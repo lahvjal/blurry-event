@@ -459,7 +459,9 @@ const styles = StyleSheet.create({
   },
   bannerSideLabel: {
     fontFamily: fonts.regular,
-    fontSize: 11,
+    // 11 put "SCORE" a hair over the 70px line once letter-spacing was
+    // counted, so it wrapped to "SCOR" / "E". "PAR" always fit.
+    fontSize: 9,
     color: 'rgba(255,255,255,0.5)',
     textTransform: 'uppercase',
     letterSpacing: 6.6,
@@ -536,7 +538,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 20,
+    paddingVertical: 20,
+    paddingLeft: 20,
+    // Extra on the right so the total doesn't sit against the screen edge —
+    // space-between pushes it all the way out.
+    paddingRight: 34,
   },
   totalSideLabelBox: {
     width: 19,
