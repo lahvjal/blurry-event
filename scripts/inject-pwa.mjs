@@ -39,7 +39,13 @@ const HEAD = `
         background-color: #131715;
         touch-action: pan-x pan-y;
       }
-      body { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
+      body {
+        position: fixed;
+        inset: 0;
+        overflow: hidden;
+        overscroll-behavior-y: none;
+        -webkit-tap-highlight-color: transparent;
+      }
     </style>
     <script>document.addEventListener('gesturestart', function (e) { e.preventDefault(); });</script>
 `;

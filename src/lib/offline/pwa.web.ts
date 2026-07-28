@@ -65,6 +65,12 @@ function ensureThemeColor() {
  * chrome is showing. This overrides it with `100dvh` so the app shell always
  * reaches the true bottom of the screen. `!important` guarantees it wins
  * regardless of where it lands relative to expo-reset in the cascade.
+ *
+ * `body { position: fixed; inset: 0 }` stops a separate bug: focusing a text
+ * input makes Safari pan the whole page up to keep it above the keyboard,
+ * and that pan doesn't reliably undo itself once the keyboard closes,
+ * leaving the app shell visibly offset. A fixed-position body has nothing
+ * for Safari to pan.
  */
 function ensureBaseStyle() {
   if (document.getElementById('blurry-shell')) return;
@@ -79,7 +85,13 @@ function ensureBaseStyle() {
       background-color: #131715;
       touch-action: pan-x pan-y;
     }
-    body { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
+    body {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+      overscroll-behavior-y: none;
+      -webkit-tap-highlight-color: transparent;
+    }
   `;
   document.head.appendChild(style);
 }
