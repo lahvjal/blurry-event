@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
 
 import { LoginShell, loginStyles as styles } from '@/components/login-shell';
@@ -13,6 +13,24 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Sessions persist to storage, but nothing checked for one on launch, so a
+  // signed-in golfer saw the login form again every time the PWA restarted.
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    supabase.auth.getSession().then(({ data }) => {
+      if (cancelled) return;
+      if (data.session) {
+        router.replace('/event');
+        return;
+      }
+      setCheckingSession(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   const submit = async () => {
     setError(null);
@@ -50,6 +68,14 @@ export default function Login() {
       setBusy(false);
     }
   };
+
+  if (checkingSession) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator color="#ffffff" />
+      </View>
+    );
+  }
 
   return (
     <LoginShell
