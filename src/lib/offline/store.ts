@@ -1,0 +1,96 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+import {
+  KeyValueStore,
+  MutationStore,
+  QueuedMutation,
+} from '@/lib/offline/types';
+
+/**
+ * Native backing. Metro resolves store.web.ts on web, so this file is the
+ * iOS/Android implementation.
+ *
+ * AsyncStorage is durable on device (SQLite-backed on both platforms), so the
+ * queue is held as one JSON document rather than per-record rows. The queue is
+ * bounded by a round's worth of writes, so rewriting the document per change is
+ * cheap and keeps the read path a single await.
+ */
+
+const QUEUE_KEY = 'blurry.offline.mutations.v1';
+const CACHE_PREFIX = 'blurry.offline.cache.';
+
+const OUTSTANDING: QueuedMutation['syncStatus'][] = ['pending', 'syncing', 'failed'];
+
+let cached: QueuedMutation[] | null = null;
+
+async function readAll(): Promise<QueuedMutation[]> {
+  if (cached) return cached;
+  try {
+    const raw = await AsyncStorage.getItem(QUEUE_KEY);
+    cached = raw ? (JSON.parse(raw) as QueuedMutation[]) : [];
+  } catch {
+    cached = [];
+  }
+  return cached;
+}
+
+async function writeAll(rows: QueuedMutation[]): Promise<void> {
+  cached = rows;
+  await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(rows));
+}
+
+export const mutationStore: MutationStore = {
+  async outstanding() {
+    const rows = await readAll();
+    return rows
+      .filter((r) => OUTSTANDING.includes(r.syncStatus))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  },
+  async get(id) {
+    return (await readAll()).find((r) => r.id === id);
+  },
+  async findByDedupeKey(key) {
+    return (await readAll()).find(
+      (r) => r.dedupeKey === key && OUTSTANDING.includes(r.syncStatus),
+    );
+  },
+  async put(mutation) {
+    const rows = await readAll();
+    const index = rows.findIndex((r) => r.id === mutation.id);
+    const next = [...rows];
+    if (index === -1) next.push(mutation);
+    else next[index] = mutation;
+    await writeAll(next);
+  },
+  async remove(id) {
+    await writeAll((await readAll()).filter((r) => r.id !== id));
+  },
+  async count() {
+    return (await mutationStore.outstanding()).length;
+  },
+  async clear() {
+    await writeAll([]);
+  },
+};
+
+export const cacheStore: KeyValueStore = {
+  async get<T>(key: string) {
+    try {
+      const raw = await AsyncStorage.getItem(CACHE_PREFIX + key);
+      return raw ? (JSON.parse(raw) as T) : null;
+    } catch {
+      return null;
+    }
+  },
+  async set<T>(key: string, value: T) {
+    await AsyncStorage.setItem(CACHE_PREFIX + key, JSON.stringify(value));
+  },
+  async remove(key: string) {
+    await AsyncStorage.removeItem(CACHE_PREFIX + key);
+  },
+};
+
+/** No-op off the web; native storage is already durable. */
+export async function requestPersistentStorage(): Promise<boolean> {
+  return true;
+}

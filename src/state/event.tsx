@@ -1,0 +1,1053 @@
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { Alert, AppState } from 'react-native';
+
+import {
+  apiAddParticipants,
+  apiApplyTeamAssignments,
+  apiAssignToTeam,
+  apiCreateTeam,
+  apiDeleteTeam,
+  apiInviteToTeam,
+  apiPostAnnouncement,
+  apiRegenerateInviteCode,
+  apiRemoveParticipant,
+  apiResetRound,
+  apiSetGameStyle,
+  apiUpdateEvent,
+  apiUpdateHole,
+  apiUpdateParticipant,
+  apiUpdateProfile,
+  apiUpdateTeam,
+  apiUploadImage,
+  EventBundle,
+  fetchEventBundle,
+} from '@/lib/api';
+import { loadSnapshot, saveSnapshot } from '@/lib/offline/snapshot';
+import { supabase } from '@/lib/supabase';
+import { enqueue } from '@/lib/sync';
+import { isSyntheticEmail, makeInviteCode, syntheticEmail } from '@/lib/invites';
+import {
+  Announcement,
+  EventConfig,
+  GameStyle,
+  Hole,
+  LeaderboardRow,
+  NewParticipantInput,
+  Participant,
+  Scores,
+  Team,
+  TeamInvite,
+  emptyScores,
+  isTeamFormat,
+  parThrough,
+  sumScores,
+  teamSize,
+} from '@/state/types';
+
+const PARS = [5, 4, 3, 3, 5, 5, 4, 4, 3, 4, 5, 3, 4, 4, 3, 3, 5, 5];
+const YARDS = [
+  520, 410, 175, 168, 545, 530, 428, 402, 155, 415, 538, 182, 420, 395, 160,
+  148, 512, 550,
+];
+
+const HOLES: Hole[] = PARS.map((par, i) => ({
+  hole: i + 1,
+  par,
+  yards: YARDS[i],
+}));
+
+const SEED_EVENT: EventConfig = {
+  id: 'blurry-invitational',
+  name: 'Blurry Invitational',
+  courseName: 'Arrowhead Golf Club',
+  // Placeholder geography only — an admin sets the real address in the app.
+  addressLine: '',
+  city: 'Littleton',
+  state: 'CO',
+  postalCode: '',
+  eventDate: '2026-08-24',
+  checkInTime: '7:00 AM',
+  startTime: '8:20 AM',
+  teeTimes: ['8:20 AM', '8:30 AM', '8:40 AM', '8:50 AM'],
+  courseMapUrl: null,
+  gameStyle: 'scramble_4',
+  holes: HOLES,
+};
+
+const avatars: Record<string, number> = {
+  p1: require('@/assets/figma/avatar-me.png'),
+  p2: require('@/assets/figma/avatar-1.png'),
+  p3: require('@/assets/figma/avatar-2.png'),
+  p4: require('@/assets/figma/avatar-3.png'),
+  p5: require('@/assets/figma/avatar-4.png'),
+};
+
+/** Local asset stand-in until avatars come from Supabase Storage. */
+export function localAvatar(participantId: string): number | null {
+  return avatars[participantId] ?? null;
+}
+
+function initialsOf(name: string): string {
+  return name
+    .split(' ')
+    .map((part) => part[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
+}
+
+function participant(
+  id: string,
+  fullName: string,
+  handicap: number | null,
+  isAdmin = false,
+  claimed = true,
+): Participant {
+  const inviteCode = makeInviteCode();
+  return {
+    id,
+    fullName,
+    initials: initialsOf(fullName),
+    handicap,
+    avatarUrl: null,
+    isAdmin,
+    inviteCode,
+    authEmail: syntheticEmail(inviteCode),
+    claimed,
+  };
+}
+
+const SEED_PARTICIPANTS: Participant[] = [
+  participant('p1', 'Vel Monroe', 4.7, true),
+  participant('p2', 'Jake Halvorsen', 9.8),
+  participant('p3', 'Ryan Jessop', 11.2),
+  participant('p4', 'Matt Kimball', 5.4),
+  participant('p5', 'Jordan Reed', 4.2),
+  participant('p6', 'Marcus Thorne', 7.1),
+  participant('p7', 'Ethan Vance', 12.3),
+  participant('p8', 'Avery Brooks', 2.9),
+  participant('p9', 'Maya Gomez', 8.4),
+  participant('p10', 'Marco Silva', 11.6),
+  participant('p11', 'Noah Kim', 6.8),
+  participant('p12', 'Cole Rivera', 14.1),
+  // Invited but haven't redeemed their code yet.
+  participant('p13', 'Drew Sable', 3.6, false, false),
+  participant('p14', 'Ellis Pratt', 10.2, false, false),
+  participant('p15', 'Grant Mullen', 15.7, false, false),
+  participant('p16', 'Wes Tanner', 8.9, false, false),
+];
+
+const SEED_TEAMS: Team[] = [
+  {
+    id: 't1',
+    name: 'Team 4',
+    teeTime: '8:40 AM',
+    startingHole: 1,
+    cart: 'Cart 14',
+    memberIds: ['p1', 'p2', 'p3', 'p4'],
+  },
+  {
+    id: 't2',
+    name: 'The Turn Dogs',
+    teeTime: '8:20 AM',
+    startingHole: 1,
+    cart: 'Cart 11',
+    memberIds: ['p5', 'p6', 'p7', 'p8'],
+  },
+  {
+    id: 't3',
+    name: 'Sunday Service',
+    teeTime: '8:30 AM',
+    startingHole: 1,
+    cart: 'Cart 12',
+    memberIds: ['p9', 'p10', 'p11', 'p12'],
+  },
+  {
+    id: 't4',
+    name: 'Green Jackets',
+    teeTime: '8:50 AM',
+    startingHole: 1,
+    cart: 'Cart 13',
+    memberIds: ['p13', 'p14', 'p15', 'p16'],
+  },
+];
+
+/** Partial cards for the other groups so the leaderboard has something to rank. */
+function seedScores(strokes: number[]): Scores {
+  const scores = emptyScores();
+  strokes.forEach((s, i) => {
+    scores[i] = s;
+  });
+  return scores;
+}
+
+const SEED_ROUNDS: Record<string, Scores> = {
+  t2: seedScores([4, 3, 2, 3, 4, 4, 3, 4, 2, 3, 4, 2, 3, 4, 2]),
+  t3: seedScores([5, 3, 3, 2, 4, 4, 4, 3, 3, 4, 4, 3, 3, 3, 2]),
+  t4: seedScores([4, 4, 3, 3, 4, 5, 4, 4, 3, 4, 5, 3, 4, 3]),
+};
+
+const SEED_ANNOUNCEMENTS: Announcement[] = [
+  {
+    id: 'a1',
+    body: 'Range balls and breakfast burritos are on the club. Arrive early.',
+    authorName: 'Blurry Boys',
+    createdAt: '2026-08-21T15:00:00Z',
+  },
+  {
+    id: 'a2',
+    body: 'Pairings are final. Check your team and tee time on the event page.',
+    authorName: 'Blurry Boys',
+    createdAt: '2026-08-20T18:30:00Z',
+  },
+];
+
+type EventState = {
+  event: EventConfig;
+  participants: Participant[];
+  teams: Team[];
+  announcements: Announcement[];
+  invites: TeamInvite[];
+  /** The signed-in participant. */
+  me: Participant;
+  myTeam: Team | null;
+  /** Key the active round is stored under: team id for scrambles, else participant id. */
+  myEntrantId: string;
+  myScores: Scores;
+  currentHoleIndex: number;
+  leaderboard: LeaderboardRow[];
+  /**
+   * True once state reflects rows read from Supabase. False while showing the
+   * built-in demo data, where the ids are made up and nothing is written back.
+   */
+  isLive: boolean;
+  /** ISO time the shown data was cached, or null when it came straight from the server. */
+  snapshotAt: string | null;
+
+  participantById: (id: string) => Participant | undefined;
+  teamOf: (participantId: string) => Team | undefined;
+  /** Re-reads everything from Supabase. Runs on sign-in and on app foreground. */
+  refresh: () => Promise<void>;
+
+  // Player actions
+  setScore: (holeIndex: number, strokes: number) => void;
+  resetRound: () => void;
+  inviteToTeam: (participantId: string) => void;
+  updateMyProfile: (patch: Partial<Pick<Participant, 'fullName' | 'handicap' | 'avatarUrl'>>) => void;
+
+  // Admin actions
+  setGameStyle: (style: GameStyle) => void;
+  /** Event details: name, course, location, date, times, tee slots, course map. */
+  updateEvent: (
+    patch: Partial<
+      Pick<
+        EventConfig,
+        | 'name'
+        | 'courseName'
+        | 'addressLine'
+        | 'city'
+        | 'state'
+        | 'postalCode'
+        | 'eventDate'
+        | 'checkInTime'
+        | 'startTime'
+        | 'teeTimes'
+        | 'courseMapUrl'
+      >
+    >,
+  ) => void;
+  /** Edits one hole of the scorecard. `hole` is 1-based. */
+  updateHole: (hole: number, patch: Partial<Pick<Hole, 'par' | 'yards'>>) => void;
+  postAnnouncement: (body: string) => void;
+  assignToTeam: (participantId: string, teamId: string | null) => void;
+  updateTeam: (teamId: string, patch: Partial<Pick<Team, 'name' | 'teeTime' | 'startingHole' | 'cart'>>) => void;
+
+  // Team admin
+  /** Resolves to the new team's id, or null if the server refused it. */
+  createTeam: (name?: string) => Promise<string | null>;
+  /** Members become unassigned; any scores for the team are discarded. */
+  deleteTeam: (teamId: string) => void;
+  /** Snake-drafts everyone into balanced teams by handicap. Replaces current teams. */
+  autoBalanceTeams: () => Promise<void>;
+
+  // Roster admin
+  /**
+   * Bulk add (CSV import or manual). Returns how many were added vs skipped as
+   * duplicates. Awaits the insert rather than adding optimistically, because
+   * invite codes are only known once the row exists.
+   */
+  addParticipants: (
+    rows: NewParticipantInput[],
+  ) => Promise<{ added: number; duplicates: string[] }>;
+  updateParticipant: (
+    id: string,
+    patch: Partial<Pick<Participant, 'fullName' | 'handicap' | 'isAdmin' | 'authEmail'>>,
+  ) => void;
+  removeParticipant: (id: string) => void;
+  regenerateInviteCode: (id: string) => Promise<void>;
+};
+
+const EventContext = createContext<EventState | null>(null);
+
+const UNLINKED_ME: Participant = {
+  id: 'unlinked',
+  fullName: 'Guest',
+  initials: 'G',
+  handicap: null,
+  avatarUrl: null,
+  isAdmin: false,
+  inviteCode: '',
+  authEmail: '',
+  claimed: false,
+};
+
+/** What a rejected write is explained with when the server didn't say. */
+function reasonFor(error: unknown): string {
+  const message = (error as { message?: string } | null)?.message;
+  return message && message.trim().length > 0
+    ? message
+    : 'Check your connection and try again.';
+}
+
+export function EventProvider({ children }: { children: React.ReactNode }) {
+  const [event, setEvent] = useState<EventConfig>(SEED_EVENT);
+  const [participants, setParticipants] = useState<Participant[]>(SEED_PARTICIPANTS);
+  const [teams, setTeams] = useState<Team[]>(SEED_TEAMS);
+  const [announcements, setAnnouncements] = useState<Announcement[]>(SEED_ANNOUNCEMENTS);
+  const [invites, setInvites] = useState<TeamInvite[]>([]);
+  const [rounds, setRounds] = useState<Record<string, Scores>>(SEED_ROUNDS);
+  const [myId, setMyId] = useState<string | null>('p1');
+  /** rounds.id per entrant key, needed to clear a card. */
+  const [roundIds, setRoundIds] = useState<Record<string, string>>({});
+  const [isLive, setIsLive] = useState(false);
+  /** Set when the screens are rendering a cached snapshot rather than a live read. */
+  const [snapshotAt, setSnapshotAt] = useState<string | null>(null);
+
+  const applySeed = useCallback(() => {
+    setEvent(SEED_EVENT);
+    setParticipants(SEED_PARTICIPANTS);
+    setTeams(SEED_TEAMS);
+    setInvites([]);
+    setAnnouncements(SEED_ANNOUNCEMENTS);
+    setRounds(SEED_ROUNDS);
+    setRoundIds({});
+    setMyId('p1');
+    setIsLive(false);
+  }, []);
+
+  const applyBundle = useCallback((bundle: EventBundle) => {
+    setEvent(bundle.event);
+    setParticipants(bundle.participants);
+    setTeams(bundle.teams);
+    setInvites(bundle.invites);
+    setAnnouncements(bundle.announcements);
+    setRounds(bundle.roundsByEntrant);
+    setRoundIds(bundle.roundIdByEntrant);
+    setMyId(bundle.meId);
+    // Cached data is still real data — writes must keep queueing while offline.
+    setIsLive(true);
+  }, []);
+
+  const loadFromServer = useCallback(async () => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const session = sessionData.session;
+    if (!session) {
+      applySeed();
+      return;
+    }
+
+    const userId = session.user.id;
+
+    try {
+      const bundle = await fetchEventBundle();
+      applyBundle(bundle);
+      setSnapshotAt(null);
+      // Refresh the offline copy on every successful load, so the card a
+      // golfer starts the round with is the one the club published.
+      void saveSnapshot(bundle, userId);
+    } catch (error) {
+      // Unreachable server is the normal case out on the course. Fall back to
+      // the last good copy rather than to demo data — showing someone a fake
+      // roster mid-round is worse than showing them slightly stale truth.
+      const snapshot = await loadSnapshot(userId);
+      if (snapshot) {
+        applyBundle(snapshot.bundle);
+        setSnapshotAt(snapshot.savedAt);
+        return;
+      }
+      setIsLive(false);
+      throw error;
+    }
+  }, [applySeed, applyBundle]);
+
+  /**
+   * Signed in but unable to read: the screens are about to show demo data and no
+   * edit will be saved, so that gets said out loud rather than discovered later.
+   */
+  const loadAndReport = useCallback(async () => {
+    try {
+      await loadFromServer();
+    } catch (error) {
+      Alert.alert(
+        "Couldn't load the event",
+        `${reasonFor(error)}\n\nUntil this loads, changes you make won't be saved.`,
+      );
+    }
+  }, [loadFromServer]);
+
+  useEffect(() => {
+    void loadAndReport();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) {
+        void loadAndReport();
+      } else {
+        applySeed();
+      }
+    });
+
+    return () => authListener.subscription.unsubscribe();
+  }, [loadAndReport, applySeed]);
+
+  // Someone else's edits — a new pairing, a fresh announcement — land on this
+  // device the next time it comes back to the foreground.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (next) => {
+      if (next === 'active') void loadFromServer().catch(() => {});
+    });
+    return () => subscription.remove();
+  }, [loadFromServer]);
+
+  /**
+   * Sends one write to Supabase behind an optimistic local update. If the server
+   * refuses it, local state is replaced with the server's copy so a rejected
+   * edit can't sit on screen looking saved.
+   *
+   * A no-op on the demo data, where the ids aren't real rows.
+   */
+  const persist = useCallback(
+    async (what: string, work: () => Promise<void>) => {
+      if (!isLive) return;
+      try {
+        await work();
+      } catch (error) {
+        Alert.alert(`Couldn't save ${what}`, reasonFor(error));
+        await loadFromServer().catch(() => {});
+      }
+    },
+    [isLive, loadFromServer],
+  );
+
+  // Team fields are edited with the keyboard, one state update per keystroke.
+  // Patches for a team are merged and sent once typing stops.
+  const teamWrites = useRef(
+    new Map<
+      string,
+      { timer: ReturnType<typeof setTimeout>; patch: Partial<Team> }
+    >(),
+  );
+
+  useEffect(
+    () => () => {
+      teamWrites.current.forEach(({ timer }) => clearTimeout(timer));
+      teamWrites.current.clear();
+    },
+    [],
+  );
+
+  const persistTeamPatch = useCallback(
+    (teamId: string, patch: Partial<Pick<Team, 'name' | 'teeTime' | 'startingHole' | 'cart'>>) => {
+      if (!isLive) return;
+
+      const inFlight = teamWrites.current.get(teamId);
+      if (inFlight) clearTimeout(inFlight.timer);
+      const merged = { ...inFlight?.patch, ...patch };
+
+      const timer = setTimeout(() => {
+        teamWrites.current.delete(teamId);
+        void persist('the team', () => apiUpdateTeam(teamId, merged));
+      }, 500);
+
+      teamWrites.current.set(teamId, { timer, patch: merged });
+    },
+    [isLive, persist],
+  );
+
+  const me = useMemo(() => {
+    if (!myId) return UNLINKED_ME;
+    return participants.find((p) => p.id === myId) ?? UNLINKED_ME;
+  }, [participants, myId]);
+
+  const myTeam = useMemo(
+    () => (myId ? teams.find((t) => t.memberIds.includes(myId)) ?? null : null),
+    [teams, myId],
+  );
+
+  const myEntrantId = myId
+    ? isTeamFormat(event.gameStyle)
+      ? (myTeam?.id ?? myId)
+      : myId
+    : 'unlinked';
+
+  /**
+   * Who owns the active round server-side: the team under a scramble, the player
+   * under solo — and the player too when a scramble hasn't paired them yet.
+   */
+  const myRoundOwner = useMemo(
+    () =>
+      isTeamFormat(event.gameStyle) && myTeam
+        ? { teamId: myTeam.id, participantId: null }
+        : { teamId: null, participantId: myId },
+    [event.gameStyle, myTeam, myId],
+  );
+
+  const myScores = rounds[myEntrantId] ?? emptyScores();
+
+  const currentHoleIndex = useMemo(() => {
+    const next = myScores.findIndex((s) => s === null);
+    return next === -1 ? 17 : next;
+  }, [myScores]);
+
+  const participantById = useCallback(
+    (id: string) => participants.find((p) => p.id === id),
+    [participants],
+  );
+
+  const teamOf = useCallback(
+    (participantId: string) => teams.find((t) => t.memberIds.includes(participantId)),
+    [teams],
+  );
+
+  const leaderboard = useMemo<LeaderboardRow[]>(() => {
+    const entrants = isTeamFormat(event.gameStyle)
+      ? teams.map((t) => ({ id: t.id, name: t.name }))
+      : participants.map((p) => ({ id: p.id, name: p.fullName }));
+
+    return entrants
+      .map(({ id, name }) => {
+        const scores = rounds[id] ?? emptyScores();
+        const strokes = sumScores(scores);
+        const thru = scores.filter((s) => s !== null).length;
+        return {
+          entrantId: id,
+          name,
+          thru,
+          strokes: strokes ?? 0,
+          toPar: strokes === null ? null : strokes - parThrough(scores, event.holes),
+          isMine: id === myEntrantId,
+        };
+      })
+      .sort((a, b) => {
+        // Unplayed entrants sink to the bottom; otherwise best to-par first.
+        if (a.toPar === null && b.toPar === null) return a.name.localeCompare(b.name);
+        if (a.toPar === null) return 1;
+        if (b.toPar === null) return -1;
+        if (a.toPar !== b.toPar) return a.toPar - b.toPar;
+        return b.thru - a.thru;
+      });
+  }, [event.gameStyle, event.holes, teams, participants, rounds, myEntrantId]);
+
+  const setScore = useCallback(
+    (holeIndex: number, strokes: number) => {
+      setRounds((prev) => {
+        const existing = prev[myEntrantId] ?? emptyScores();
+        const next = [...existing];
+        next[holeIndex] = strokes;
+        return { ...prev, [myEntrantId]: next };
+      });
+
+      if (!isLive || !myId) return;
+      // Queued rather than written straight through: this is the one write that
+      // has to survive standing in a bunker with no bars.
+      void enqueue({
+        kind: 'score',
+        eventId: event.id,
+        teamId: myRoundOwner.teamId,
+        participantId: myRoundOwner.participantId,
+        hole: holeIndex + 1,
+        strokes,
+        enteredBy: myId,
+        clientUpdatedAt: new Date().toISOString(),
+      });
+    },
+    [myEntrantId, isLive, myId, event.id, myRoundOwner],
+  );
+
+  const resetRound = useCallback(() => {
+    setRounds((prev) => ({ ...prev, [myEntrantId]: emptyScores() }));
+    const roundId = roundIds[myEntrantId];
+    if (!roundId) return;
+    void persist('the cleared card', () => apiResetRound(roundId));
+  }, [myEntrantId, roundIds, persist]);
+
+  const inviteToTeam = useCallback(
+    (participantId: string) => {
+      if (!myTeam || !myId) return;
+      if (myTeam.memberIds.length >= teamSize(event.gameStyle)) return;
+
+      const localId = `inv-${Date.now()}`;
+      setInvites((prev) => [
+        ...prev,
+        {
+          id: localId,
+          teamId: myTeam.id,
+          invitedParticipantId: participantId,
+          invitedByParticipantId: myId,
+          status: 'pending',
+        },
+      ]);
+
+      void persist('the invite', async () => {
+        const id = await apiInviteToTeam(myTeam.id, participantId, myId);
+        if (id) {
+          setInvites((prev) =>
+            prev.map((invite) => (invite.id === localId ? { ...invite, id } : invite)),
+          );
+        }
+      });
+    },
+    [myTeam, event.gameStyle, myId, persist],
+  );
+
+  const updateMyProfile = useCallback(
+    (patch: Partial<Pick<Participant, 'fullName' | 'handicap' | 'avatarUrl'>>) => {
+      if (!myId) return;
+      setParticipants((prev) =>
+        prev.map((p) =>
+          p.id === myId
+            ? {
+                ...p,
+                ...patch,
+                initials: patch.fullName ? initialsOf(patch.fullName) : p.initials,
+              }
+            : p,
+        ),
+      );
+
+      void persist('your profile', async () => {
+        // Name and handicap live on the participant row, which is what every
+        // other screen reads; the avatar lives on the profile.
+        if (patch.fullName !== undefined || patch.handicap !== undefined) {
+          await apiUpdateParticipant(myId, {
+            fullName: patch.fullName,
+            handicap: patch.handicap,
+          });
+        }
+        if (patch.avatarUrl === undefined && patch.fullName === undefined) return;
+
+        const { data } = await supabase.auth.getUser();
+        const userId = data.user?.id;
+        if (!userId) return;
+
+        // The picker hands back a local file:// uri, which only means anything on
+        // this device — the bytes have to go to Storage before the url is worth
+        // saving.
+        const avatarUrl =
+          patch.avatarUrl === undefined || patch.avatarUrl === null
+            ? patch.avatarUrl
+            : await apiUploadImage(`avatars/${userId}`, patch.avatarUrl);
+
+        await apiUpdateProfile(userId, { displayName: patch.fullName, avatarUrl });
+
+        if (typeof avatarUrl === 'string') {
+          setParticipants((prev) =>
+            prev.map((p) => (p.id === myId ? { ...p, avatarUrl } : p)),
+          );
+        }
+      });
+    },
+    [myId, persist],
+  );
+
+  const setGameStyle = useCallback(
+    (style: GameStyle) => {
+      setEvent((prev) => ({ ...prev, gameStyle: style }));
+      void persist('the format', () => apiSetGameStyle(event.id, style));
+    },
+    [event.id, persist],
+  );
+
+  const updateEvent = useCallback<EventState['updateEvent']>(
+    (patch) => {
+      setEvent((prev) => ({ ...prev, ...patch }));
+
+      void persist('the event details', async () => {
+        // A freshly picked course map is a local file:// uri, which resolves to
+        // nothing on anybody else's phone. The bytes go to Storage first and the
+        // public url is what gets saved.
+        const uploaded =
+          patch.courseMapUrl && !patch.courseMapUrl.startsWith('http')
+            ? await apiUploadImage('course', patch.courseMapUrl)
+            : null;
+
+        await apiUpdateEvent(event.id, {
+          ...patch,
+          courseMapUrl: uploaded ?? patch.courseMapUrl,
+        });
+
+        if (uploaded) setEvent((prev) => ({ ...prev, courseMapUrl: uploaded }));
+      });
+    },
+    [event.id, persist],
+  );
+
+  const updateHole = useCallback(
+    (hole: number, patch: Partial<Pick<Hole, 'par' | 'yards'>>) => {
+      setEvent((prev) => ({
+        ...prev,
+        holes: prev.holes.map((h) => (h.hole === hole ? { ...h, ...patch } : h)),
+      }));
+      void persist('the scorecard', () => apiUpdateHole(event.id, hole, patch));
+    },
+    [event.id, persist],
+  );
+
+  const postAnnouncement = useCallback(
+    (body: string) => {
+      setAnnouncements((prev) => [
+        {
+          id: `a-${Date.now()}`,
+          body,
+          authorName: me.fullName,
+          createdAt: new Date().toISOString(),
+        },
+        ...prev,
+      ]);
+      void persist('the announcement', () => apiPostAnnouncement(event.id, body, myId));
+    },
+    [me.fullName, event.id, myId, persist],
+  );
+
+  const assignToTeam = useCallback(
+    (participantId: string, teamId: string | null) => {
+      setTeams((prev) =>
+        prev.map((team) => {
+          const without = team.memberIds.filter((id) => id !== participantId);
+          if (team.id === teamId) return { ...team, memberIds: [...without, participantId] };
+          return { ...team, memberIds: without };
+        }),
+      );
+      void persist('the pairing', () => apiAssignToTeam(participantId, teamId));
+    },
+    [persist],
+  );
+
+  const updateTeam = useCallback(
+    (teamId: string, patch: Partial<Pick<Team, 'name' | 'teeTime' | 'startingHole' | 'cart'>>) => {
+      setTeams((prev) => prev.map((t) => (t.id === teamId ? { ...t, ...patch } : t)));
+      persistTeamPatch(teamId, patch);
+    },
+    [persistTeamPatch],
+  );
+
+  const createTeam = useCallback<EventState['createTeam']>(
+    async (name) => {
+      const teamName = name?.trim() || `Team ${teams.length + 1}`;
+      const blank = {
+        name: teamName,
+        teeTime: null,
+        startingHole: null,
+        cart: null,
+        memberIds: [],
+      };
+
+      // The one action that isn't optimistic: a placeholder row would carry an
+      // invented id, and a rename or tee time set before the real id arrived
+      // would be written against a row that doesn't exist.
+      if (!isLive) {
+        const localId = `t-${Date.now()}`;
+        setTeams((prev) => [...prev, { id: localId, ...blank }]);
+        return localId;
+      }
+
+      try {
+        const id = await apiCreateTeam(event.id, teamName);
+        setTeams((prev) => [...prev, { id, ...blank }]);
+        return id;
+      } catch (error) {
+        Alert.alert("Couldn't add the team", reasonFor(error));
+        return null;
+      }
+    },
+    [teams.length, event.id, isLive],
+  );
+
+  const deleteTeam = useCallback(
+    (teamId: string) => {
+      setTeams((prev) => prev.filter((t) => t.id !== teamId));
+      setRounds((prev) => {
+        const next = { ...prev };
+        delete next[teamId];
+        return next;
+      });
+      void persist('the team', () => apiDeleteTeam(teamId));
+    },
+    [persist],
+  );
+
+  /**
+   * Snake draft by handicap: sort best-to-worst, deal 1..N then N..1, so each
+   * team ends up with a comparable spread rather than all the low indexes
+   * landing together. Players without a handicap are treated as mid-pack.
+   */
+  const autoBalanceTeams = useCallback<EventState['autoBalanceTeams']>(async () => {
+    const size = teamSize(event.gameStyle);
+    const ranked = [...participants].sort((a, b) => {
+      const ah = a.handicap ?? 12;
+      const bh = b.handicap ?? 12;
+      return ah - bh;
+    });
+
+    const teamCount = Math.max(1, Math.ceil(ranked.length / size));
+    const buckets: string[][] = Array.from({ length: teamCount }, () => []);
+
+    ranked.forEach((player, i) => {
+      const round = Math.floor(i / teamCount);
+      const slot = i % teamCount;
+      // Reverse direction on odd rounds for the snake.
+      const target = round % 2 === 0 ? slot : teamCount - 1 - slot;
+      buckets[target].push(player.id);
+    });
+
+    // Existing teams are reused position by position so their tee times, carts
+    // and — importantly — their rounds survive the reshuffle. Only teams past the
+    // end of the new arrangement are dropped.
+    const arrangement = buckets.map((memberIds, i) => {
+      const existing = teams[i];
+      return {
+        id: existing?.id ?? null,
+        name: existing?.name ?? `Team ${i + 1}`,
+        teeTime: existing?.teeTime ?? null,
+        startingHole: existing?.startingHole ?? null,
+        cart: existing?.cart ?? null,
+        memberIds,
+      };
+    });
+
+    const seat = (ids: (string | null)[]) =>
+      setTeams(
+        arrangement.map((team, i) => ({
+          ...team,
+          id: ids[i] ?? `t-auto-${i}-${Date.now()}`,
+        })),
+      );
+
+    if (!isLive) {
+      seat(arrangement.map((team) => team.id));
+      return;
+    }
+
+    // Seated only once the server has the arrangement, so the ids on screen are
+    // always ones the next edit can be written against.
+    try {
+      seat(await apiApplyTeamAssignments(event.id, arrangement));
+    } catch (error) {
+      Alert.alert("Couldn't balance the teams", reasonFor(error));
+      await loadFromServer().catch(() => {});
+    }
+  }, [participants, teams, event.gameStyle, event.id, isLive, loadFromServer]);
+
+  const addParticipants = useCallback<EventState['addParticipants']>(
+    async (rows) => {
+      const existingEmails = new Set(
+        participants.map((p) => p.authEmail.toLowerCase()).filter(Boolean),
+      );
+      const existingNames = new Set(participants.map((p) => p.fullName.toLowerCase()));
+
+      const duplicates: string[] = [];
+      const fresh: NewParticipantInput[] = [];
+
+      rows.forEach((row) => {
+        const email = row.email?.toLowerCase() ?? null;
+        const name = row.fullName.toLowerCase();
+        // Match on either identity. Re-importing a corrected list is far more
+        // common than two players genuinely sharing a name, so a name clash is
+        // treated as a duplicate — add a real namesake by hand.
+        if ((email && existingEmails.has(email)) || existingNames.has(name)) {
+          duplicates.push(row.fullName);
+          return;
+        }
+        if (email) existingEmails.add(email);
+        existingNames.add(name);
+        fresh.push(row);
+      });
+
+      if (fresh.length === 0) return { added: 0, duplicates };
+
+      if (!isLive) {
+        setParticipants((prev) => [
+          ...prev,
+          ...fresh.map((row, i) => {
+            const inviteCode = makeInviteCode();
+            return {
+              id: `p-${Date.now()}-${prev.length + i}`,
+              fullName: row.fullName,
+              initials: initialsOf(row.fullName),
+              handicap: row.handicap,
+              avatarUrl: null,
+              isAdmin: row.isAdmin,
+              inviteCode,
+              authEmail: row.email?.toLowerCase() ?? syntheticEmail(inviteCode),
+              claimed: false,
+            };
+          }),
+        ]);
+        return { added: fresh.length, duplicates };
+      }
+
+      try {
+        const created = await apiAddParticipants(event.id, fresh);
+        setParticipants((prev) => [...prev, ...created]);
+        return { added: created.length, duplicates };
+      } catch (error) {
+        Alert.alert("Couldn't add to the roster", reasonFor(error));
+        return { added: 0, duplicates };
+      }
+    },
+    [participants, event.id, isLive],
+  );
+
+  const updateParticipant = useCallback(
+    (
+      id: string,
+      patch: Partial<Pick<Participant, 'fullName' | 'handicap' | 'isAdmin' | 'authEmail'>>,
+    ) => {
+      const current = participants.find((p) => p.id === id);
+      if (!current) return;
+
+      // Clearing the email falls back to the code-derived placeholder so the
+      // participant can still sign in with their invite code alone.
+      const authEmail =
+        patch.authEmail === undefined
+          ? undefined
+          : patch.authEmail.trim() === ''
+            ? syntheticEmail(current.inviteCode)
+            : patch.authEmail.trim().toLowerCase();
+
+      setParticipants((prev) =>
+        prev.map((p) =>
+          p.id === id
+            ? {
+                ...p,
+                ...patch,
+                authEmail: authEmail ?? p.authEmail,
+                initials: patch.fullName ? initialsOf(patch.fullName) : p.initials,
+              }
+            : p,
+        ),
+      );
+
+      void persist('the roster', () =>
+        apiUpdateParticipant(id, {
+          fullName: patch.fullName,
+          handicap: patch.handicap,
+          isAdmin: patch.isAdmin,
+          authEmail,
+        }),
+      );
+    },
+    [participants, persist],
+  );
+
+  const removeParticipant = useCallback(
+    (id: string) => {
+      setParticipants((prev) => prev.filter((p) => p.id !== id));
+      setTeams((prev) =>
+        prev.map((team) => ({
+          ...team,
+          memberIds: team.memberIds.filter((memberId) => memberId !== id),
+        })),
+      );
+      void persist('the roster', () => apiRemoveParticipant(id));
+    },
+    [persist],
+  );
+
+  /** Invalidates the old code — use when an invite leaks or needs resending. */
+  const regenerateInviteCode = useCallback<EventState['regenerateInviteCode']>(
+    async (id) => {
+      const current = participants.find((p) => p.id === id);
+      if (!current) return;
+      const keepsEmail = !isSyntheticEmail(current.authEmail);
+
+      const apply = (inviteCode: string) =>
+        setParticipants((prev) =>
+          prev.map((p) =>
+            p.id === id
+              ? {
+                  ...p,
+                  inviteCode,
+                  authEmail: keepsEmail ? p.authEmail : syntheticEmail(inviteCode),
+                }
+              : p,
+          ),
+        );
+
+      // Not optimistic on purpose: showing a code before the write lands would
+      // put an invite on screen that nothing can be redeemed against.
+      if (!isLive) {
+        apply(makeInviteCode());
+        return;
+      }
+
+      try {
+        apply(await apiRegenerateInviteCode(id, keepsEmail));
+      } catch (error) {
+        Alert.alert("Couldn't regenerate the invite", reasonFor(error));
+      }
+    },
+    [participants, isLive],
+  );
+
+  const value: EventState = {
+    event,
+    participants,
+    teams,
+    announcements,
+    invites,
+    me,
+    myTeam,
+    myEntrantId,
+    myScores,
+    currentHoleIndex,
+    leaderboard,
+    isLive,
+    snapshotAt,
+    participantById,
+    teamOf,
+    refresh: loadFromServer,
+    setScore,
+    resetRound,
+    inviteToTeam,
+    updateMyProfile,
+    setGameStyle,
+    updateEvent,
+    updateHole,
+    postAnnouncement,
+    assignToTeam,
+    updateTeam,
+    createTeam,
+    deleteTeam,
+    autoBalanceTeams,
+    addParticipants,
+    updateParticipant,
+    removeParticipant,
+    regenerateInviteCode,
+  };
+
+  return <EventContext.Provider value={value}>{children}</EventContext.Provider>;
+}
+
+export function useEvent() {
+  const ctx = useContext(EventContext);
+  if (!ctx) throw new Error('useEvent must be used inside EventProvider');
+  return ctx;
+}

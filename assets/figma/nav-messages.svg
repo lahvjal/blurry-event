@@ -1,0 +1,10 @@
+<svg preserveAspectRatio="none" width="100%" height="100%" overflow="visible" style="display: block;" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="pie-chart" clip-path="url(#clip0_0_84)">
+<path id="Rectangle 16" d="M1.855 6.81232C1.855 5.15546 3.19815 3.81232 4.855 3.81232H17.145C18.8019 3.81232 20.145 5.15546 20.145 6.81232V14.3858C20.145 16.0427 18.8019 17.3858 17.145 17.3858H11.011C10.3551 17.3858 9.71732 17.6007 9.19524 17.9977L5.38521 20.8945C4.8398 21.3092 4.08365 20.7791 4.28753 20.125L4.5779 19.1933C4.8574 18.2965 4.18733 17.3858 3.248 17.3858C2.47867 17.3858 1.855 16.7621 1.855 15.9928V6.81232Z" stroke="white" stroke-width="2"/>
+</g>
+<defs>
+<clipPath id="clip0_0_84">
+<rect width="22" height="22" fill="white"/>
+</clipPath>
+</defs>
+</svg>

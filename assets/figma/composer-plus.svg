@@ -1,0 +1,9 @@
+<svg preserveAspectRatio="none" width="100%" height="100%" overflow="visible" style="display: block;" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+<foreignObject x="-20" y="-20" width="72" height="72"><div xmlns="http://www.w3.org/1999/xhtml" style="backdrop-filter:blur(10px);clip-path:url(#bgblur_0_0_14_clip_path);height:100%;width:100%"></div></foreignObject><g id="Floating bar" data-figma-bg-blur-radius="20">
+<path d="M0 16C0 7.16344 7.16344 0 16 0V0C24.8366 0 32 7.16344 32 16V16C32 24.8366 24.8366 32 16 32V32C7.16344 32 0 24.8366 0 16V16Z" fill="#38443D" fill-opacity="0.5"/>
+<path id="Plus" d="M15.0073 21.85V10.15H16.9927V21.85H15.0073ZM10.15 16.9927V15.0073H21.85V16.9927H10.15Z" fill="#5B645B"/>
+</g>
+<defs>
+<clipPath id="bgblur_0_0_14_clip_path" transform="translate(20 20)"><path d="M0 16C0 7.16344 7.16344 0 16 0V0C24.8366 0 32 7.16344 32 16V16C32 24.8366 24.8366 32 16 32V32C7.16344 32 0 24.8366 0 16V16Z"/>
+</clipPath></defs>
+</svg>
