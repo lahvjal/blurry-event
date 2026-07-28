@@ -1,7 +1,7 @@
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useState } from 'react';
-import { StyleProp, StyleSheet, TextInput, View, ViewStyle, Text } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { Pressable, StyleProp, StyleSheet, TextInput, View, ViewStyle, Text } from 'react-native';
 import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 
 import { colors, fonts } from '@/constants/theme';
@@ -46,9 +46,13 @@ export function SearchField({
   style?: StyleProp<ViewStyle>;
 }) {
   const [focused, setFocused] = useState(false);
+  const inputRef = useRef<TextInput>(null);
 
   return (
-    <View style={[styles.root, style]} dataSet={{ focusRing: 'true' }}>
+    <Pressable
+      style={[styles.root, style]}
+      dataSet={{ focusRing: 'true' }}
+      onPress={() => inputRef.current?.focus()}>
       <LinearGradient colors={['#0f1110', '#111513']} style={StyleSheet.absoluteFill} />
       {focused ? <FocusGlow /> : null}
       <View style={styles.row}>
@@ -62,6 +66,7 @@ export function SearchField({
           />
         ) : null}
         <TextInput
+          ref={inputRef}
           value={value}
           onChangeText={onChangeText}
           placeholder={placeholder}
@@ -76,7 +81,7 @@ export function SearchField({
           autoCorrect={false}
         />
       </View>
-    </View>
+    </Pressable>
   );
 }
 

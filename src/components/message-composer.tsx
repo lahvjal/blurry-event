@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { LiquidGlassSurface } from '@/components/liquid-glass';
@@ -21,6 +21,7 @@ export function MessageComposer({
   const [text, setText] = useState('');
   const [multiline, setMultiline] = useState(false);
   const hasText = text.trim().length > 0;
+  const inputRef = useRef<TextInput>(null);
 
   const send = () => {
     if (!hasText) return;
@@ -33,32 +34,37 @@ export function MessageComposer({
       <Pressable>
         <Image source={composerPlus} style={styles.plus} contentFit="contain" />
       </Pressable>
-      {/* Pill is fully rounded while single-line, relaxes to 20 when text wraps */}
-      <LiquidGlassSurface
-        style={[styles.pill, { borderRadius: multiline ? 20 : 999 }]}
-        interactive
-        dataSet={{ focusRing: 'true' }}>
-        <TextInput
-          value={text}
-          onChangeText={setText}
-          placeholder="Message…"
-          placeholderTextColor={colors.textMuted}
-          style={styles.input}
-          dataSet={{ skipRing: 'true' }}
-          multiline
-          onContentSizeChange={(event) =>
-            setMultiline(event.nativeEvent.contentSize.height > 24)
-          }
-          onSubmitEditing={send}
-        />
-        <Pressable onPress={send} hitSlop={8}>
-          <Image
-            source={hasText ? sendActive : sendIdle}
-            style={styles.send}
-            contentFit="contain"
+      {/* Tapping anywhere in the pill (not just the text itself) focuses the
+          input — its own box is narrower than the visual field. */}
+      <Pressable style={styles.pillHit} onPress={() => inputRef.current?.focus()}>
+        {/* Pill is fully rounded while single-line, relaxes to 20 when text wraps */}
+        <LiquidGlassSurface
+          style={[styles.pill, { borderRadius: multiline ? 20 : 999 }]}
+          interactive
+          dataSet={{ focusRing: 'true' }}>
+          <TextInput
+            ref={inputRef}
+            value={text}
+            onChangeText={setText}
+            placeholder="Message…"
+            placeholderTextColor={colors.textMuted}
+            style={styles.input}
+            dataSet={{ skipRing: 'true' }}
+            multiline
+            onContentSizeChange={(event) =>
+              setMultiline(event.nativeEvent.contentSize.height > 24)
+            }
+            onSubmitEditing={send}
           />
-        </Pressable>
-      </LiquidGlassSurface>
+          <Pressable onPress={send} hitSlop={8}>
+            <Image
+              source={hasText ? sendActive : sendIdle}
+              style={styles.send}
+              contentFit="contain"
+            />
+          </Pressable>
+        </LiquidGlassSurface>
+      </Pressable>
     </View>
   );
 }
@@ -75,8 +81,10 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
   },
-  pill: {
+  pillHit: {
     flex: 1,
+  },
+  pill: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-between',
