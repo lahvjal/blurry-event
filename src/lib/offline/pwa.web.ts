@@ -56,37 +56,49 @@ function ensurePinchZoomBlocked() {
 }
 
 /**
- * Shrinks `#root` to the visible area **only while the keyboard is up**.
+ * Shrinks `#root` to the visible area **only while a field is being typed
+ * into**, and restores it the moment that field is done.
  *
- * An earlier version tracked `visualViewport` unconditionally, which turned
- * every few pixels the browser shaved off the visual viewport into a strip of
- * bare `body` under the floating nav. The keyboard is the only case that
- * genuinely needs the app to be shorter than the screen; the rest of the time
- * `100dvh` is already exactly right, so the override is cleared and the CSS
- * fallback takes over.
+ * Two conditions, and the focus one is what makes this safe. Deciding from the
+ * measurement alone meant a keyboard that closed without the viewport
+ * reporting all the way back left the app permanently short, showing a strip
+ * of bare `body` under the nav until reload. Focus is unambiguous: nothing
+ * focused, nothing covering the app, full height. The measurement then only
+ * decides *how much* to shrink, never whether to stay shrunk.
  *
- * The gap is measured rather than the height compared, because Safari both
- * shortens the visual viewport and pans it — `offsetTop` is the panned part
- * and counts toward what the keyboard is covering.
+ * The covered gap is measured rather than heights compared, because Safari
+ * both shortens the visual viewport and pans it — `offsetTop` is the panned
+ * part and counts toward what the keyboard hides.
  */
 const KEYBOARD_MIN_INSET = 120;
+
+function isEditing(): boolean {
+  const el = document.activeElement as HTMLElement | null;
+  if (!el) return false;
+  return (
+    el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable
+  );
+}
 
 function ensureViewportPinned() {
   if (!window.visualViewport) return;
   const vv = window.visualViewport;
   const root = document.documentElement;
 
+  const release = () => {
+    // Back to 100dvh, which already reaches the bottom edge of the screen.
+    root.style.removeProperty('--app-height');
+    root.style.removeProperty('--app-offset-top');
+  };
+
   const sync = () => {
     const covered = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
 
-    if (covered >= KEYBOARD_MIN_INSET) {
+    if (isEditing() && covered >= KEYBOARD_MIN_INSET) {
       root.style.setProperty('--app-height', `${vv.height}px`);
       root.style.setProperty('--app-offset-top', `${vv.offsetTop}px`);
     } else {
-      // Anything smaller is browser chrome or rounding, not a keyboard. Back to
-      // 100dvh, which already reaches the bottom edge of the screen.
-      root.style.removeProperty('--app-height');
-      root.style.removeProperty('--app-offset-top');
+      release();
     }
 
     window.scrollTo(0, 0);
@@ -96,6 +108,14 @@ function ensureViewportPinned() {
   vv.addEventListener('resize', sync);
   vv.addEventListener('scroll', sync);
   window.addEventListener('scroll', sync);
+  document.addEventListener('focusin', sync);
+
+  // Release on blur without waiting for a viewport event that may never
+  // arrive, then sync again once the keyboard has finished animating away.
+  document.addEventListener('focusout', () => {
+    release();
+    setTimeout(sync, 300);
+  });
 }
 
 function ensureManifestLink() {

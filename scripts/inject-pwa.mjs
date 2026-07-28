@@ -104,18 +104,27 @@ const HEAD = `
       document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
       if (window.visualViewport) {
         var vv = window.visualViewport;
-        // Only shrink the app while the keyboard is genuinely covering it.
-        // Tracking visualViewport unconditionally turned a few pixels of
-        // browser rounding into a strip of bare background under the nav.
+        var root = document.documentElement;
+        // Shrink only while a field is actually being typed into. Deciding
+        // from the measurement alone meant a keyboard that closed without the
+        // viewport reporting all the way back left the app permanently short,
+        // showing bare background under the nav until reload.
+        var isEditing = function () {
+          var el = document.activeElement;
+          if (!el) return false;
+          return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable;
+        };
+        var releaseViewport = function () {
+          root.style.removeProperty('--app-height');
+          root.style.removeProperty('--app-offset-top');
+        };
         var syncViewport = function () {
           var covered = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-          var root = document.documentElement;
-          if (covered >= 120) {
+          if (isEditing() && covered >= 120) {
             root.style.setProperty('--app-height', vv.height + 'px');
             root.style.setProperty('--app-offset-top', vv.offsetTop + 'px');
           } else {
-            root.style.removeProperty('--app-height');
-            root.style.removeProperty('--app-offset-top');
+            releaseViewport();
           }
           window.scrollTo(0, 0);
         };
@@ -123,6 +132,13 @@ const HEAD = `
         vv.addEventListener('resize', syncViewport);
         vv.addEventListener('scroll', syncViewport);
         window.addEventListener('scroll', syncViewport);
+        document.addEventListener('focusin', syncViewport);
+        // Release on blur rather than waiting for a viewport event that may
+        // never arrive, then settle again after the keyboard animates away.
+        document.addEventListener('focusout', function () {
+          releaseViewport();
+          setTimeout(syncViewport, 300);
+        });
       }
     </script>
 `;
