@@ -170,15 +170,15 @@ export default function EventHome() {
 
           {/* Scoring CTA */}
           <Pressable onPress={() => router.push(complete ? '/complete-round' : '/scorecard')}>
-            <GradientPanel colors={colors.gradCta} style={styles.cta}>
+            <View style={styles.cta}>
               <View style={styles.ctaLeft}>
                 <Image source={plusCircle} style={{ width: 33, height: 33 }} />
                 <Text style={styles.ctaText}>
                   {complete ? 'VIEW FINAL CARD' : inProgress ? 'CONTINUE ROUND' : 'START SCORING'}
                 </Text>
               </View>
-              <Chevron />
-            </GradientPanel>
+              <Chevron color="#131715" />
+            </View>
           </Pressable>
 
           {inProgress ? (
@@ -382,7 +382,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 28,
+    backgroundColor: '#ffffff',
   },
   ctaLeft: {
     flexDirection: 'row',
@@ -392,7 +394,7 @@ const styles = StyleSheet.create({
   ctaText: {
     fontFamily: fonts.bold,
     fontSize: 13,
-    color: '#ffffff',
+    color: '#131715',
     textTransform: 'uppercase',
   },
   progressRow: {

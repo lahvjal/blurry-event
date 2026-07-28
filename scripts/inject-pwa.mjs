@@ -31,7 +31,13 @@ const HEAD = `
     <link rel="apple-touch-icon" href="/pwa/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/pwa/icon-192.png" />
     <style id="blurry-shell">
-      html, body, #root { background-color: #131715; }
+      html, body, #root {
+        height: 100vh !important;
+        height: 100dvh !important;
+        min-height: 100vh !important;
+        min-height: 100dvh !important;
+        background-color: #131715;
+      }
       body { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
     </style>
 `;

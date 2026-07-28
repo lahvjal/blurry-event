@@ -40,6 +40,7 @@ export function LiquidGlassSurface({
       <BlurView
         intensity={20}
         tint="dark"
+        pointerEvents="none"
         style={{
           position: 'absolute',
           top: 0,

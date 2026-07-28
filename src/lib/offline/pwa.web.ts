@@ -8,6 +8,30 @@
  * during development rather than only after a production export.
  */
 
+/**
+ * `viewport-fit=cover` is what makes `env(safe-area-inset-*)` resolve to
+ * real values on iOS Safari — without it, react-native-safe-area-context
+ * reports zero insets everywhere. Expo's stock dev template ships a
+ * viewport meta without it, so it's rewritten here rather than appended
+ * (a second viewport meta would be ignored).
+ */
+function ensureViewportFitCover() {
+  const existing = document.querySelector('meta[name="viewport"]');
+  if (existing) {
+    if (!existing.getAttribute('content')?.includes('viewport-fit')) {
+      existing.setAttribute(
+        'content',
+        'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover',
+      );
+    }
+    return;
+  }
+  const meta = document.createElement('meta');
+  meta.name = 'viewport';
+  meta.content = 'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover';
+  document.head.appendChild(meta);
+}
+
 function ensureManifestLink() {
   if (document.querySelector('link[rel="manifest"]')) return;
   const link = document.createElement('link');
@@ -25,14 +49,40 @@ function ensureThemeColor() {
 }
 
 /**
+ * Expo's own `#expo-reset` style tag sets a static `height: 100%`, which on
+ * mobile Safari can exceed the visually available viewport once browser
+ * chrome is showing. This overrides it with `100dvh` so the app shell always
+ * reaches the true bottom of the screen. `!important` guarantees it wins
+ * regardless of where it lands relative to expo-reset in the cascade.
+ */
+function ensureBaseStyle() {
+  if (document.getElementById('blurry-shell')) return;
+  const style = document.createElement('style');
+  style.id = 'blurry-shell';
+  style.textContent = `
+    html, body, #root {
+      height: 100vh !important;
+      height: 100dvh !important;
+      min-height: 100vh !important;
+      min-height: 100dvh !important;
+      background-color: #131715;
+    }
+    body { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
+  `;
+  document.head.appendChild(style);
+}
+
+/**
  * Registers the app-shell worker. Silent on failure — no worker means no
  * offline shell, but scores still save to IndexedDB, so it must never be fatal.
  */
 export function setupPwa(): void {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
 
+  ensureViewportFitCover();
   ensureManifestLink();
   ensureThemeColor();
+  ensureBaseStyle();
 
   if (!('serviceWorker' in navigator)) return;
 

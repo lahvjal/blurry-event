@@ -10,6 +10,7 @@ import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { colors } from '@/constants/theme';
 import { setupPwa } from '@/lib/offline/pwa';
@@ -43,15 +44,17 @@ export default function RootLayout() {
   }
 
   return (
-    <EventProvider>
-      <StatusBar style="light" />
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: colors.bg },
-          animation: 'fade',
-        }}
-      />
-    </EventProvider>
+    <SafeAreaProvider>
+      <EventProvider>
+        <StatusBar style="light" />
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: colors.bg },
+            animation: 'fade',
+          }}
+        />
+      </EventProvider>
+    </SafeAreaProvider>
   );
 }
