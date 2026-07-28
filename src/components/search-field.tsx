@@ -48,7 +48,7 @@ export function SearchField({
   const [focused, setFocused] = useState(false);
 
   return (
-    <View style={[styles.root, style]}>
+    <View style={[styles.root, style]} dataSet={{ focusRing: 'true' }}>
       <LinearGradient colors={['#0f1110', '#111513']} style={StyleSheet.absoluteFill} />
       {focused ? <FocusGlow /> : null}
       <View style={styles.row}>
@@ -69,6 +69,7 @@ export function SearchField({
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           style={styles.input}
+          dataSet={{ skipRing: 'true' }}
           selectionColor="#ffffff"
           clearButtonMode="while-editing"
           autoCapitalize="none"

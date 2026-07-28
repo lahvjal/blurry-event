@@ -95,6 +95,17 @@ function ensureThemeColor() {
  * a gap under the floating nav (the fixed body's `inset: 0` box didn't track
  * `dvh` the same way `#root` did). `resizes-content` now handles the
  * keyboard at the root, so body just needs to stay non-scrollable.
+ *
+ * The focus-ring rules replace the browser's default `outline`, which draws
+ * tight around the raw `<input>`/`<textarea>` box. For a field where that
+ * element *is* the whole visual field (most of them — background and
+ * padding applied directly to the TextInput) that's already correct, so
+ * `input:focus`/`textarea:focus` gets a themed ring straight away. For a
+ * field where the input sits inside a decorative pill with icons as
+ * siblings (the message composer, the search field), the input's own box is
+ * narrower than the field — those opt out with `data-skip-ring` and the
+ * pill wrapper opts in with `data-focus-ring`, so the ring wraps the whole
+ * pill via `:focus-within` instead.
  */
 function ensureBaseStyle() {
   if (document.getElementById('blurry-shell')) return;
@@ -113,6 +124,13 @@ function ensureBaseStyle() {
       overflow: hidden;
       overscroll-behavior-y: none;
       -webkit-tap-highlight-color: transparent;
+    }
+    input, textarea { outline: none; }
+    input:focus:not([data-skip-ring]), textarea:focus:not([data-skip-ring]) {
+      box-shadow: 0 0 0 2px #7bffb2;
+    }
+    [data-focus-ring]:focus-within {
+      box-shadow: 0 0 0 2px #7bffb2;
     }
   `;
   document.head.appendChild(style);

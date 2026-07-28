@@ -36,13 +36,15 @@ export function MessageComposer({
       {/* Pill is fully rounded while single-line, relaxes to 20 when text wraps */}
       <LiquidGlassSurface
         style={[styles.pill, { borderRadius: multiline ? 20 : 999 }]}
-        interactive>
+        interactive
+        dataSet={{ focusRing: 'true' }}>
         <TextInput
           value={text}
           onChangeText={setText}
           placeholder="Message…"
           placeholderTextColor={colors.textMuted}
           style={styles.input}
+          dataSet={{ skipRing: 'true' }}
           multiline
           onContentSizeChange={(event) =>
             setMultiline(event.nativeEvent.contentSize.height > 24)

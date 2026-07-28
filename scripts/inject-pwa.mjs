@@ -44,6 +44,13 @@ const HEAD = `
         overscroll-behavior-y: none;
         -webkit-tap-highlight-color: transparent;
       }
+      input, textarea { outline: none; }
+      input:focus:not([data-skip-ring]), textarea:focus:not([data-skip-ring]) {
+        box-shadow: 0 0 0 2px #7bffb2;
+      }
+      [data-focus-ring]:focus-within {
+        box-shadow: 0 0 0 2px #7bffb2;
+      }
     </style>
     <script>
       document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
