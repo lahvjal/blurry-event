@@ -8,28 +8,39 @@
  * during development rather than only after a production export.
  */
 
+const VIEWPORT_CONTENT =
+  'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover';
+
 /**
  * `viewport-fit=cover` is what makes `env(safe-area-inset-*)` resolve to
  * real values on iOS Safari — without it, react-native-safe-area-context
- * reports zero insets everywhere. Expo's stock dev template ships a
- * viewport meta without it, so it's rewritten here rather than appended
- * (a second viewport meta would be ignored).
+ * reports zero insets everywhere. `user-scalable=no` plus a pinned
+ * min/max-scale is what stops pinch-zoom and the auto-zoom Safari does when
+ * focusing a text input. Expo's stock dev template ships a viewport meta
+ * without any of this, so it's rewritten here rather than appended (a second
+ * viewport meta would be ignored).
  */
 function ensureViewportFitCover() {
   const existing = document.querySelector('meta[name="viewport"]');
   if (existing) {
-    if (!existing.getAttribute('content')?.includes('viewport-fit')) {
-      existing.setAttribute(
-        'content',
-        'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover',
-      );
+    if (existing.getAttribute('content') !== VIEWPORT_CONTENT) {
+      existing.setAttribute('content', VIEWPORT_CONTENT);
     }
     return;
   }
   const meta = document.createElement('meta');
   meta.name = 'viewport';
-  meta.content = 'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover';
+  meta.content = VIEWPORT_CONTENT;
   document.head.appendChild(meta);
+}
+
+/**
+ * `user-scalable=no` is enough on most browsers, but iOS Safari has long
+ * ignored it for pinch gestures specifically (an accessibility carve-out).
+ * Blocking the native `gesturestart` event is the standard workaround.
+ */
+function ensurePinchZoomBlocked() {
+  document.addEventListener('gesturestart', (event) => event.preventDefault());
 }
 
 function ensureManifestLink() {
@@ -66,6 +77,7 @@ function ensureBaseStyle() {
       min-height: 100vh !important;
       min-height: 100dvh !important;
       background-color: #131715;
+      touch-action: pan-x pan-y;
     }
     body { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
   `;
@@ -80,6 +92,7 @@ export function setupPwa(): void {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
 
   ensureViewportFitCover();
+  ensurePinchZoomBlocked();
   ensureManifestLink();
   ensureThemeColor();
   ensureBaseStyle();
