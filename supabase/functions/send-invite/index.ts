@@ -162,8 +162,10 @@ Deno.serve(async (request) => {
   });
 
   if (error) {
-    // The function raises for non-admins, which is the expected refusal path.
-    const forbidden = /admin/i.test(error.message);
+    // Two ways to be refused, and both mean the same thing to the caller:
+    // invite_payloads raises for a signed-in non-admin, and Postgres denies
+    // EXECUTE outright for anon, which never reaches that check.
+    const forbidden = /admin|permission denied/i.test(error.message);
     return new Response(forbidden ? 'Forbidden' : 'Lookup failed', {
       status: forbidden ? 403 : 500,
     });
