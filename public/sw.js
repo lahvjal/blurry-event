@@ -11,7 +11,7 @@
  * manages itself and can reason about staleness for.
  */
 
-const VERSION = 'v2';
+const VERSION = 'v3';
 const SHELL_CACHE = `blurry-shell-${VERSION}`;
 const ASSET_CACHE = `blurry-assets-${VERSION}`;
 
@@ -140,6 +140,17 @@ self.addEventListener('push', (event) => {
   }
 
   const title = payload.title || 'Blurry Invitational';
+
+  // The count on the home screen icon. Set here rather than in the app because
+  // this is the only code that runs while the app is closed, which is exactly
+  // when the badge matters. Unsupported browsers simply don't have the method.
+  if (typeof payload.badgeCount === 'number' && self.navigator.setAppBadge) {
+    event.waitUntil(
+      payload.badgeCount > 0
+        ? self.navigator.setAppBadge(payload.badgeCount).catch(() => {})
+        : self.navigator.clearAppBadge().catch(() => {}),
+    );
+  }
 
   event.waitUntil(
     self.registration.showNotification(title, {

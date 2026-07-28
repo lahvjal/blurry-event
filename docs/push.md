@@ -33,6 +33,29 @@ The UI treats that as a fixable state rather than a dead end: on iPhone in a tab
 the prompt reads "Add to Home Screen" instead of offering a toggle that couldn't
 work. Android and desktop have no such restriction.
 
+## Icon badge
+
+The unread count on the home screen icon, via the Badging API. Same platform
+gate as push — an installed PWA with notification permission — so anywhere push
+works, the badge works, and anywhere it doesn't the calls are simply absent.
+
+It counts **unread messages only**. Announcements and tee time changes still
+notify, but there's no read state for them in the schema to count against.
+
+Two halves, because no single piece of code sees both directions:
+
+- **Up:** the service worker's `push` handler sets it. That's the only code
+  running while the app is closed, which is exactly when the count changes.
+  Each recipient's number differs, so `send-push` looks them all up in one call
+  to `unread_totals()` and sends an individualised payload per device.
+- **Down:** the app sets it whenever the inbox loads and after marking a thread
+  read. Opening a thread from a notification never touches the inbox, so
+  `refreshBadge()` runs there too — otherwise the icon would keep claiming
+  unread messages you'd just read.
+
+Zero clears the badge rather than setting it to `0`, which still draws a dot on
+some platforms. Signing out clears it too.
+
 ## Setup
 
 Once per environment. Until it's done, `notify_push()` returns quietly and the
@@ -90,6 +113,7 @@ deploy without the config file for any reason, pass `--no-verify-jwt`.
 
 `0011_push.sql` creates the subscriptions table, its RLS policies, and the four
 triggers. `0012_push_config.sql` adds the config table the dispatcher reads.
+`0013_unread_totals.sql` adds the per-recipient unread count the badge needs.
 
 ### 6. Point the database at it
 

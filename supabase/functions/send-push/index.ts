@@ -41,6 +41,13 @@ type Payload = {
   url: string;
   /** Collapse key — a second message in a thread replaces the first. */
   tag?: string;
+  /**
+   * Unread total for the home screen icon badge. Named to avoid colliding with
+   * the Notification API's own `badge`, which is the small monochrome glyph.
+   * Filled in per recipient at delivery time, not here — everyone receiving a
+   * given notification has a different count.
+   */
+  badgeCount?: number;
 };
 
 /** A notification and the auth users who should receive it. */
@@ -220,12 +227,24 @@ async function deliver(recipients: string[], payload: Payload) {
 
   const { data: subscriptions } = await admin
     .from('push_subscriptions')
-    .select('id, endpoint, p256dh, auth')
+    .select('id, endpoint, p256dh, auth, user_id')
     .in('user_id', recipients);
 
   if (!subscriptions?.length) return { sent: 0, pruned: 0 };
 
-  const body = JSON.stringify(payload);
+  // Every recipient's badge is their own number, so the payload can't be shared
+  // across devices the way the title and body can. One round trip covers all of
+  // them; anyone with nothing unread simply doesn't come back and defaults to 0.
+  const { data: totals } = await admin.rpc('unread_totals', {
+    user_ids: recipients,
+  });
+  const badgeByUser = new Map<string, number>(
+    (totals ?? []).map((row: { user_id: string; unread: number }) => [
+      row.user_id,
+      Number(row.unread),
+    ]),
+  );
+
   const dead: string[] = [];
 
   const results = await Promise.allSettled(
@@ -235,7 +254,10 @@ async function deliver(recipients: string[], payload: Payload) {
           endpoint: sub.endpoint,
           keys: { p256dh: sub.p256dh, auth: sub.auth },
         },
-        body,
+        JSON.stringify({
+          ...payload,
+          badgeCount: badgeByUser.get(sub.user_id) ?? 0,
+        }),
         { TTL: 60 * 60 * 12 },
       ).catch((error: { statusCode?: number }) => {
         // 404/410 mean the browser threw this subscription away — the app was

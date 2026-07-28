@@ -1,6 +1,7 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 
+import { setBadge } from '@/lib/badge';
 import {
   fetchConversation,
   fetchConversationSummaries,
@@ -37,6 +38,23 @@ async function signedIn(): Promise<boolean> {
   return Boolean(data.session);
 }
 
+/**
+ * Recomputes the home screen badge from the server's unread counts.
+ *
+ * Needed because opening a thread from a notification never touches the inbox,
+ * so nothing else would notice the count had dropped. Costs one query on
+ * thread open, which is worth an icon that doesn't lie.
+ */
+export async function refreshBadge(): Promise<void> {
+  try {
+    if (!(await signedIn())) return;
+    const summaries = await fetchConversationSummaries();
+    await setBadge(summaries.reduce((total, c) => total + c.unreadCount, 0));
+  } catch {
+    // A stale badge isn't worth an error path.
+  }
+}
+
 export function useConversations() {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,7 +67,12 @@ export function useConversations() {
         setError(null);
         return;
       }
-      setConversations(await fetchConversationSummaries());
+      const summaries = await fetchConversationSummaries();
+      setConversations(summaries);
+      // The push handler drives the badge up while the app is closed; this is
+      // what brings it back down, since reading a thread is only ever visible
+      // from in here.
+      void setBadge(summaries.reduce((total, c) => total + c.unreadCount, 0));
       setError(null);
     } catch (caught) {
       setError(errorText(caught));
@@ -140,9 +163,12 @@ export function useConversation(conversationId: string | null) {
   // Clear the badge on open, and again as messages arrive while it's open.
   useEffect(() => {
     if (!conversationId || messages.length === 0 || !me.claimed) return;
-    void markConversationRead(conversationId, me.id).catch(() => {
-      // A stale badge isn't worth interrupting anyone over.
-    });
+    void markConversationRead(conversationId, me.id)
+      // Reading here is often the whole reason the icon badge was showing.
+      .then(refreshBadge)
+      .catch(() => {
+        // A stale badge isn't worth interrupting anyone over.
+      });
   }, [conversationId, me.claimed, me.id, messages.length]);
 
   const send = useCallback(

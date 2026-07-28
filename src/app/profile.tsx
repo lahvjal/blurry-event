@@ -18,6 +18,7 @@ import { FloatingNav } from '@/components/floating-nav';
 import { PushToggleRow } from '@/components/push-controls';
 import { Badge, InfoRow, Noise, SectionLabel } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
+import { clearBadge } from '@/lib/badge';
 import { clearPushForSignOut } from '@/lib/push';
 import { supabase } from '@/lib/supabase';
 import { localAvatar, useEvent } from '@/state/event';
@@ -202,8 +203,10 @@ export default function Profile() {
           style={styles.signOut}
           onPress={async () => {
             // Drop this device's push registration first, so the next person to
-            // sign in on this phone doesn't inherit the last one's alerts.
+            // sign in on this phone doesn't inherit the last one's alerts — or
+            // their unread count sitting on the icon.
             await clearPushForSignOut();
+            await clearBadge();
             await supabase.auth.signOut();
             router.replace('/');
           }}>
