@@ -1,10 +1,12 @@
 import { Image } from 'expo-image';
 import { usePathname, useRouter } from 'expo-router';
 import React from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { LiquidGlassSurface } from '@/components/liquid-glass';
+import { fonts } from '@/constants/theme';
+import { useUnreadTotal } from '@/state/unread';
 
 const icons = {
   event: require('@/assets/figma/nav-home.svg'),
@@ -24,6 +26,7 @@ export function FloatingNav() {
   const router = useRouter();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
+  const unread = useUnreadTotal();
 
   return (
     <View
@@ -39,12 +42,21 @@ export function FloatingNav() {
                 style={styles.tab}
                 onPress={() => router.navigate(tab.route)}>
                 <View style={[styles.tabPill, active && styles.tabPillActive]}>
-                  <Image
-                    source={icons[tab.key]}
-                    style={{ width: 22, height: 22 }}
-                    contentFit="contain"
-                    tintColor={active ? '#282f2b' : '#ffffff'}
-                  />
+                  <View style={styles.iconWrap}>
+                    <Image
+                      source={icons[tab.key]}
+                      style={{ width: 22, height: 22 }}
+                      contentFit="contain"
+                      tintColor={active ? '#282f2b' : '#ffffff'}
+                    />
+                    {tab.key === 'messages' && unread > 0 ? (
+                      <View style={styles.badge}>
+                        <Text style={styles.badgeText}>
+                          {unread > 99 ? '99+' : unread}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
                 </View>
               </Pressable>
             );
@@ -90,5 +102,33 @@ const styles = StyleSheet.create({
   },
   tabPillActive: {
     backgroundColor: '#ffffff',
+  },
+  /** Sized to the icon so the badge has something to hang off the corner of. */
+  iconWrap: {
+    width: 22,
+    height: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badge: {
+    position: 'absolute',
+    top: -6,
+    right: -11,
+    minWidth: 17,
+    height: 17,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    // The one place the app breaks from its green palette. A count here means
+    // someone is waiting on you, and system red is what that reads as
+    // everywhere else on the phone.
+    backgroundColor: '#ff3b30',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: {
+    fontFamily: fonts.bold,
+    fontSize: 10,
+    lineHeight: 13,
+    color: '#ffffff',
   },
 });

@@ -56,6 +56,13 @@ Two halves, because no single piece of code sees both directions:
 Zero clears the badge rather than setting it to `0`, which still draws a dot on
 some platforms. Signing out clears it too.
 
+The red bubble on the Messages nav tab reads the same count, from
+`src/state/unread.ts`. That store is module-level rather than context on
+purpose: `FloatingNav` renders on nearly every screen, so per-mount state would
+mean a query on every navigation and several realtime subscriptions open at
+once — and, worse, the two badges could drift apart and disagree about the same
+number.
+
 ## Setup
 
 Once per environment. Until it's done, `notify_push()` returns quietly and the
