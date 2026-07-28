@@ -9,7 +9,7 @@
  */
 
 const VIEWPORT_CONTENT =
-  'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover';
+  'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content';
 
 /**
  * `viewport-fit=cover` is what makes `env(safe-area-inset-*)` resolve to
@@ -19,6 +19,15 @@ const VIEWPORT_CONTENT =
  * focusing a text input. Expo's stock dev template ships a viewport meta
  * without any of this, so it's rewritten here rather than appended (a second
  * viewport meta would be ignored).
+ *
+ * `interactive-widget=resizes-content` (Safari 16.4+) is what actually fixes
+ * keyboard handling at the root: without it, iOS keeps the layout viewport
+ * full-size and pans the *visual* viewport to tuck a focused input above the
+ * keyboard — and a `position: fixed` body doesn't track that pan reliably,
+ * which is what produced both the vertical offset after closing the
+ * keyboard and a horizontal one while it's open. With this flag the layout
+ * viewport (and `dvh`) actually shrinks for the keyboard, so there's no pan
+ * to compensate for in the first place.
  */
 function ensureViewportFitCover() {
   const existing = document.querySelector('meta[name="viewport"]');
@@ -41,6 +50,20 @@ function ensureViewportFitCover() {
  */
 function ensurePinchZoomBlocked() {
   document.addEventListener('gesturestart', (event) => event.preventDefault());
+}
+
+/**
+ * Belt-and-suspenders for iOS < 16.4, which ignores
+ * `interactive-widget=resizes-content`: pin the document scroll position to
+ * the origin whenever the visual viewport moves, so a keyboard-driven pan
+ * can't leave the shell visibly offset.
+ */
+function ensureViewportPinned() {
+  if (!window.visualViewport) return;
+  const reset = () => window.scrollTo(0, 0);
+  window.visualViewport.addEventListener('resize', reset);
+  window.visualViewport.addEventListener('scroll', reset);
+  window.addEventListener('scroll', reset);
 }
 
 function ensureManifestLink() {
@@ -105,6 +128,7 @@ export function setupPwa(): void {
 
   ensureViewportFitCover();
   ensurePinchZoomBlocked();
+  ensureViewportPinned();
   ensureManifestLink();
   ensureThemeColor();
   ensureBaseStyle();

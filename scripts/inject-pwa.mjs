@@ -20,7 +20,7 @@ if (!existsSync(indexPath)) {
 }
 
 const HEAD = `
-    <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
     <meta name="description" content="Scorecard, leaderboard and messaging for the Blurry Invitational. Works without a signal." />
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#131715" />
@@ -47,7 +47,15 @@ const HEAD = `
         -webkit-tap-highlight-color: transparent;
       }
     </style>
-    <script>document.addEventListener('gesturestart', function (e) { e.preventDefault(); });</script>
+    <script>
+      document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
+      if (window.visualViewport) {
+        var resetScroll = function () { window.scrollTo(0, 0); };
+        window.visualViewport.addEventListener('resize', resetScroll);
+        window.visualViewport.addEventListener('scroll', resetScroll);
+        window.addEventListener('scroll', resetScroll);
+      }
+    </script>
 `;
 
 let html = readFileSync(indexPath, 'utf8');
