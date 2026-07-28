@@ -9,7 +9,7 @@
  */
 
 const VIEWPORT_CONTENT =
-  'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content';
+  'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=overlays-content';
 
 /**
  * `viewport-fit=cover` is what makes `env(safe-area-inset-*)` resolve to
@@ -20,14 +20,17 @@ const VIEWPORT_CONTENT =
  * without any of this, so it's rewritten here rather than appended (a second
  * viewport meta would be ignored).
  *
- * `interactive-widget=resizes-content` (Safari 16.4+) is what actually fixes
- * keyboard handling at the root: without it, iOS keeps the layout viewport
- * full-size and pans the *visual* viewport to tuck a focused input above the
- * keyboard — and a `position: fixed` body doesn't track that pan reliably,
- * which is what produced both the vertical offset after closing the
- * keyboard and a horizontal one while it's open. With this flag the layout
- * viewport (and `dvh`) actually shrinks for the keyboard, so there's no pan
- * to compensate for in the first place.
+ * `interactive-widget=overlays-content` (rather than `resizes-content`) is
+ * deliberate: `resizes-content` shrinks the layout viewport for the keyboard,
+ * but on real iOS Safari that shrink doesn't reserve space for Safari's own
+ * accessory toolbar (the prev/next/done bar above the keyboard) — so a
+ * bottom-anchored field like the message composer ends up sized right up
+ * against the toolbar and gets rendered behind it. `overlays-content` keeps
+ * the layout viewport full-size and leaves keyboard handling to us, via
+ * `ensureViewportPinned` below, which sizes `#root` off `visualViewport`
+ * instead — that api's `height` reliably excludes the toolbar because it's
+ * measuring genuinely visible pixels, not deriving them from the keyboard's
+ * reported height the way the declarative resize does.
  */
 function ensureViewportFitCover() {
   const existing = document.querySelector('meta[name="viewport"]');
@@ -53,17 +56,28 @@ function ensurePinchZoomBlocked() {
 }
 
 /**
- * Belt-and-suspenders for iOS < 16.4, which ignores
- * `interactive-widget=resizes-content`: pin the document scroll position to
- * the origin whenever the visual viewport moves, so a keyboard-driven pan
- * can't leave the shell visibly offset.
+ * Keeps `#root` sized and positioned to exactly the real visible area,
+ * tracked live off `window.visualViewport`. `html`/`body` stay at the full,
+ * unshrunk layout-viewport size as an inert backdrop; `#root` is what
+ * actually holds the app, so it's the one that needs to both shrink for the
+ * keyboard (`--app-height`) and slide to wherever Safari panned the visible
+ * window to (`--app-offset-top`) — without the second part, a `#root` sized
+ * correctly but left at `top: 0` would render mostly scrolled out of view
+ * the moment Safari pans. `window.scrollTo(0, 0)` on the same events cancels
+ * any residual document-level scroll so nothing fights this positioning.
  */
 function ensureViewportPinned() {
   if (!window.visualViewport) return;
-  const reset = () => window.scrollTo(0, 0);
-  window.visualViewport.addEventListener('resize', reset);
-  window.visualViewport.addEventListener('scroll', reset);
-  window.addEventListener('scroll', reset);
+  const vv = window.visualViewport;
+  const sync = () => {
+    document.documentElement.style.setProperty('--app-height', `${vv.height}px`);
+    document.documentElement.style.setProperty('--app-offset-top', `${vv.offsetTop}px`);
+    window.scrollTo(0, 0);
+  };
+  sync();
+  vv.addEventListener('resize', sync);
+  vv.addEventListener('scroll', sync);
+  window.addEventListener('scroll', sync);
 }
 
 function ensureManifestLink() {
@@ -85,16 +99,13 @@ function ensureThemeColor() {
 /**
  * Expo's own `#expo-reset` style tag sets a static `height: 100%`, which on
  * mobile Safari can exceed the visually available viewport once browser
- * chrome is showing. This overrides it with `100dvh` so the app shell always
- * reaches the true bottom of the screen. `!important` guarantees it wins
- * regardless of where it lands relative to expo-reset in the cascade.
- *
- * `body` only gets `overflow: hidden` here — an earlier version also pinned
- * it to `position: fixed`, which was meant to stop Safari's keyboard-focus
- * pan but instead fought with `interactive-widget=resizes-content` and left
- * a gap under the floating nav (the fixed body's `inset: 0` box didn't track
- * `dvh` the same way `#root` did). `resizes-content` now handles the
- * keyboard at the root, so body just needs to stay non-scrollable.
+ * chrome is showing. `html`/`body` get `100dvh` as an inert, full-size
+ * backdrop; `#root` is the one that needs to track the *real* visible area
+ * (see `ensureViewportPinned`), so it's sized and positioned off the
+ * `--app-height`/`--app-offset-top` custom properties that function keeps
+ * live, falling back to `100dvh`/`0` before that JS has run a first time.
+ * `!important` guarantees these win regardless of where they land relative
+ * to expo-reset in the cascade.
  *
  * The focus-ring rules replace the browser's default `outline`, which draws
  * tight around the raw `<input>`/`<textarea>` box. For a field where that
@@ -112,11 +123,18 @@ function ensureBaseStyle() {
   const style = document.createElement('style');
   style.id = 'blurry-shell';
   style.textContent = `
-    html, body, #root {
+    html, body {
       height: 100vh !important;
       height: 100dvh !important;
       min-height: 100vh !important;
       min-height: 100dvh !important;
+      background-color: #131715;
+      touch-action: pan-x pan-y;
+    }
+    #root {
+      height: var(--app-height, 100dvh) !important;
+      min-height: var(--app-height, 100dvh) !important;
+      transform: translateY(var(--app-offset-top, 0px));
       background-color: #131715;
       touch-action: pan-x pan-y;
     }

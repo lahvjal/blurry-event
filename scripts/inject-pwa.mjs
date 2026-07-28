@@ -20,7 +20,7 @@ if (!existsSync(indexPath)) {
 }
 
 const HEAD = `
-    <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=overlays-content" />
     <meta name="description" content="Scorecard, leaderboard and messaging for the Blurry Invitational. Works without a signal." />
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#131715" />
@@ -31,11 +31,18 @@ const HEAD = `
     <link rel="apple-touch-icon" href="/pwa/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/pwa/icon-192.png" />
     <style id="blurry-shell">
-      html, body, #root {
+      html, body {
         height: 100vh !important;
         height: 100dvh !important;
         min-height: 100vh !important;
         min-height: 100dvh !important;
+        background-color: #131715;
+        touch-action: pan-x pan-y;
+      }
+      #root {
+        height: var(--app-height, 100dvh) !important;
+        min-height: var(--app-height, 100dvh) !important;
+        transform: translateY(var(--app-offset-top, 0px));
         background-color: #131715;
         touch-action: pan-x pan-y;
       }
@@ -55,10 +62,16 @@ const HEAD = `
     <script>
       document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
       if (window.visualViewport) {
-        var resetScroll = function () { window.scrollTo(0, 0); };
-        window.visualViewport.addEventListener('resize', resetScroll);
-        window.visualViewport.addEventListener('scroll', resetScroll);
-        window.addEventListener('scroll', resetScroll);
+        var vv = window.visualViewport;
+        var syncViewport = function () {
+          document.documentElement.style.setProperty('--app-height', vv.height + 'px');
+          document.documentElement.style.setProperty('--app-offset-top', vv.offsetTop + 'px');
+          window.scrollTo(0, 0);
+        };
+        syncViewport();
+        vv.addEventListener('resize', syncViewport);
+        vv.addEventListener('scroll', syncViewport);
+        window.addEventListener('scroll', syncViewport);
       }
     </script>
 `;
