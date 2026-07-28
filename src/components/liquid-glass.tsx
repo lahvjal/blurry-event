@@ -48,9 +48,13 @@ export function LiquidGlassSurface({
           right: 0,
           bottom: 0,
           backgroundColor: tintColor,
+          zIndex: -1,
         }}
       />
-      {children}
+      {/* Own stacking context above the blur layer — an absolutely positioned
+          sibling otherwise paints (and blurs) above in-flow content on web,
+          regardless of DOM order. */}
+      <View style={{ zIndex: 1 }}>{children}</View>
     </View>
   );
 }
