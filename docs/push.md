@@ -86,19 +86,32 @@ supabase functions deploy send-push
 Postgres, which has no JWT, and the shared secret is the check instead. If you
 deploy without the config file for any reason, pass `--no-verify-jwt`.
 
-### 5. Point the database at it
+### 5. Run the migrations
+
+`0011_push.sql` creates the subscriptions table, its RLS policies, and the four
+triggers. `0012_push_config.sql` adds the config table the dispatcher reads.
+
+### 6. Point the database at it
 
 ```sql
-alter database postgres set app.push_hook_url    = 'https://<project-ref>.supabase.co/functions/v1/send-push';
-alter database postgres set app.push_hook_secret = '<the PUSH_HOOK_SECRET from step 3>';
+insert into push_config (key, value) values
+  ('push_hook_url',    'https://<project-ref>.supabase.co/functions/v1/send-push'),
+  ('push_hook_secret', '<the PUSH_HOOK_SECRET from step 3>')
+on conflict (key) do update set value = excluded.value, updated_at = now();
 ```
 
-Then reconnect — `alter database` only affects new sessions.
+Takes effect on the next trigger — no restart, no waiting for connections to
+cycle.
 
-### 6. Run the migration
+> Config lives in a table rather than `alter database ... set app.x`, which is
+> what Supabase's webhook docs suggest. On a managed project the `postgres` role
+> isn't a superuser and that statement fails with `42501 permission denied`.
 
-`supabase/migrations/0011_push.sql` creates the subscriptions table, its RLS
-policies, and the four triggers.
+Check it landed (this never returns the secret itself, only whether one is set):
+
+```sql
+select * from push_config_status();
+```
 
 ## Testing
 
@@ -161,10 +174,10 @@ Work down this list — it's ordered by how often each one is the answer.
   running `v1` receives nothing. Delete the installed app and clear website data.
 - **`sent: 0` in the logs** — the event resolved but no recipient had a device
   registered. Check `push_subscriptions` actually has rows for those users.
-- **Function never called** — `app.push_hook_url` unset, or set in a session that
-  has since closed. Verify with `select current_setting('app.push_hook_url', true);`
-- **403 in the function logs** — `PUSH_HOOK_SECRET` and `app.push_hook_secret`
-  disagree.
+- **Function never called** — no `push_hook_url` row. Verify with
+  `select * from push_config_status();`
+- **403 in the function logs** — the `PUSH_HOOK_SECRET` given to the CLI and the
+  `push_hook_secret` row disagree.
 - **Subscription vanishes on its own** — expected. A 404/410 from the push
   service means that device threw its subscription away, and the row is pruned so
   it isn't retried forever. The device re-registers next time the app opens.
