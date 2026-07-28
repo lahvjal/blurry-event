@@ -3,10 +3,8 @@ import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   Animated,
   Easing,
-  NativeScrollEvent,
-  NativeSyntheticEvent,
+  PanResponder,
   Platform,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -14,35 +12,48 @@ import {
 
 import { fonts } from '@/constants/theme';
 
+/** On-screen size of one number. Purely visual — see STEP for the gesture. */
 const ITEM_HEIGHT = 150;
 const VISIBLE_ITEMS = 3;
 const WHEEL_WIDTH = 120;
 /** How long a number takes to click into the center once it wins the detent. */
 const SNAP_DURATION = 110;
 const isWeb = Platform.OS === 'web';
+
 /**
- * The browser says precisely when a scroll — drag, fling or wheel — has come
- * to rest, so the track can be realigned the instant it stops.
+ * Finger travel per number, deliberately much smaller than ITEM_HEIGHT.
+ *
+ * Tying the two together meant a whole number cost 150px of drag — about a
+ * fifth of the screen — so entering a 7 on a par 4 was a long haul. The wheel
+ * still *renders* a number every 150px; only the gesture is scaled.
  */
-const hasScrollEnd =
-  isWeb && typeof window !== 'undefined' && 'onscrollend' in window;
+const STEP = 46;
+
 /**
- * Fallback for browsers without `scrollend` (iOS 17 and older). react-native-web
- * emits one last scroll event 100ms after the real final one, so wait past that
- * to work from the true resting offset rather than a stale one.
+ * A flick past this speed (px/ms) is read as a throw rather than a drag.
+ * Below it, the dial lands exactly where the finger left it.
  */
-const WEB_SETTLE_DELAY = 140;
-/** Sub-pixel drift is already on the detent; correcting it would just loop. */
-const ALIGNED = 1;
+const FLING_MIN_VELOCITY = 0.4;
+/** How much of that speed becomes extra travel. */
+const FLING_SCALE = 1.7;
+/**
+ * Ceiling on a throw. Native momentum had no cap, which is why a small flick
+ * could skip several numbers; a score dial wants precision far more than it
+ * wants reach, and the whole range is only a dozen values.
+ */
+const FLING_MAX_STEPS = 3;
 
 /**
  * Vertical dial for score entry, opening on the hole's par.
  *
- * The numbers are not carried by the scroll — an invisible scroll view sits on
- * top purely to catch the swipe, and the wheel underneath is pinned to whole
- * numbers. It holds still until the swipe crosses a detent, then clicks the
- * next number into the center with a haptic, so the dial can never drift or
- * rest between two scores.
+ * The wheel is pinned to whole numbers: it holds still until the drag crosses
+ * a detent, then clicks the next number into the center with a haptic, so the
+ * dial can never drift or rest between two scores.
+ *
+ * The gesture is read directly rather than through a scroll view. A scroll view
+ * hands its feel to the browser — and react-native-web ignores `snapToInterval`
+ * and `decelerationRate`, so there was no way to stop a light flick from
+ * carrying several numbers past the one the golfer wanted.
  */
 export function ScoreDial({
   min = 1,
@@ -63,20 +74,17 @@ export function ScoreDial({
 
   const lastIndex = values.length - 1;
   const clamp = useCallback(
-    (index: number) => Math.min(Math.max(index, 0), lastIndex),
+    (i: number) => Math.min(Math.max(i, 0), lastIndex),
     [lastIndex],
   );
   const startIndex = clamp(initial - min);
 
-  const scroller = useRef<ScrollView>(null);
   const detent = useRef(new Animated.Value(startIndex * ITEM_HEIGHT)).current;
   const wheelY = useMemo(() => Animated.multiply(detent, -1), [detent]);
 
-  const offset = useRef(startIndex * ITEM_HEIGHT);
   const index = useRef(startIndex);
-  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const touching = useRef(false);
-  const parked = useRef(false);
+  /** Where the dial sat when the finger went down; all travel is measured off it. */
+  const dragFrom = useRef(startIndex);
 
   const snapTo = useCallback(
     (next: number) => {
@@ -92,126 +100,74 @@ export function ScoreDial({
     [detent],
   );
 
+  // Keeps the latest callback without rebuilding the responder mid-gesture,
+  // which would drop the drag the moment the parent re-rendered.
+  const onChangeRef = useRef(onChange);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
   const select = useCallback(
     (next: number) => {
       if (next === index.current) return;
       index.current = next;
       snapTo(next);
       Haptics.selectionAsync();
-      onChange(values[next]);
+      onChangeRef.current(values[next]);
     },
-    [onChange, snapTo, values],
+    [snapTo, values],
   );
 
-  const scrollToIndex = useCallback((next: number) => {
-    offset.current = next * ITEM_HEIGHT;
-    scroller.current?.scrollTo({ y: next * ITEM_HEIGHT, animated: false });
-  }, []);
+  const responder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        // A couple of pixels of slop, so a tap doesn't register as a drag.
+        onMoveShouldSetPanResponder: (_event, gesture) => Math.abs(gesture.dy) > 2,
+        onPanResponderTerminationRequest: () => false,
 
-  // Pull the hidden track back onto the number the wheel is showing. Nothing
-  // moves on screen — it just keeps the next swipe measuring from the detent
-  // rather than from the slack left over from the last one.
-  const settle = useCallback(() => {
-    const next = clamp(Math.round(offset.current / ITEM_HEIGHT));
-    select(next);
-    if (Math.abs(offset.current - next * ITEM_HEIGHT) > ALIGNED) {
-      scrollToIndex(next);
-    }
-  }, [clamp, scrollToIndex, select]);
+        onPanResponderGrant: () => {
+          dragFrom.current = index.current;
+        },
 
-  const scheduleSettle = useCallback(() => {
-    if (settleTimer.current) clearTimeout(settleTimer.current);
-    settleTimer.current = setTimeout(settle, WEB_SETTLE_DELAY);
-  }, [settle]);
+        // Dragging up brings higher numbers in from below, so travel is
+        // subtracted: dy is positive downward.
+        onPanResponderMove: (_event, gesture) => {
+          select(clamp(dragFrom.current - Math.round(gesture.dy / STEP)));
+        },
 
-  // `contentOffset` only lands on iOS, so park the track on the starting
-  // number once the content has been measured — otherwise the first swipe on
-  // Android and web is measured from the lowest score instead of from par.
-  const park = useCallback(() => {
-    if (parked.current) return;
-    parked.current = true;
-    scrollToIndex(startIndex);
-  }, [scrollToIndex, startIndex]);
-
-  // react-native-web ignores `snapToInterval` and never fires the momentum
-  // callbacks, so the realignment rides on the DOM's own scroll-end signal.
-  useEffect(() => {
-    if (!hasScrollEnd) return;
-    const node = scroller.current?.getScrollableNode() as HTMLElement | null;
-    if (!node) return;
-    const onScrollEnd = () => {
-      offset.current = node.scrollTop;
-      settle();
-    };
-    node.addEventListener('scrollend', onScrollEnd);
-    return () => node.removeEventListener('scrollend', onScrollEnd);
-  }, [settle]);
+        onPanResponderRelease: (_event, gesture) => {
+          const landed = clamp(dragFrom.current - Math.round(gesture.dy / STEP));
+          if (Math.abs(gesture.vy) < FLING_MIN_VELOCITY) {
+            select(landed);
+            return;
+          }
+          const thrown = Math.round(-gesture.vy * FLING_SCALE);
+          const capped = Math.max(
+            -FLING_MAX_STEPS,
+            Math.min(FLING_MAX_STEPS, thrown),
+          );
+          select(clamp(landed + capped));
+        },
+      }),
+    [clamp, select],
+  );
 
   // A different hole brings a different par with it; move the dial there
   // instead of leaving it on the last hole's number.
   useEffect(() => {
-    if (!parked.current || index.current === startIndex) return;
+    if (index.current === startIndex) return;
     index.current = startIndex;
     snapTo(startIndex);
-    scrollToIndex(startIndex);
-  }, [scrollToIndex, snapTo, startIndex]);
-
-  useEffect(
-    () => () => {
-      if (settleTimer.current) clearTimeout(settleTimer.current);
-    },
-    [],
-  );
-
-  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    offset.current = event.nativeEvent.contentOffset.y;
-    // Halfway between two numbers the next one takes the detent.
-    select(clamp(Math.round(offset.current / ITEM_HEIGHT)));
-    // Realigning mid-drag would eat part of the swipe, so a held gesture waits
-    // and realigns on release instead.
-    if (isWeb && !hasScrollEnd && !touching.current) scheduleSettle();
-  };
-
-  // Native only: web gets neither of these from react-native-web.
-  const handleScrollEndDrag = (
-    event: NativeSyntheticEvent<NativeScrollEvent>,
-  ) => {
-    offset.current = event.nativeEvent.contentOffset.y;
-    // A release with no throw left in it never produces momentum, so this is
-    // the only chance to realign. Anything faster — or a platform that does not
-    // report velocity — is left to the momentum handler rather than risk
-    // cutting a fling short.
-    const velocity = event.nativeEvent.velocity?.y;
-    if (velocity != null && Math.abs(velocity) < 0.05) settle();
-  };
-
-  const handleMomentumScrollEnd = (
-    event: NativeSyntheticEvent<NativeScrollEvent>,
-  ) => {
-    offset.current = event.nativeEvent.contentOffset.y;
-    settle();
-  };
-
-  const webTouchProps =
-    isWeb && !hasScrollEnd
-      ? {
-          onTouchStart: () => {
-            touching.current = true;
-            if (settleTimer.current) clearTimeout(settleTimer.current);
-          },
-          onTouchEnd: () => {
-            touching.current = false;
-            scheduleSettle();
-          },
-          onTouchCancel: () => {
-            touching.current = false;
-            scheduleSettle();
-          },
-        }
-      : null;
+  }, [snapTo, startIndex]);
 
   return (
-    <View style={styles.window}>
+    <View
+      style={styles.window}
+      // Stops the browser claiming the vertical drag for page scrolling; the
+      // app-wide `touch-action: pan-x pan-y` would otherwise win here.
+      dataSet={{ dial: 'true' }}
+      {...responder.panHandlers}>
       <Animated.View
         pointerEvents="none"
         style={[styles.wheel, { transform: [{ translateY: wheelY }] }]}>
@@ -246,26 +202,6 @@ export function ScoreDial({
           );
         })}
       </Animated.View>
-
-      {/* Catches the swipe and nothing else: the numbers live underneath. */}
-      <ScrollView
-        ref={scroller}
-        style={StyleSheet.absoluteFill}
-        showsVerticalScrollIndicator={false}
-        snapToInterval={ITEM_HEIGHT}
-        decelerationRate="fast"
-        bounces={false}
-        overScrollMode="never"
-        contentOffset={{ x: 0, y: startIndex * ITEM_HEIGHT }}
-        onContentSizeChange={park}
-        onScroll={handleScroll}
-        onScrollEndDrag={handleScrollEndDrag}
-        onMomentumScrollEnd={handleMomentumScrollEnd}
-        scrollEventThrottle={16}
-        {...webTouchProps}
-        contentContainerStyle={styles.track}>
-        <View style={{ height: values.length * ITEM_HEIGHT }} />
-      </ScrollView>
     </View>
   );
 }
@@ -282,9 +218,6 @@ const styles = StyleSheet.create({
     right: 0,
     // Centers the first number in the window; the rest stack below it.
     top: (ITEM_HEIGHT * VISIBLE_ITEMS - ITEM_HEIGHT) / 2,
-  },
-  track: {
-    paddingVertical: ITEM_HEIGHT,
   },
   item: {
     height: ITEM_HEIGHT,

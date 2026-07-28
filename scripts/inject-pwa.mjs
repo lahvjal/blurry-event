@@ -59,6 +59,17 @@ const HEAD = `
       [data-focus-ring]:focus-within {
         box-shadow: 0 0 0 2px #7bffb2;
       }
+      /*
+       * The score dial reads the drag itself, so the browser must not also
+       * scroll the page, select the numerals, or raise the iOS long-press
+       * callout — all three fire on exactly the gesture used to enter a score.
+       */
+      [data-dial] {
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-touch-callout: none;
+      }
     </style>
     <script>
       document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
