@@ -28,6 +28,7 @@ import {
   generateTeeTimes,
   mapsUrl,
   parseTimeOfDay,
+  TEE_PRESETS,
 } from '@/state/types';
 
 /**
@@ -49,6 +50,7 @@ type EventDraft = Pick<
   | 'startTime'
   | 'teeTimes'
   | 'courseMapUrl'
+  | 'teeColor'
 >;
 
 function draftFrom(event: EventConfig): EventDraft {
@@ -64,6 +66,7 @@ function draftFrom(event: EventConfig): EventDraft {
     startTime: event.startTime,
     teeTimes: event.teeTimes,
     courseMapUrl: event.courseMapUrl,
+    teeColor: event.teeColor,
   };
 }
 
@@ -550,6 +553,37 @@ export default function AdminEvent() {
             </View>
             <Text style={styles.linkArrow}>›</Text>
           </Pressable>
+
+          {/* Which tees the yardages above belong to. */}
+          <Text style={styles.fieldLabel}>TEES</Text>
+          <View style={styles.teeColorRow}>
+            {TEE_PRESETS.map((tee) => {
+              const active =
+                draft.teeColor.trim().toLowerCase() === tee.name.toLowerCase();
+              return (
+                <Pressable
+                  key={tee.name}
+                  onPress={() => patch({ teeColor: tee.name })}
+                  style={[styles.teeChip, active && styles.teeChipActive]}>
+                  <View style={[styles.teeSwatch, { backgroundColor: tee.swatch }]} />
+                  <Text style={[styles.teeChipText, active && styles.teeChipTextActive]}>
+                    {tee.name}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <TextInput
+            value={draft.teeColor}
+            onChangeText={(teeColor) => patch({ teeColor })}
+            style={styles.input}
+            placeholder="Or type the name your course uses"
+            placeholderTextColor="rgba(255,255,255,0.3)"
+            selectionColor={colors.highlight}
+          />
+          <Text style={styles.hint}>
+            Shown on the score entry screen, under the yardage.
+          </Text>
         </View>
       </ScrollView>
 
@@ -594,6 +628,41 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     fontSize: 9,
     color: 'rgba(255,255,255,0.45)',
+  },
+  teeColorRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  teeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  teeChipActive: {
+    borderColor: colors.highlight,
+  },
+  /** A ring, so the white and black swatches both stay visible on this bg. */
+  teeSwatch: {
+    width: 13,
+    height: 13,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+  },
+  teeChipText: {
+    fontFamily: fonts.bold,
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.6)',
+  },
+  teeChipTextActive: {
+    color: '#ffffff',
   },
   input: {
     backgroundColor: 'rgba(0,0,0,0.3)',

@@ -4,8 +4,9 @@
     {
       "name": "expo-web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "web"],
-      "port": 8081
+      "runtimeArgs": ["run", "web", "--", "--port", "8090"],
+      "port": 8090,
+      "autoPort": false
     }
   ]
 }

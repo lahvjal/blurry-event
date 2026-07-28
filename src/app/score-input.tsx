@@ -64,7 +64,7 @@ export default function ScoreInput() {
                 end={{ x: 1, y: 0 }}
                 style={styles.teeLine}
               />
-              <Text style={styles.statLabel}>white</Text>
+              <Text style={styles.statLabel}>{event.teeColor}</Text>
               <LinearGradient
                 colors={['#898b8a', 'rgba(115,115,115,0)']}
                 start={{ x: 0, y: 0 }}

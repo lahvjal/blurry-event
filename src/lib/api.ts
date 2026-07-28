@@ -169,6 +169,7 @@ export async function fetchEventBundle(): Promise<EventBundle> {
       startTime: row.start_time ?? '8:00 AM',
       teeTimes: row.tee_times ?? [],
       courseMapUrl: row.course_map_url ?? null,
+      teeColor: row.tee_color || 'White',
       gameStyle: row.game_style as GameStyle,
       holes: (holesRes.data ?? []).map((h: any) => ({
         hole: h.hole,
@@ -254,6 +255,7 @@ export async function apiUpdateEvent(
     startTime?: string;
     teeTimes?: string[];
     courseMapUrl?: string | null;
+    teeColor?: string;
   },
 ) {
   const payload = assigned({
@@ -268,6 +270,7 @@ export async function apiUpdateEvent(
     start_time: patch.startTime,
     tee_times: patch.teeTimes,
     course_map_url: patch.courseMapUrl,
+    tee_color: patch.teeColor,
   });
   if (!payload) return;
 

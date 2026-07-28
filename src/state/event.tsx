@@ -78,6 +78,7 @@ const SEED_EVENT: EventConfig = {
   startTime: '8:20 AM',
   teeTimes: ['8:20 AM', '8:30 AM', '8:40 AM', '8:50 AM'],
   courseMapUrl: null,
+  teeColor: 'White',
   gameStyle: 'scramble_4',
   holes: HOLES,
 };
@@ -246,7 +247,7 @@ type EventState = {
 
   // Admin actions
   setGameStyle: (style: GameStyle) => void;
-  /** Event details: name, course, location, date, times, tee slots, course map. */
+  /** Event details: name, course, location, date, times, tee slots, map, tees. */
   updateEvent: (
     patch: Partial<
       Pick<
@@ -262,6 +263,7 @@ type EventState = {
         | 'startTime'
         | 'teeTimes'
         | 'courseMapUrl'
+        | 'teeColor'
       >
     >,
   ) => void;

@@ -144,9 +144,25 @@ export type EventConfig = {
   teeTimes: string[];
   /** Uploaded course map image; null until an admin adds one. */
   courseMapUrl: string | null;
+  /** Which tees the field is playing, e.g. "White". Shown on score entry. */
+  teeColor: string;
   gameStyle: GameStyle;
   holes: Hole[];
 };
+
+/**
+ * The tee names that cover almost every course, roughly longest to shortest,
+ * with the swatch each one is known by. Offered as presets in admin; the stored
+ * value is plain text, so a course calling them something else still fits.
+ */
+export const TEE_PRESETS: { name: string; swatch: string }[] = [
+  { name: 'Black', swatch: '#1c1f1d' },
+  { name: 'Blue', swatch: '#3f7fd0' },
+  { name: 'White', swatch: '#f2f4f2' },
+  { name: 'Gold', swatch: '#d2a63c' },
+  { name: 'Green', swatch: '#4a9d63' },
+  { name: 'Red', swatch: '#cf4d4d' },
+];
 
 /** Compact "Littleton, CO" for headers and cards. */
 export function shortLocation(event: EventConfig): string {
