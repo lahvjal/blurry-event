@@ -209,7 +209,10 @@ export function ScoreDial({
 const styles = StyleSheet.create({
   window: {
     height: ITEM_HEIGHT * VISIBLE_ITEMS,
-    width: WHEEL_WIDTH,
+    // Full width so the swipe can be started anywhere across the screen —
+    // a thumb shouldn't have to find a 120px column mid-round. The numerals
+    // stay centered inside it; only the catchment area grows.
+    alignSelf: 'stretch',
     overflow: 'hidden',
   },
   wheel: {

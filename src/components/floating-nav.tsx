@@ -1,3 +1,4 @@
+import { LinearGradient } from 'expo-linear-gradient';
 import { Image } from 'expo-image';
 import { usePathname, useRouter } from 'expo-router';
 import React from 'react';
@@ -7,6 +8,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LiquidGlassSurface } from '@/components/liquid-glass';
 import { fonts } from '@/constants/theme';
 import { useUnreadTotal } from '@/state/unread';
+
+/** How far above the bar the scrim starts fading in. */
+const SCRIM_RISE = 96;
 
 const icons = {
   event: require('@/assets/figma/nav-home.svg'),
@@ -28,51 +32,86 @@ export function FloatingNav() {
   const insets = useSafeAreaInsets();
   const unread = useUnreadTotal();
 
+  const bottomInset = Math.max(20, insets.bottom + 12);
+  const scrimHeight = SCRIM_RISE + 5 + 72 + bottomInset;
+
   return (
-    <View
-      style={[styles.wrapper, { paddingBottom: Math.max(20, insets.bottom + 12) }]}
-      pointerEvents="box-none">
-      <LiquidGlassSurface style={styles.bar} tintColor="rgba(40,49,43,0.5)">
-        <View style={styles.items}>
-          {tabs.map((tab) => {
-            const active = pathname === tab.route;
-            return (
-              <Pressable
-                key={tab.key}
-                style={styles.tab}
-                onPress={() => router.navigate(tab.route)}>
-                <View style={[styles.tabPill, active && styles.tabPillActive]}>
-                  <View style={styles.iconWrap}>
-                    <Image
-                      source={icons[tab.key]}
-                      style={{ width: 22, height: 22 }}
-                      contentFit="contain"
-                      tintColor={active ? '#282f2b' : '#ffffff'}
-                    />
-                    {tab.key === 'messages' && unread > 0 ? (
-                      <View style={styles.badge}>
-                        <Text style={styles.badgeText}>
-                          {unread > 99 ? '99+' : unread}
-                        </Text>
-                      </View>
-                    ) : null}
+    <View style={styles.host} pointerEvents="box-none">
+      {/*
+        Everything scrolling toward the bottom edge fades out under the nav
+        rather than running into it. Three stacked backdrop blurs, each masked
+        to start lower and blur harder than the last, give a blur that deepens
+        toward the edge — a single layer can only fade one radius in and out,
+        which reads as a band rather than a gradient. The tint on top does the
+        darkening. Web-only: `backdrop-filter` and `mask-image` come from the
+        injected stylesheet, keyed on these data attributes.
+      */}
+      <View style={[styles.scrim, { height: scrimHeight }]} pointerEvents="none">
+        <View style={StyleSheet.absoluteFill} dataSet={{ navScrim: '1' }} />
+        <View style={StyleSheet.absoluteFill} dataSet={{ navScrim: '2' }} />
+        <View style={StyleSheet.absoluteFill} dataSet={{ navScrim: '3' }} />
+        <LinearGradient
+          colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.45)', 'rgba(0,0,0,0.88)']}
+          locations={[0, 0.55, 1]}
+          style={StyleSheet.absoluteFill}
+        />
+      </View>
+
+      <View
+        style={[styles.wrapper, { paddingBottom: bottomInset }]}
+        pointerEvents="box-none">
+        <LiquidGlassSurface style={styles.bar} tintColor="rgba(0,0,0,0.72)">
+          <View style={styles.items}>
+            {tabs.map((tab) => {
+              const active = pathname === tab.route;
+              return (
+                <Pressable
+                  key={tab.key}
+                  style={styles.tab}
+                  onPress={() => router.navigate(tab.route)}>
+                  <View style={[styles.tabPill, active && styles.tabPillActive]}>
+                    <View style={styles.iconWrap}>
+                      <Image
+                        source={icons[tab.key]}
+                        style={{ width: 22, height: 22 }}
+                        contentFit="contain"
+                        tintColor={active ? '#282f2b' : '#ffffff'}
+                      />
+                      {tab.key === 'messages' && unread > 0 ? (
+                        <View style={styles.badge}>
+                          <Text style={styles.badgeText}>
+                            {unread > 99 ? '99+' : unread}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
                   </View>
-                </View>
-              </Pressable>
-            );
-          })}
-        </View>
-      </LiquidGlassSurface>
+                </Pressable>
+              );
+            })}
+          </View>
+        </LiquidGlassSurface>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrapper: {
+  /** Unpadded, so the scrim can reach the screen edges the bar insets from. */
+  host: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
+  },
+  scrim: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  wrapper: {
+    position: 'relative',
     paddingHorizontal: 13,
     paddingTop: 5,
     paddingBottom: 20,

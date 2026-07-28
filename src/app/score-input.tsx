@@ -26,6 +26,12 @@ export default function ScoreInput() {
   const toPar = value - par;
   const toParLabel = toPar === 0 ? 'E' : toPar > 0 ? `+${toPar}` : `${toPar}`;
 
+  // The nav grows with the home indicator, so a fixed offset here would sit on
+  // top of it on a notched phone. Mirrors FloatingNav's own inset, plus the bar
+  // and a gap.
+  const CTA_HEIGHT = 102;
+  const aboveNav = Math.max(20, insets.bottom + 12) + 72 + 10;
+
   const save = () => {
     setScore(currentHole, value);
     if (currentHole === 17) {
@@ -39,7 +45,11 @@ export default function ScoreInput() {
     <View style={styles.root}>
       <Noise />
       <PageHeader title="score card" subtitle={event.courseName} />
-      <View style={[styles.content, { paddingTop: insets.top + 54 + 10 }]}>
+      <View
+        style={[
+          styles.content,
+          { paddingTop: insets.top + 54 + 10, paddingBottom: aboveNav + CTA_HEIGHT },
+        ]}>
         {/* Hole stats */}
         <View style={styles.statsBlock}>
           <View style={styles.statsRow}>
@@ -86,26 +96,33 @@ export default function ScoreInput() {
           </View>
         </View>
 
-        {/* Score picker */}
+        {/* Score picker. The dial spans the full width so the swipe can start
+            anywhere; the label and to-par float over it and stay out of the
+            way of the gesture. */}
         <View style={styles.picker}>
-          <View style={styles.pickerCenter}>
-            <View style={styles.sideLabelBox}>
-              <Text style={styles.sideLabel}>score</Text>
-            </View>
-            <ScoreDial initial={par} onChange={setValue} />
-            <Text style={styles.toPar}>{toParLabel}</Text>
+          <ScoreDial initial={par} onChange={setValue} />
+          <View style={styles.sideLabelBox} pointerEvents="none">
+            <Text style={styles.sideLabel}>score</Text>
           </View>
+          <Text style={styles.toPar} pointerEvents="none">
+            {toParLabel}
+          </Text>
         </View>
 
-        {/* CTA */}
-        <Pressable onPress={save}>
-          <GradientPanel colors={colors.gradCta} style={styles.cta}>
-            <Text style={styles.ctaText}>save score</Text>
-            <Chevron />
-          </GradientPanel>
-        </Pressable>
       </View>
+
       <FloatingNav />
+
+      {/* After the nav on purpose. The nav's scrim fades scrolling content
+          toward the bottom edge, and the one button that commits a score has
+          no business being blurred — painting it later keeps it crisp. It sits
+          clear of the bar, so nothing is covered. */}
+      <Pressable onPress={save} style={[styles.ctaFixed, { bottom: aboveNav }]}>
+        <GradientPanel colors={colors.gradCta} style={styles.cta}>
+          <Text style={styles.ctaText}>save score</Text>
+          <Chevron />
+        </GradientPanel>
+      </Pressable>
     </View>
   );
 }
@@ -117,7 +134,8 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    paddingBottom: 105,
+    // paddingBottom is set inline — it reserves room for the positioned CTA
+    // and the nav, both of which depend on the safe-area inset.
   },
   statsBlock: {
     paddingHorizontal: 80,
@@ -177,12 +195,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  pickerCenter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 60,
-  },
   sideLabelBox: {
+    position: 'absolute',
+    left: 30,
     width: 13,
     height: 80,
     alignItems: 'center',
@@ -199,9 +214,17 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   toPar: {
+    position: 'absolute',
+    right: 40,
     fontFamily: fonts.serif,
     fontSize: 30,
     color: '#ffffff',
+  },
+  /** Parked just above the nav; `bottom` is set inline from the safe area. */
+  ctaFixed: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
   },
   cta: {
     height: 102,

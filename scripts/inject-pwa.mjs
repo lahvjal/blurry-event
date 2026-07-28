@@ -75,6 +75,30 @@ const HEAD = `
         -webkit-user-select: none;
         -webkit-touch-callout: none;
       }
+      /*
+       * Progressive blur behind the nav. Each layer blurs the same backdrop
+       * harder than the last and is masked to begin lower, so the blur
+       * deepens toward the bottom edge instead of switching on at one line.
+       */
+      [data-nav-scrim] { pointer-events: none; }
+      [data-nav-scrim="1"] {
+        backdrop-filter: blur(3px);
+        -webkit-backdrop-filter: blur(3px);
+        mask-image: linear-gradient(to bottom, transparent 0%, #000 38%);
+        -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 38%);
+      }
+      [data-nav-scrim="2"] {
+        backdrop-filter: blur(9px);
+        -webkit-backdrop-filter: blur(9px);
+        mask-image: linear-gradient(to bottom, transparent 32%, #000 68%);
+        -webkit-mask-image: linear-gradient(to bottom, transparent 32%, #000 68%);
+      }
+      [data-nav-scrim="3"] {
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        mask-image: linear-gradient(to bottom, transparent 60%, #000 92%);
+        -webkit-mask-image: linear-gradient(to bottom, transparent 60%, #000 92%);
+      }
     </style>
     <script>
       document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
