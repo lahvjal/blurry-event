@@ -48,3 +48,6 @@ example
 
 # VAPID keypair for local push testing — never commit.
 .vapid.local.json
+
+# Supabase CLI local state
+supabase/.temp/
