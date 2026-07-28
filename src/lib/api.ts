@@ -115,6 +115,7 @@ export async function fetchEventBundle(): Promise<EventBundle> {
       inviteCode: p.invite_code,
       authEmail: p.auth_email,
       claimed: p.claimed_by !== null,
+      inviteSentAt: p.invite_sent_at ?? null,
     };
   });
 
@@ -463,6 +464,7 @@ export async function apiAddParticipants(
     inviteCode: p.invite_code,
     authEmail: p.auth_email,
     claimed: p.claimed_by !== null,
+    inviteSentAt: p.invite_sent_at ?? null,
   }));
 }
 

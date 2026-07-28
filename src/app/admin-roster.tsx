@@ -20,6 +20,7 @@ import { SearchField } from '@/components/search-field';
 import { ActionButton, Noise, SectionLabel } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
 import { CSV_TEMPLATE, CsvImportResult, parseRoster } from '@/lib/csv';
+import { sendInviteEmails } from '@/lib/invite-email';
 import { inviteMessage, invitesAsCsv, isSyntheticEmail } from '@/lib/invites';
 import { useEvent } from '@/state/event';
 import { NewParticipantInput, Participant } from '@/state/types';
@@ -37,6 +38,7 @@ export default function AdminRoster() {
     updateParticipant,
     removeParticipant,
     regenerateInviteCode,
+    refresh,
   } = useEvent();
 
   const [query, setQuery] = useState('');
@@ -47,6 +49,9 @@ export default function AdminRoster() {
   const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newHandicap, setNewHandicap] = useState('');
+  /** Disables every send control while one is in flight, so a slow network
+   *  can't turn an impatient second tap into a duplicate email. */
+  const [emailing, setEmailing] = useState(false);
 
   // Inline edit of an existing roster row.
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -214,6 +219,45 @@ export default function AdminRoster() {
   const shareInvite = async (participant: Participant) => {
     await Share.share({ message: inviteMessage(participant, event.name) });
   };
+
+  /**
+   * `label` is what the confirmation talks about — one player's name, or a
+   * count for the bulk run.
+   */
+  const emailInvites = async (targets: Participant[], label: string) => {
+    if (targets.length === 0) {
+      Alert.alert('Nobody to email', 'Everyone with an email address has already been invited.');
+      return;
+    }
+
+    setEmailing(true);
+    try {
+      const result = await sendInviteEmails(targets.map((p) => p.id));
+      // Pick up the invite_sent_at stamps the function just wrote.
+      await refresh();
+
+      const parts = [`Sent ${result.sent} invite${result.sent === 1 ? '' : 's'}.`];
+      if (result.skipped > 0) {
+        parts.push(`${result.skipped} skipped — no email address on file.`);
+      }
+      if (result.failed > 0) {
+        parts.push(`${result.failed} failed:\n${result.errors.join('\n')}`);
+      }
+      Alert.alert(result.failed > 0 ? 'Partly sent' : 'Invites sent', parts.join('\n\n'));
+    } catch (error) {
+      Alert.alert(
+        `Couldn't email ${label}`,
+        error instanceof Error ? error.message : 'Something went wrong sending the invite.',
+      );
+    } finally {
+      setEmailing(false);
+    }
+  };
+
+  /** Everyone with a real address who has never been sent one. */
+  const uninvited = participants.filter(
+    (p) => !isSyntheticEmail(p.authEmail) && !p.inviteSentAt,
+  );
 
   const exportAll = async () => {
     await Share.share({
@@ -524,7 +568,14 @@ export default function AdminRoster() {
                   </View>
                 ) : expanded ? (
                   <View style={styles.expandedPanel}>
-                    <Text style={styles.expandedEmail}>{p.authEmail}</Text>
+                    <Text style={styles.expandedEmail}>
+                      {isSyntheticEmail(p.authEmail)
+                        ? 'No email on file — invite by code'
+                        : p.authEmail}
+                      {p.inviteSentAt
+                        ? `  ·  invited ${new Date(p.inviteSentAt).toLocaleDateString()}`
+                        : ''}
+                    </Text>
                     <View style={styles.expandedActions}>
                       <Pressable style={styles.chip} onPress={() => startEditing(p)}>
                         <Text style={styles.chipText}>EDIT</Text>
@@ -535,6 +586,17 @@ export default function AdminRoster() {
                       <Pressable style={styles.chip} onPress={() => shareInvite(p)}>
                         <Text style={styles.chipText}>SHARE</Text>
                       </Pressable>
+                      {/* Nothing to email a placeholder address. */}
+                      {!isSyntheticEmail(p.authEmail) ? (
+                        <Pressable
+                          style={styles.chip}
+                          disabled={emailing}
+                          onPress={() => emailInvites([p], p.fullName)}>
+                          <Text style={styles.chipText}>
+                            {p.inviteSentAt ? 'RESEND EMAIL' : 'EMAIL INVITE'}
+                          </Text>
+                        </Pressable>
+                      ) : null}
                       <Pressable
                         style={styles.chip}
                         onPress={() =>
@@ -572,6 +634,30 @@ export default function AdminRoster() {
           <SectionLabel color={colors.link} size={10}>
             bulk
           </SectionLabel>
+          <Pressable
+            style={[styles.secondaryButton, emailing && styles.buttonBusy]}
+            disabled={emailing || uninvited.length === 0}
+            onPress={() =>
+              Alert.alert(
+                `Email ${uninvited.length} invite${uninvited.length === 1 ? '' : 's'}?`,
+                'Goes to everyone with an email address who hasn’t been sent one yet.',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Send',
+                    onPress: () => emailInvites(uninvited, 'the roster'),
+                  },
+                ],
+              )
+            }>
+            <Text style={styles.secondaryButtonText}>
+              {emailing
+                ? 'SENDING…'
+                : uninvited.length === 0
+                  ? 'EVERYONE INVITED'
+                  : `EMAIL ${uninvited.length} UNSENT INVITE${uninvited.length === 1 ? '' : 'S'}`}
+            </Text>
+          </Pressable>
           <Pressable style={styles.secondaryButton} onPress={exportAll}>
             <Text style={styles.secondaryButtonText}>EXPORT ALL INVITES</Text>
           </Pressable>
@@ -655,6 +741,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(15,17,16,0.55)',
+  },
+  buttonBusy: {
+    opacity: 0.5,
   },
   secondaryButtonText: {
     fontFamily: fonts.bold,

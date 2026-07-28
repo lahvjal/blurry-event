@@ -122,6 +122,7 @@ function participant(
     inviteCode,
     authEmail: syntheticEmail(inviteCode),
     claimed,
+    inviteSentAt: null,
   };
 }
 
@@ -307,6 +308,7 @@ const UNLINKED_ME: Participant = {
   inviteCode: '',
   authEmail: '',
   claimed: false,
+  inviteSentAt: null,
 };
 
 /** What a rejected write is explained with when the server didn't say. */
@@ -897,6 +899,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
               inviteCode,
               authEmail: row.email?.toLowerCase() ?? syntheticEmail(inviteCode),
               claimed: false,
+              inviteSentAt: null,
             };
           }),
         ]);

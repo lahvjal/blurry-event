@@ -1,7 +1,17 @@
 import { Participant } from '@/state/types';
 
-/** Matches app.json's `scheme`. */
-const SCHEME = 'blurryclub';
+/**
+ * Where invite links point. Falls back to the running origin on web so a
+ * preview deploy links to itself rather than to production.
+ *
+ * This used to be the `blurryclub://` scheme from app.json, which is a native
+ * deep link — it opens nothing in a browser, so every emailed, copied, shared
+ * and CSV-exported invite link was dead on the web build.
+ */
+const SITE_URL =
+  process.env.EXPO_PUBLIC_SITE_URL ||
+  (typeof window !== 'undefined' && window.location?.origin) ||
+  'https://blurryinvitational.com';
 
 /** Random, unguessable — anonymous callers can probe the lookup endpoint. */
 export function makeInviteCode(): string {
@@ -26,7 +36,7 @@ export function isSyntheticEmail(email: string): boolean {
 }
 
 export function inviteLink(code: string): string {
-  return `${SCHEME}://invite?code=${encodeURIComponent(code)}`;
+  return `${SITE_URL}/invite?code=${encodeURIComponent(code)}`;
 }
 
 /** Ready-to-send text the admin can paste into a message or email. */
@@ -34,10 +44,14 @@ export function inviteMessage(participant: Participant, eventName: string): stri
   return [
     `You're in for the ${eventName}.`,
     '',
-    `Download the app, tap your invite link, and set up your login:`,
-    `  ${participant.inviteCode}`,
+    `Set up your login here:`,
+    `  ${inviteLink(participant.inviteCode)}`,
     '',
-    `Or tap: ${inviteLink(participant.inviteCode)}`,
+    `Your invite code: ${participant.inviteCode}`,
+    '',
+    `Once you're in, add it to your home screen — on iPhone tap Share then`,
+    `"Add to Home Screen". That's what lets it work without signal on the`,
+    `course, and what turns on notifications.`,
   ].join('\n');
 }
 

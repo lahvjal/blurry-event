@@ -43,6 +43,8 @@ export type Participant = {
   authEmail: string;
   /** False until they redeem their invite code and set a password. */
   claimed: boolean;
+  /** When their invite email went out; null means they've never been sent one. */
+  inviteSentAt: string | null;
 };
 
 /** A roster row before it becomes a Participant (CSV import or manual add). */
