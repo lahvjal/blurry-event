@@ -41,7 +41,12 @@ const HEAD = `
         touch-action: pan-x pan-y;
       }
       #root {
+        /* 100vh first for anything without dvh; the var line then wins where
+           it parses. With no keyboard the var is unset, so this is plain
+           100dvh — the full screen, flush to the bottom edge. */
+        height: 100vh !important;
         height: var(--app-height, 100dvh) !important;
+        min-height: 100vh !important;
         min-height: var(--app-height, 100dvh) !important;
         transform: translateY(var(--app-offset-top, 0px));
         background-color: #131715;
@@ -75,9 +80,19 @@ const HEAD = `
       document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
       if (window.visualViewport) {
         var vv = window.visualViewport;
+        // Only shrink the app while the keyboard is genuinely covering it.
+        // Tracking visualViewport unconditionally turned a few pixels of
+        // browser rounding into a strip of bare background under the nav.
         var syncViewport = function () {
-          document.documentElement.style.setProperty('--app-height', vv.height + 'px');
-          document.documentElement.style.setProperty('--app-offset-top', vv.offsetTop + 'px');
+          var covered = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+          var root = document.documentElement;
+          if (covered >= 120) {
+            root.style.setProperty('--app-height', vv.height + 'px');
+            root.style.setProperty('--app-offset-top', vv.offsetTop + 'px');
+          } else {
+            root.style.removeProperty('--app-height');
+            root.style.removeProperty('--app-offset-top');
+          }
           window.scrollTo(0, 0);
         };
         syncViewport();

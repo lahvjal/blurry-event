@@ -56,24 +56,42 @@ function ensurePinchZoomBlocked() {
 }
 
 /**
- * Keeps `#root` sized and positioned to exactly the real visible area,
- * tracked live off `window.visualViewport`. `html`/`body` stay at the full,
- * unshrunk layout-viewport size as an inert backdrop; `#root` is what
- * actually holds the app, so it's the one that needs to both shrink for the
- * keyboard (`--app-height`) and slide to wherever Safari panned the visible
- * window to (`--app-offset-top`) — without the second part, a `#root` sized
- * correctly but left at `top: 0` would render mostly scrolled out of view
- * the moment Safari pans. `window.scrollTo(0, 0)` on the same events cancels
- * any residual document-level scroll so nothing fights this positioning.
+ * Shrinks `#root` to the visible area **only while the keyboard is up**.
+ *
+ * An earlier version tracked `visualViewport` unconditionally, which turned
+ * every few pixels the browser shaved off the visual viewport into a strip of
+ * bare `body` under the floating nav. The keyboard is the only case that
+ * genuinely needs the app to be shorter than the screen; the rest of the time
+ * `100dvh` is already exactly right, so the override is cleared and the CSS
+ * fallback takes over.
+ *
+ * The gap is measured rather than the height compared, because Safari both
+ * shortens the visual viewport and pans it — `offsetTop` is the panned part
+ * and counts toward what the keyboard is covering.
  */
+const KEYBOARD_MIN_INSET = 120;
+
 function ensureViewportPinned() {
   if (!window.visualViewport) return;
   const vv = window.visualViewport;
+  const root = document.documentElement;
+
   const sync = () => {
-    document.documentElement.style.setProperty('--app-height', `${vv.height}px`);
-    document.documentElement.style.setProperty('--app-offset-top', `${vv.offsetTop}px`);
+    const covered = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+
+    if (covered >= KEYBOARD_MIN_INSET) {
+      root.style.setProperty('--app-height', `${vv.height}px`);
+      root.style.setProperty('--app-offset-top', `${vv.offsetTop}px`);
+    } else {
+      // Anything smaller is browser chrome or rounding, not a keyboard. Back to
+      // 100dvh, which already reaches the bottom edge of the screen.
+      root.style.removeProperty('--app-height');
+      root.style.removeProperty('--app-offset-top');
+    }
+
     window.scrollTo(0, 0);
   };
+
   sync();
   vv.addEventListener('resize', sync);
   vv.addEventListener('scroll', sync);
@@ -132,7 +150,12 @@ function ensureBaseStyle() {
       touch-action: pan-x pan-y;
     }
     #root {
+      /* 100vh first for anything without dvh; the var line then wins where it
+         parses. With no keyboard the var is unset, so this is plain 100dvh —
+         the full screen, flush to the bottom edge. */
+      height: 100vh !important;
       height: var(--app-height, 100dvh) !important;
+      min-height: 100vh !important;
       min-height: var(--app-height, 100dvh) !important;
       transform: translateY(var(--app-offset-top, 0px));
       background-color: #131715;
