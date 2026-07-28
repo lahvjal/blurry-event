@@ -457,14 +457,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  /**
+   * Every rotated side label — the banner's HOLE and PAR, the footer's PAR and
+   * SCORE — shares this, so they stay one size. The letter-spacing is cut
+   * alongside the type: at 6.6 it, not the font size, was what made "SCORE"
+   * long enough to wrap onto a second line.
+   */
   bannerSideLabel: {
     fontFamily: fonts.regular,
-    // 11 put "SCORE" a hair over the 70px line once letter-spacing was
-    // counted, so it wrapped to "SCOR" / "E". "PAR" always fit.
-    fontSize: 9,
+    fontSize: 8,
     color: 'rgba(255,255,255,0.5)',
     textTransform: 'uppercase',
-    letterSpacing: 6.6,
+    letterSpacing: 4,
     transform: [{ rotate: '-90deg' }],
     width: 70,
     textAlign: 'center',
