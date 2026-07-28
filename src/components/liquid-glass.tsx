@@ -54,10 +54,14 @@ export function LiquidGlassSurface({
           zIndex: -1,
         }}
       />
-      {/* Own stacking context above the blur layer — an absolutely positioned
-          sibling otherwise paints (and blurs) above in-flow content on web,
-          regardless of DOM order. */}
-      <View style={{ zIndex: 1 }}>{children}</View>
+      {/*
+        Children stay direct flex children of the surface. Wrapping them to
+        lift them above the blur collapsed every row layout built on one —
+        the header pill's back / title / menu, and the composer's input and
+        send button — into a single flex item. The blur's negative z-index
+        already puts it behind in-flow content, so no wrapper is needed.
+      */}
+      {children}
     </View>
   );
 }

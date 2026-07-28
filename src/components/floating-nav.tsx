@@ -9,8 +9,10 @@ import { LiquidGlassSurface } from '@/components/liquid-glass';
 import { fonts } from '@/constants/theme';
 import { useUnreadTotal } from '@/state/unread';
 
-/** How far above the bar the scrim starts fading in. */
-const SCRIM_RISE = 96;
+/** How far above the top of the bar the scrim starts fading in. */
+const SCRIM_RISE = 10;
+/** Matches styles.bar. */
+const BAR_HEIGHT = 72;
 
 const icons = {
   event: require('@/assets/figma/nav-home.svg'),
@@ -33,7 +35,8 @@ export function FloatingNav() {
   const unread = useUnreadTotal();
 
   const bottomInset = Math.max(20, insets.bottom + 12);
-  const scrimHeight = SCRIM_RISE + 5 + 72 + bottomInset;
+  // Measured from the bottom edge up to SCRIM_RISE above the bar's top edge.
+  const scrimHeight = bottomInset + BAR_HEIGHT + SCRIM_RISE;
 
   return (
     <View style={styles.host} pointerEvents="box-none">
