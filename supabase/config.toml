@@ -1,0 +1,7 @@
+# Supabase CLI config. Anything not set here falls back to the CLI's defaults.
+
+# The push sender is called by a Postgres trigger, not by a signed-in user, so
+# there is no JWT to verify. It authenticates with the x-push-secret header
+# instead — see supabase/functions/send-push/index.ts.
+[functions.send-push]
+verify_jwt = false

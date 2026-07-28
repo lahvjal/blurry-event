@@ -11,7 +11,7 @@
  * manages itself and can reason about staleness for.
  */
 
-const VERSION = 'v1';
+const VERSION = 'v2';
 const SHELL_CACHE = `blurry-shell-${VERSION}`;
 const ASSET_CACHE = `blurry-assets-${VERSION}`;
 
@@ -118,4 +118,74 @@ self.addEventListener('fetch', (event) => {
 /** Lets the page trigger an immediate activation after an update. */
 self.addEventListener('message', (event) => {
   if (event.data === 'SKIP_WAITING') void self.skipWaiting();
+});
+
+// ---------------------------------------------------------------------------
+// Push
+// ---------------------------------------------------------------------------
+
+/**
+ * Payloads come from the send-push edge function as
+ * `{ title, body, url, tag }`. A notification must always be shown: browsers
+ * grant push under `userVisibleOnly`, and staying silent burns that trust —
+ * repeated offences get the site's push permission revoked. So a malformed
+ * payload still surfaces something rather than returning early.
+ */
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch {
+    // Not JSON. Fall through to the generic notification below.
+  }
+
+  const title = payload.title || 'Blurry Invitational';
+
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: payload.body || '',
+      icon: '/pwa/icon-192.png',
+      badge: '/pwa/icon-192.png',
+      // Same tag = same slot, so a busy thread replaces its own notification
+      // instead of stacking twenty of them on the lock screen.
+      tag: payload.tag || 'blurry',
+      renotify: true,
+      data: { url: payload.url || '/' },
+    }),
+  );
+});
+
+/**
+ * Focus an open tab and take it to the right screen; only open a new window if
+ * the app isn't running at all. Opening unconditionally would leave a golfer
+ * with two copies of the app and a half-typed message stranded in the other.
+ */
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || '/';
+
+  event.waitUntil(
+    (async () => {
+      const clients = await self.clients.matchAll({
+        type: 'window',
+        includeUncontrolled: true,
+      });
+
+      for (const client of clients) {
+        if ('focus' in client) {
+          await client.focus();
+          if ('navigate' in client) {
+            // Cross-origin or a client mid-navigation will reject; the tab is
+            // focused either way, which is the part that matters.
+            try {
+              await client.navigate(target);
+            } catch {}
+          }
+          return;
+        }
+      }
+
+      await self.clients.openWindow(target);
+    })(),
+  );
 });

@@ -1,0 +1,182 @@
+# Push notifications
+
+Web Push, so it works on the same installed PWA the app already ships as — no
+native build, no App Store.
+
+```
+Postgres trigger  →  send-push edge function  →  browser push service  →  device
+   (row changed)        (resolves who, signs)        (Apple/Google/Mozilla)
+```
+
+The database only says *what changed*. The edge function decides *who cares* and
+does the signing, because a Web Push payload has to be signed with the VAPID
+private key and that key has no business inside Postgres.
+
+## What sends a notification
+
+| Trigger | Who gets it | Opens |
+|---|---|---|
+| New message | Everyone in the thread except the sender | That conversation |
+| New announcement | The whole roster except its author | Announcements |
+| Tee time or starting hole changed | That team's members | My Team |
+| Added to a team | The player added | My Team |
+
+Renaming a team deliberately sends nothing — only logistics that change where
+someone has to physically be are worth a buzz.
+
+## The iOS constraint
+
+**iOS only delivers Web Push to a PWA that has been added to the home screen**,
+on iOS 16.4 or later. In a normal Safari tab the Push API isn't there at all.
+
+The UI treats that as a fixable state rather than a dead end: on iPhone in a tab
+the prompt reads "Add to Home Screen" instead of offering a toggle that couldn't
+work. Android and desktop have no such restriction.
+
+## Setup
+
+Once per environment. Until it's done, `notify_push()` returns quietly and the
+app behaves exactly as it did before push existed — nothing breaks, nothing sends.
+
+### 1. Generate VAPID keys
+
+```bash
+npx web-push generate-vapid-keys
+```
+
+One keypair, reused forever. **Rotating it unsubscribes every device**, so keep
+it somewhere safe. The public half ships in the app bundle (that's fine and by
+design); the private half is a signing key and only ever lives in the edge
+function's secrets.
+
+### 2. Client env
+
+`.env` locally, and Vercel → Settings → Environment Variables for production:
+
+```
+EXPO_PUBLIC_VAPID_PUBLIC_KEY=<public key>
+```
+
+Env vars are inlined at build time, so a change here needs a redeploy. Leave it
+blank to ship without push — the toggle and prompt hide themselves.
+
+### 3. Edge function secrets
+
+```bash
+supabase secrets set \
+  VAPID_PUBLIC_KEY=<public key> \
+  VAPID_PRIVATE_KEY=<private key> \
+  VAPID_SUBJECT=mailto:you@example.com \
+  PUSH_HOOK_SECRET=$(openssl rand -hex 32)
+```
+
+`PUSH_HOOK_SECRET` is what proves a request to the function actually came from
+our database. Keep the value — step 5 needs the same one.
+
+`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are injected automatically; don't
+set them, and don't put the service role key anywhere else.
+
+### 4. Deploy the function
+
+```bash
+supabase functions deploy send-push
+```
+
+`supabase/config.toml` already sets `verify_jwt = false` for it — the caller is
+Postgres, which has no JWT, and the shared secret is the check instead. If you
+deploy without the config file for any reason, pass `--no-verify-jwt`.
+
+### 5. Point the database at it
+
+```sql
+alter database postgres set app.push_hook_url    = 'https://<project-ref>.supabase.co/functions/v1/send-push';
+alter database postgres set app.push_hook_secret = '<the PUSH_HOOK_SECRET from step 3>';
+```
+
+Then reconnect — `alter database` only affects new sessions.
+
+### 6. Run the migration
+
+`supabase/migrations/0011_push.sql` creates the subscriptions table, its RLS
+policies, and the four triggers.
+
+## Testing
+
+### Desktop Chrome — fastest loop
+
+Everything works in a normal tab, so this is where to iterate.
+
+1. Open the app, sign in, go to **Messages**. The green prompt appears; hit
+   **ALLOW** and accept Chrome's permission dialog.
+2. Confirm the row landed:
+   ```sql
+   select user_id, left(endpoint, 60), created_at from push_subscriptions;
+   ```
+3. Send a message from a second browser (or a private window signed in as
+   another player). The notification should appear within a second or two.
+
+To watch it end to end:
+
+```bash
+supabase functions logs send-push
+```
+
+A successful call returns `{ sent: n, pruned: n }`. `sent: 0` means the payload
+resolved but nobody in the recipient list had a registered device.
+
+### iPhone — the one that actually matters
+
+Must be a **real device**; the simulator's push support isn't reliable enough to
+trust a negative result.
+
+1. Open the deployed site in Safari.
+2. **Share → Add to Home Screen.**
+3. Open the app **from the home screen icon**, not from Safari.
+4. Messages → **ALLOW**.
+5. Background the app entirely (swipe up), then have someone send you a message.
+
+If you'd previously installed the PWA, delete it and clear the site data under
+**Settings → Safari → Advanced → Website Data** first — an old cached service
+worker won't have the `push` handler in it.
+
+### Firing one by hand
+
+Skips the app entirely, useful for isolating whether the problem is the trigger
+or the function:
+
+```bash
+curl -X POST 'https://<project-ref>.supabase.co/functions/v1/send-push' \
+  -H 'Content-Type: application/json' \
+  -H 'x-push-secret: <PUSH_HOOK_SECRET>' \
+  -d '{"type":"message","id":"<a real message uuid>"}'
+```
+
+## When nothing arrives
+
+Work down this list — it's ordered by how often each one is the answer.
+
+- **Nothing at all on iPhone** — opened from the home screen icon, or from
+  Safari? A tab silently can't. This is the usual cause.
+- **Stale service worker** — the `push` handler arrived in worker `v2`. A device
+  running `v1` receives nothing. Delete the installed app and clear website data.
+- **`sent: 0` in the logs** — the event resolved but no recipient had a device
+  registered. Check `push_subscriptions` actually has rows for those users.
+- **Function never called** — `app.push_hook_url` unset, or set in a session that
+  has since closed. Verify with `select current_setting('app.push_hook_url', true);`
+- **403 in the function logs** — `PUSH_HOOK_SECRET` and `app.push_hook_secret`
+  disagree.
+- **Subscription vanishes on its own** — expected. A 404/410 from the push
+  service means that device threw its subscription away, and the row is pruned so
+  it isn't retried forever. The device re-registers next time the app opens.
+
+## Notes
+
+- Signing out deletes this device's subscription, so the next person to sign in
+  on a shared phone doesn't inherit the last one's alerts.
+- Push endpoints rotate without warning, and a stale one fails silently — every
+  launch re-asserts the current endpoint (`syncPush()` in `src/app/_layout.tsx`).
+- Notifications are collapsed per conversation, so a busy thread replaces its own
+  notification rather than stacking twenty on the lock screen.
+- Delivery is entirely best-effort and deliberately kept off the scoring path.
+  Scores are offline-first and never depend on any of this — see
+  [offline.md](offline.md).

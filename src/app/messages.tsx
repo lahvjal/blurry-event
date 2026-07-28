@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FloatingNav } from '@/components/floating-nav';
+import { PushPrompt } from '@/components/push-controls';
 import { SearchField } from '@/components/search-field';
 import { Noise } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
@@ -64,6 +65,8 @@ export default function Messages() {
           onChangeText={setQuery}
           style={{ marginBottom: 8 }}
         />
+
+        {me.claimed ? <PushPrompt /> : null}
 
         {error ? <Text style={styles.notice}>{error}</Text> : null}
 

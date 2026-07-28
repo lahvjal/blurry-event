@@ -45,3 +45,6 @@ example
 # Local env (never commit real keys)
 .env
 .env.local
+
+# VAPID keypair for local push testing — never commit.
+.vapid.local.json

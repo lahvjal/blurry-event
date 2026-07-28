@@ -14,6 +14,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { colors } from '@/constants/theme';
 import { setupPwa } from '@/lib/offline/pwa';
+import { syncPush } from '@/lib/push';
 import { startSync } from '@/lib/sync';
 import { EventProvider } from '@/state/event';
 
@@ -38,6 +39,11 @@ export default function RootLayout() {
   // connectivity for the rest of the session.
   useEffect(() => startSync(), []);
   useEffect(() => setupPwa(), []);
+  // Push endpoints rotate without warning and a stale one fails silently, so
+  // an already-granted device re-asserts its current endpoint on every launch.
+  useEffect(() => {
+    void syncPush();
+  }, []);
 
   if (!loaded) {
     return null;

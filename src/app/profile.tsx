@@ -15,8 +15,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FloatingNav } from '@/components/floating-nav';
+import { PushToggleRow } from '@/components/push-controls';
 import { Badge, InfoRow, Noise, SectionLabel } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
+import { clearPushForSignOut } from '@/lib/push';
 import { supabase } from '@/lib/supabase';
 import { localAvatar, useEvent } from '@/state/event';
 import { GAME_STYLE_LABELS } from '@/state/types';
@@ -194,9 +196,14 @@ export default function Profile() {
           </View>
         ) : null}
 
+        <PushToggleRow />
+
         <Pressable
           style={styles.signOut}
           onPress={async () => {
+            // Drop this device's push registration first, so the next person to
+            // sign in on this phone doesn't inherit the last one's alerts.
+            await clearPushForSignOut();
             await supabase.auth.signOut();
             router.replace('/');
           }}>
