@@ -25,6 +25,10 @@ export function Noise({ opacity = 0.04 }: { opacity?: number }) {
         source={noise}
         resizeMode="repeat"
         style={[StyleSheet.absoluteFill, { opacity }]}
+        // Without this the tile layer takes the file's own dimensions, so the
+        // grain repeated across a small box and left the rest of a wide screen
+        // flat. Filling the layer lets it tile the whole surface.
+        imageStyle={styles.tile}
       />
     </View>
   );
@@ -195,6 +199,10 @@ export function ActionButton({
 }
 
 const styles = StyleSheet.create({
+  tile: {
+    width: '100%',
+    height: '100%',
+  },
   infoRow: {
     height: 48,
     flexDirection: 'row',

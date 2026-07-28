@@ -23,7 +23,15 @@ export function LoginShell({
   footer: React.ReactNode;
 }) {
   return (
-    <ImageBackground source={bg} style={styles.root} resizeMode="cover">
+    <ImageBackground
+      source={bg}
+      style={styles.root}
+      resizeMode="cover"
+      // react-native-web sizes the inner image layer to the file's intrinsic
+      // dimensions unless told otherwise, so `cover` was being applied inside a
+      // 736px-wide box: fine on a phone, but on a desktop window the artwork
+      // stopped dead partway across. Filling the layer makes cover mean cover.
+      imageStyle={styles.backgroundImage}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -111,6 +119,10 @@ export const loginStyles = StyleSheet.create({
 const styles = StyleSheet.create({
   root: {
     flex: 1,
+  },
+  backgroundImage: {
+    width: '100%',
+    height: '100%',
   },
   content: {
     flexGrow: 1,

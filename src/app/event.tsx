@@ -124,6 +124,9 @@ export default function EventHome() {
             source={clubBg}
             style={[StyleSheet.absoluteFill, { opacity: 0.45 }]}
             resizeMode="cover"
+            // Fills the inner layer so `cover` spans the hero on any width;
+            // otherwise it takes the file's own size and stops short.
+            imageStyle={styles.heroImage}
           />
           <View style={styles.heroTop}>
             <Image source={logoSmall} style={styles.heroLogo} contentFit="contain" />
@@ -312,6 +315,10 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
     gap: 10,
     overflow: 'hidden',
+  },
+  heroImage: {
+    width: '100%',
+    height: '100%',
   },
   heroTop: {
     flexDirection: 'row',
