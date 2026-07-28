@@ -89,11 +89,12 @@ function ensureThemeColor() {
  * reaches the true bottom of the screen. `!important` guarantees it wins
  * regardless of where it lands relative to expo-reset in the cascade.
  *
- * `body { position: fixed; inset: 0 }` stops a separate bug: focusing a text
- * input makes Safari pan the whole page up to keep it above the keyboard,
- * and that pan doesn't reliably undo itself once the keyboard closes,
- * leaving the app shell visibly offset. A fixed-position body has nothing
- * for Safari to pan.
+ * `body` only gets `overflow: hidden` here — an earlier version also pinned
+ * it to `position: fixed`, which was meant to stop Safari's keyboard-focus
+ * pan but instead fought with `interactive-widget=resizes-content` and left
+ * a gap under the floating nav (the fixed body's `inset: 0` box didn't track
+ * `dvh` the same way `#root` did). `resizes-content` now handles the
+ * keyboard at the root, so body just needs to stay non-scrollable.
  */
 function ensureBaseStyle() {
   if (document.getElementById('blurry-shell')) return;
@@ -109,8 +110,6 @@ function ensureBaseStyle() {
       touch-action: pan-x pan-y;
     }
     body {
-      position: fixed;
-      inset: 0;
       overflow: hidden;
       overscroll-behavior-y: none;
       -webkit-tap-highlight-color: transparent;

@@ -40,8 +40,6 @@ const HEAD = `
         touch-action: pan-x pan-y;
       }
       body {
-        position: fixed;
-        inset: 0;
         overflow: hidden;
         overscroll-behavior-y: none;
         -webkit-tap-highlight-color: transparent;
