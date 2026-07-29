@@ -33,6 +33,12 @@ export type MutationPayload =
       senderId: string;
       body: string;
       replyToId?: string | null;
+      media?: {
+        url: string;
+        mimeType: string;
+        width: number | null;
+        height: number | null;
+      } | null;
       clientId: string;
     }
   | {

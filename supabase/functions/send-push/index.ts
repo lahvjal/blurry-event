@@ -56,6 +56,9 @@ type Fanout = { recipients: string[]; payload: Payload } | null;
 const firstName = (full: string | null | undefined) =>
   (full ?? 'Someone').split(' ')[0];
 
+const mediaName = (mimeType: string | null | undefined) =>
+  mimeType === 'image/gif' ? 'GIF' : 'photo';
+
 // ---------------------------------------------------------------------------
 // Resolving each event type into recipients + copy
 // ---------------------------------------------------------------------------
@@ -63,7 +66,7 @@ const firstName = (full: string | null | undefined) =>
 async function forMessage(id: string): Promise<Fanout> {
   const { data: message } = await admin
     .from('messages')
-    .select('body, sender_id, conversation_id')
+    .select('body, sender_id, conversation_id, media_mime_type')
     .eq('id', id)
     .maybeSingle();
   if (!message) return null;
@@ -94,6 +97,9 @@ async function forMessage(id: string): Promise<Fanout> {
     .filter((uid): uid is string => Boolean(uid));
 
   const direct = conversation.kind === 'direct';
+  const messageBody =
+    message.body.trim() ||
+    `Sent a ${mediaName(message.media_mime_type)}`;
 
   let groupTitle = conversation.name?.trim();
   if (!direct && !groupTitle) {
@@ -111,7 +117,9 @@ async function forMessage(id: string): Promise<Fanout> {
     payload: {
       title: direct ? (sender?.full_name ?? 'New message') : groupTitle!,
       // In a group the sender needs naming; in a DM the title already does it.
-      body: direct ? message.body : `${firstName(sender?.full_name)}: ${message.body}`,
+      body: direct
+        ? messageBody
+        : `${firstName(sender?.full_name)}: ${messageBody}`,
       url: `/${direct ? 'direct-message' : 'group-conversation'}?id=${conversation.id}`,
       tag: `conversation-${conversation.id}`,
     },
@@ -125,7 +133,7 @@ async function forReaction(
 ): Promise<Fanout> {
   const { data: message } = await admin
     .from('messages')
-    .select('body, sender_id, conversation_id')
+    .select('body, sender_id, conversation_id, media_mime_type')
     .eq('id', messageId)
     .maybeSingle();
   if (!message || message.sender_id === participantId) return null;
@@ -172,6 +180,9 @@ async function forReaction(
   const trimmed = message.body.trim();
   const excerpt =
     trimmed.length > 72 ? `${trimmed.slice(0, 71)}…` : trimmed;
+  const reactionTarget = excerpt
+    ? `“${excerpt}”`
+    : `a ${mediaName(message.media_mime_type)}`;
   const reactorName = reactor?.full_name ?? 'Someone';
 
   return {
@@ -179,8 +190,8 @@ async function forReaction(
     payload: {
       title: direct ? reactorName : groupTitle!,
       body: direct
-        ? `${emoji} reacted to “${excerpt}”`
-        : `${firstName(reactorName)} reacted ${emoji} to “${excerpt}”`,
+        ? `${emoji} reacted to ${reactionTarget}`
+        : `${firstName(reactorName)} reacted ${emoji} to ${reactionTarget}`,
       url: `/${direct ? 'direct-message' : 'group-conversation'}?id=${conversation.id}`,
       tag: `conversation-${conversation.id}`,
     },

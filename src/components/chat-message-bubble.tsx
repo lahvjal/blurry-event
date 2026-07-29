@@ -1,5 +1,6 @@
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
+import { Image } from 'expo-image';
 import React from 'react';
 import {
   Alert,
@@ -134,7 +135,11 @@ export function ChatMessageBubble({
   }, [message.reactions, myParticipantId, participantNameById]);
   const canChangeMessage =
     !message.pending && !message.id.startsWith('local-');
-  const actionCount = canChangeMessage ? (mine ? 4 : 2) : 1;
+  const canEditMessage =
+    canChangeMessage && mine && message.body.trim().length > 0;
+  const actionCount = canChangeMessage
+    ? 2 + (mine ? 1 : 0) + (canEditMessage ? 1 : 0)
+    : 1;
   const actionMenuHeight = actionCount * ACTION_ROW_HEIGHT;
   const reactionDetailsHeight =
     REACTION_DETAILS_HEADER_HEIGHT +
@@ -152,6 +157,15 @@ export function ChatMessageBubble({
       : overlayMode === 'reactionDetails'
         ? reactionDetailsHeight
         : REACTION_MENU_HEIGHT;
+  const mediaLabel =
+    message.media?.mimeType === 'image/gif' ? 'GIF' : 'Photo';
+  const accessibleBody = message.body.trim() || mediaLabel;
+  const mediaWidth = Math.min(246, Math.max(180, windowWidth * 0.58));
+  const mediaAspect =
+    message.media?.width && message.media.height
+      ? message.media.width / message.media.height
+      : 1;
+  const mediaHeight = Math.min(310, Math.max(140, mediaWidth / mediaAspect));
 
   const reactedWith = React.useMemo(
     () =>
@@ -308,7 +322,7 @@ export function ChatMessageBubble({
         <Pressable
           ref={bubbleRef}
           accessibilityRole="button"
-          accessibilityLabel={`${message.body}. Sent at ${formatMessageTime(
+          accessibilityLabel={`${accessibleBody}. Sent at ${formatMessageTime(
             message.createdAt,
           )}`}
           accessibilityHint="Double tap to react. Press and hold for message actions."
@@ -344,15 +358,38 @@ export function ChatMessageBubble({
                 selectable={false}
                 numberOfLines={2}
                 style={styles.replyPreviewBody}>
-                {replyToMessage?.body ?? 'Message no longer available'}
+                {replyToMessage?.body.trim() ||
+                  (replyToMessage?.media
+                    ? replyToMessage.media.mimeType === 'image/gif'
+                      ? 'GIF'
+                      : 'Photo'
+                    : 'Message no longer available')}
               </Text>
             </View>
           ) : null}
-          <Text
-            selectable={false}
-            style={[styles.bubbleText, mine && styles.textMine]}>
-            {message.body}
-          </Text>
+          {message.media ? (
+            <Image
+              accessibilityLabel={mediaLabel}
+              source={{ uri: message.media.url }}
+              style={[
+                styles.messageMedia,
+                { width: mediaWidth, height: mediaHeight },
+              ]}
+              contentFit="cover"
+              transition={120}
+            />
+          ) : null}
+          {message.body ? (
+            <Text
+              selectable={false}
+              style={[
+                styles.bubbleText,
+                mine && styles.textMine,
+                message.media && styles.mediaCaption,
+              ]}>
+              {message.body}
+            </Text>
+          ) : null}
           <Text
             selectable={false}
             style={[styles.timestamp, mine && styles.timestampMine]}>
@@ -482,9 +519,12 @@ export function ChatMessageBubble({
                     <MessageAction
                       label="UNSEND"
                       destructive
+                      last={!canEditMessage}
                       onPress={confirmUnsend}
                     />
-                    <MessageAction label="EDIT" onPress={chooseEdit} last />
+                    {canEditMessage ? (
+                      <MessageAction label="EDIT" onPress={chooseEdit} last />
+                    ) : null}
                   </>
                 ) : null}
               </Pressable>
@@ -700,6 +740,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     color: '#ffffff',
+  },
+  messageMedia: {
+    maxWidth: '100%',
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  mediaCaption: {
+    marginTop: 9,
   },
   textMine: {
     textAlign: 'right',

@@ -1,5 +1,5 @@
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useRefreshOnPull } from '@/components/pull-to-refresh';
 import {
@@ -19,6 +19,7 @@ import { supabase } from '@/lib/supabase';
 import { useEvent } from '@/state/event';
 import {
   ChatMessage,
+  ChatMessageMediaDraft,
   ChatMessageReaction,
   Conversation,
   ConversationSummary,
@@ -125,7 +126,10 @@ export function useConversation(conversationId: string | null) {
   const { me } = useEvent();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [hasOlder, setHasOlder] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const loadingOlderRef = useRef(false);
 
   const reload = useCallback(async () => {
     if (!conversationId) {
@@ -134,7 +138,9 @@ export function useConversation(conversationId: string | null) {
       return;
     }
     try {
-      setMessages(await fetchMessages(conversationId));
+      const page = await fetchMessages(conversationId);
+      setMessages(page.messages);
+      setHasOlder(page.hasOlder);
       setError(null);
     } catch (caught) {
       setError(errorText(caught));
@@ -145,6 +151,8 @@ export function useConversation(conversationId: string | null) {
 
   useEffect(() => {
     setLoading(true);
+    setMessages([]);
+    setHasOlder(false);
     void reload();
   }, [reload]);
   useRefreshOnPull(reload);
@@ -152,11 +160,20 @@ export function useConversation(conversationId: string | null) {
   useEffect(() => {
     if (!conversationId) return;
     return subscribeToMessages(conversationId, (change) =>
-      setMessages((prev) =>
-        change.event === 'DELETE'
-          ? prev.filter((message) => message.id !== change.messageId)
-          : mergeMessage(prev, change.message),
-      ),
+      setMessages((prev) => {
+        if (change.event === 'DELETE') {
+          return prev.filter((message) => message.id !== change.messageId);
+        }
+        // An edit to an unloaded historical message should not pull that one
+        // row into the recent window without its surrounding page.
+        if (
+          change.event === 'UPDATE' &&
+          !prev.some((message) => message.id === change.messageId)
+        ) {
+          return prev;
+        }
+        return mergeMessage(prev, change.message);
+      }),
     );
   }, [conversationId]);
 
@@ -192,21 +209,56 @@ export function useConversation(conversationId: string | null) {
     reactionCount,
   ]);
 
+  const loadOlder = useCallback(async () => {
+    const oldest = messages[0];
+    if (
+      !conversationId ||
+      !oldest ||
+      !hasOlder ||
+      loadingOlderRef.current
+    ) {
+      return;
+    }
+
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    try {
+      const page = await fetchMessages(conversationId, {
+        createdAt: oldest.createdAt,
+      });
+      setMessages((current) => mergeMessagePages(page.messages, current));
+      setHasOlder(page.hasOlder);
+      setError(null);
+    } catch (caught) {
+      setError(errorText(caught));
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }, [conversationId, hasOlder, messages]);
+
   const send = useCallback(
-    async (body: string, replyToId?: string | null) => {
+    async (
+      body: string,
+      replyToId?: string | null,
+      attachment?: ChatMessageMediaDraft | null,
+    ): Promise<boolean> => {
       const text = body.trim();
-      if (!conversationId || !text) return;
+      if (!conversationId || (!text && !attachment)) return false;
       try {
         const sent = await sendMessage({
           conversationId,
           senderId: me.id,
           body: text,
           replyToId: replyToId ?? null,
+          attachment: attachment ?? null,
         });
         setMessages((prev) => mergeMessage(prev, sent));
         setError(null);
+        return true;
       } catch (caught) {
         setError(errorText(caught));
+        return false;
       }
     },
     [conversationId, me.id],
@@ -322,7 +374,19 @@ export function useConversation(conversationId: string | null) {
     [me.id, messages, reload],
   );
 
-  return { messages, loading, error, send, react, edit, unsend, reload };
+  return {
+    messages,
+    loading,
+    loadingOlder,
+    hasOlder,
+    error,
+    send,
+    react,
+    edit,
+    unsend,
+    loadOlder,
+    reload,
+  };
 }
 
 /**
@@ -343,6 +407,17 @@ function mergeMessage(list: ChatMessage[], incoming: ChatMessage): ChatMessage[]
     return next;
   }
   return [...list, incoming].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+function mergeMessagePages(
+  older: ChatMessage[],
+  current: ChatMessage[],
+): ChatMessage[] {
+  const known = new Set(current.map((message) => message.clientId));
+  return [
+    ...older.filter((message) => !known.has(message.clientId)),
+    ...current,
+  ].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
 function mergeReaction(

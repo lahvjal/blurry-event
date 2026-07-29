@@ -117,6 +117,25 @@ select * from (values
        and pg_get_function_result(p.oid) like '%last_reactor_id%'
    )),
 
+  ('0020  message media columns present',
+   (select count(*) from col
+     where table_name='messages'
+       and column_name in ('media_url','media_mime_type','media_width','media_height')) = 4),
+
+  ('0020  message-media storage bucket',
+   exists (select 1 from storage.buckets where id='message-media')),
+
+  ('0020  media fields in conversation summaries',
+   exists (
+     select 1
+     from pg_proc p
+     join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname='public'
+       and p.proname='conversation_summaries'
+       and pg_get_function_result(p.oid) like '%last_message_media_mime_type%'
+       and pg_get_function_result(p.oid) like '%last_reaction_message_media_mime_type%'
+   )),
+
   ('RLS   enabled on every public table',
    not exists (select 1 from pg_tables
      where schemaname='public' and rowsecurity = false)),

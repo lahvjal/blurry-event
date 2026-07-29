@@ -1,7 +1,14 @@
+import {
+  ImageManipulator,
+  SaveFormat,
+} from 'expo-image-manipulator';
+
 import { isPermanentError, supabase } from '@/lib/supabase';
 import { enqueue } from '@/lib/sync';
 import {
   ChatMessage,
+  ChatMessageMedia,
+  ChatMessageMediaDraft,
   ChatMessageReaction,
   Conversation,
   ConversationKind,
@@ -15,8 +22,12 @@ import {
  * functions — see supabase/migrations/0007_messaging.sql.
  */
 
-/** How many messages a thread loads. Older ones aren't paged in yet. */
-const MESSAGE_PAGE = 200;
+/** Small first paint; older messages arrive in the same-sized cursor pages. */
+const MESSAGE_PAGE = 40;
+const MAX_MESSAGE_MEDIA_BYTES = 15 * 1024 * 1024;
+const MAX_SOURCE_PHOTO_BYTES = 40 * 1024 * 1024;
+const MAX_PHOTO_EDGE = 2048;
+const PHOTO_COMPRESSION = 0.78;
 
 type SummaryRow = {
   id: string;
@@ -27,11 +38,13 @@ type SummaryRow = {
   last_message_body: string | null;
   last_message_at: string | null;
   last_sender_id: string | null;
+  last_message_media_mime_type?: string | null;
   last_activity_at?: string | null;
   last_activity_kind?: 'message' | 'reaction' | null;
   last_reaction_emoji?: string | null;
   last_reactor_id?: string | null;
   last_reaction_message_body?: string | null;
+  last_reaction_message_media_mime_type?: string | null;
   unread_count: number;
 };
 
@@ -44,6 +57,10 @@ type MessageRow = {
   client_id: string;
   created_at: string;
   edited_at?: string | null;
+  media_url?: string | null;
+  media_mime_type?: string | null;
+  media_width?: number | null;
+  media_height?: number | null;
   message_reactions?: ReactionRow[] | null;
 };
 
@@ -51,6 +68,15 @@ type ReactionRow = {
   message_id?: string;
   participant_id: string;
   emoji: string;
+};
+
+export type MessageCursor = {
+  createdAt: string;
+};
+
+export type MessagePage = {
+  messages: ChatMessage[];
+  hasOlder: boolean;
 };
 
 /**
@@ -81,6 +107,15 @@ function toMessage(row: MessageRow): ChatMessage {
     clientId: row.client_id,
     createdAt: row.created_at,
     editedAt: row.edited_at ?? null,
+    media:
+      row.media_url && row.media_mime_type
+        ? {
+            url: row.media_url,
+            mimeType: row.media_mime_type,
+            width: row.media_width ?? null,
+            height: row.media_height ?? null,
+          }
+        : null,
     reactions: (row.message_reactions ?? []).map((reaction) => ({
       participantId: reaction.participant_id,
       emoji: reaction.emoji,
@@ -101,6 +136,7 @@ export async function fetchConversationSummaries(): Promise<ConversationSummary[
     lastMessageBody: row.last_message_body,
     lastMessageAt: row.last_message_at,
     lastSenderId: row.last_sender_id,
+    lastMessageMediaMimeType: row.last_message_media_mime_type ?? null,
     // These fields arrive with migration 0019. Falling back to the newest
     // message keeps the inbox usable while the app and database roll out.
     lastActivityAt: row.last_activity_at ?? row.last_message_at,
@@ -110,6 +146,8 @@ export async function fetchConversationSummaries(): Promise<ConversationSummary[
     lastReactionEmoji: row.last_reaction_emoji ?? null,
     lastReactorId: row.last_reactor_id ?? null,
     lastReactionMessageBody: row.last_reaction_message_body ?? null,
+    lastReactionMessageMediaMimeType:
+      row.last_reaction_message_media_mime_type ?? null,
     unreadCount: row.unread_count ?? 0,
   }));
 }
@@ -142,49 +180,52 @@ export async function fetchConversation(id: string): Promise<Conversation | null
   };
 }
 
-/** Oldest first, so the thread renders top to bottom. */
-export async function fetchMessages(conversationId: string): Promise<ChatMessage[]> {
+/** Newest page first from Postgres, returned oldest-first for the thread. */
+export async function fetchMessages(
+  conversationId: string,
+  before?: MessageCursor,
+): Promise<MessagePage> {
   // Newest-first with a limit uses the (conversation_id, created_at desc)
-  // index and keeps the most recent page; flip it for display.
-  const query = (selection: string) =>
-    supabase
+  // index and keeps the most recent page. A timestamp cursor avoids offset
+  // drift when new messages arrive while someone is reading older history.
+  const query = (selection: string) => {
+    let request = supabase
       .from('messages')
       .select(selection)
       .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: false })
-      .limit(MESSAGE_PAGE);
+      .order('created_at', { ascending: false });
+    if (before) request = request.lt('created_at', before.createdAt);
+    return request.limit(MESSAGE_PAGE + 1);
+  };
 
-  let { data, error } = await query(
+  const selections = [
+    'id, conversation_id, sender_id, body, reply_to_id, client_id, created_at, edited_at, media_url, media_mime_type, media_width, media_height, message_reactions(participant_id, emoji)',
     'id, conversation_id, sender_id, body, reply_to_id, client_id, created_at, edited_at, message_reactions(participant_id, emoji)',
-  );
+    'id, conversation_id, sender_id, body, client_id, created_at, message_reactions(participant_id, emoji)',
+    'id, conversation_id, sender_id, body, client_id, created_at',
+  ];
 
-  // Keep chat readable during the short rollout window before the new message
-  // action columns reach Supabase. Reply/edit metadata simply remains empty.
-  if (
-    error?.code === 'PGRST200' ||
-    error?.code === 'PGRST204' ||
-    error?.code === 'PGRST205' ||
-    error?.code === '42703'
-  ) {
-    ({ data, error } = await query(
-      'id, conversation_id, sender_id, body, client_id, created_at, message_reactions(participant_id, emoji)',
-    ));
-  }
-
-  // The same fallback keeps the thread usable before reactions are migrated.
-  if (
-    error?.code === 'PGRST200' ||
-    error?.code === 'PGRST204' ||
-    error?.code === 'PGRST205' ||
-    error?.code === '42703'
-  ) {
-    ({ data, error } = await query(
-      'id, conversation_id, sender_id, body, client_id, created_at',
-    ));
+  let data: unknown[] | null = null;
+  let error: { code?: string; message?: string } | null = null;
+  for (const selection of selections) {
+    ({ data, error } = await query(selection));
+    if (!error) break;
+    if (
+      error.code !== 'PGRST200' &&
+      error.code !== 'PGRST204' &&
+      error.code !== 'PGRST205' &&
+      error.code !== '42703'
+    ) {
+      break;
+    }
   }
 
   if (error) throw error;
-  return ((data ?? []) as unknown as MessageRow[]).map(toMessage).reverse();
+  const rows = (data ?? []) as unknown as MessageRow[];
+  return {
+    messages: rows.slice(0, MESSAGE_PAGE).map(toMessage).reverse(),
+    hasOlder: rows.length > MESSAGE_PAGE,
+  };
 }
 
 /**
@@ -201,8 +242,12 @@ export async function sendMessage(params: {
   senderId: string;
   body: string;
   replyToId?: string | null;
+  attachment?: ChatMessageMediaDraft | null;
 }): Promise<ChatMessage> {
   const clientId = newClientId();
+  const media = params.attachment
+    ? await uploadMessageMedia(params.conversationId, params.attachment)
+    : null;
   const optimistic: ChatMessage = {
     id: `local-${clientId}`,
     conversationId: params.conversationId,
@@ -212,6 +257,7 @@ export async function sendMessage(params: {
     clientId,
     createdAt: new Date().toISOString(),
     editedAt: null,
+    media,
     reactions: [],
     pending: true,
   };
@@ -222,6 +268,14 @@ export async function sendMessage(params: {
     body: params.body,
     client_id: clientId,
     ...(params.replyToId ? { reply_to_id: params.replyToId } : {}),
+    ...(media
+      ? {
+          media_url: media.url,
+          media_mime_type: media.mimeType,
+          media_width: media.width,
+          media_height: media.height,
+        }
+      : {}),
   });
 
   // A duplicate client_id means this exact message already landed.
@@ -237,10 +291,124 @@ export async function sendMessage(params: {
     senderId: params.senderId,
     body: params.body,
     replyToId: params.replyToId ?? null,
+    media,
     clientId,
   });
 
   return optimistic;
+}
+
+function mediaMimeType(draft: ChatMessageMediaDraft): string {
+  if (draft.mimeType?.startsWith('image/')) return draft.mimeType.toLowerCase();
+  const extension = draft.fileName?.split('.').pop()?.toLowerCase();
+  if (extension === 'gif') return 'image/gif';
+  if (extension === 'png') return 'image/png';
+  if (extension === 'webp') return 'image/webp';
+  if (extension === 'avif') return 'image/avif';
+  if (extension === 'heic') return 'image/heic';
+  if (extension === 'heif') return 'image/heif';
+  return 'image/jpeg';
+}
+
+type PreparedMessageMedia = {
+  bytes: ArrayBuffer;
+  mimeType: string;
+  extension: string;
+  width: number | null;
+  height: number | null;
+};
+
+async function readMediaBytes(uri: string): Promise<ArrayBuffer> {
+  const response = await fetch(uri);
+  if (!response.ok) throw new Error('Could not read that image.');
+  return response.arrayBuffer();
+}
+
+/**
+ * Resizes photos before encoding them as WebP. Animated GIFs are deliberately
+ * kept intact: image re-encoders flatten them to one frame, so their safety
+ * control is the upload cap rather than destructive recompression.
+ */
+async function prepareMessageMedia(
+  draft: ChatMessageMediaDraft,
+): Promise<PreparedMessageMedia> {
+  const mimeType = mediaMimeType(draft);
+  const sourceBytes = await readMediaBytes(draft.uri);
+
+  if (mimeType === 'image/gif') {
+    if (sourceBytes.byteLength > MAX_MESSAGE_MEDIA_BYTES) {
+      throw new Error('Choose a GIF smaller than 15 MB.');
+    }
+    return {
+      bytes: sourceBytes,
+      mimeType,
+      extension: 'gif',
+      width: draft.width || null,
+      height: draft.height || null,
+    };
+  }
+
+  if (sourceBytes.byteLength > MAX_SOURCE_PHOTO_BYTES) {
+    throw new Error('Choose a photo smaller than 40 MB.');
+  }
+
+  const context = ImageManipulator.manipulate(draft.uri);
+  const largestEdge = Math.max(draft.width, draft.height);
+  if (largestEdge > MAX_PHOTO_EDGE) {
+    if (draft.width >= draft.height) {
+      context.resize({ width: MAX_PHOTO_EDGE, height: null });
+    } else {
+      context.resize({ width: null, height: MAX_PHOTO_EDGE });
+    }
+  }
+
+  const rendered = await context.renderAsync();
+  const result = await rendered.saveAsync({
+    compress: PHOTO_COMPRESSION,
+    format: SaveFormat.WEBP,
+  });
+  const compressedBytes = await readMediaBytes(result.uri);
+  if (compressedBytes.byteLength > MAX_MESSAGE_MEDIA_BYTES) {
+    throw new Error('That photo is still larger than 15 MB after compression.');
+  }
+
+  return {
+    bytes: compressedBytes,
+    mimeType: 'image/webp',
+    extension: 'webp',
+    width: result.width || null,
+    height: result.height || null,
+  };
+}
+
+/** Compresses and uploads one selected photo/GIF before inserting its message. */
+async function uploadMessageMedia(
+  conversationId: string,
+  draft: ChatMessageMediaDraft,
+): Promise<ChatMessageMedia> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const userId = sessionData.session?.user.id;
+  if (!userId) throw new Error('Sign in again to share an image.');
+
+  const prepared = await prepareMessageMedia(draft);
+  const path =
+    `${userId}/${conversationId}/${newClientId()}.${prepared.extension}`;
+  const { error } = await supabase.storage
+    .from('message-media')
+    .upload(path, prepared.bytes, {
+      cacheControl: '31536000',
+      contentType: prepared.mimeType,
+      upsert: false,
+    });
+  if (error) throw error;
+
+  const { data } = supabase.storage.from('message-media').getPublicUrl(path);
+  return {
+    url: data.publicUrl,
+    mimeType: prepared.mimeType,
+    width: prepared.width,
+    height: prepared.height,
+  };
 }
 
 /** Changes one of the caller's own messages. The database trigger records the

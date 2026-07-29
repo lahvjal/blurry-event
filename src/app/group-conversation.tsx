@@ -2,7 +2,10 @@ import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Platform,
   Pressable,
   ScrollView,
@@ -39,6 +42,7 @@ import {
   useConversationDetail,
 } from '@/state/chat';
 import { useEvent } from '@/state/event';
+import { ChatMessageMediaDraft } from '@/state/types';
 
 const backArrow = require('@/assets/figma/back-arrow.svg');
 const moreDots = require('@/assets/figma/more-dots.svg');
@@ -76,8 +80,18 @@ export default function GroupConversation() {
   const conversationId = params.id ?? null;
 
   const { conversation } = useConversationDetail(conversationId);
-  const { messages, loading, error, send, react, edit, unsend } =
-    useConversation(conversationId);
+  const {
+    messages,
+    loading,
+    loadingOlder,
+    hasOlder,
+    error,
+    send,
+    react,
+    edit,
+    unsend,
+    loadOlder,
+  } = useConversation(conversationId);
   const [composerContext, setComposerContext] =
     React.useState<MessageComposerContext | null>(null);
 
@@ -88,6 +102,7 @@ export default function GroupConversation() {
 
   const scroller = React.useRef<ScrollView>(null);
   const lastAutoScrolledMessage = React.useRef<string | null>(null);
+  const nearBottom = React.useRef(true);
   const [composerHeight, setComposerHeight] = React.useState(
     DEFAULT_MESSAGE_COMPOSER_HEIGHT,
   );
@@ -95,18 +110,25 @@ export default function GroupConversation() {
   const messageById = new Map(messages.map((message) => [message.id, message]));
   const newestMessageClientId = messages[messages.length - 1]?.clientId ?? null;
 
-  const handleSend = async (text: string) => {
+  const handleSend = async (
+    text: string,
+    attachment: ChatMessageMediaDraft | null,
+  ): Promise<boolean> => {
     if (composerContext?.kind === 'edit') {
       await edit(composerContext.messageId, text);
+      setComposerContext(null);
+      return true;
     } else {
-      await send(
+      const sent = await send(
         text,
         composerContext?.kind === 'reply'
           ? composerContext.messageId
           : null,
+        attachment,
       );
+      if (sent) setComposerContext(null);
+      return sent;
     }
-    setComposerContext(null);
   };
 
   const handleContentSizeChange = () => {
@@ -117,7 +139,20 @@ export default function GroupConversation() {
       return;
     }
     lastAutoScrolledMessage.current = newestMessageClientId;
-    scroller.current?.scrollToEnd({ animated: false });
+    if (nearBottom.current) {
+      scroller.current?.scrollToEnd({ animated: false });
+    }
+  };
+
+  const handleScroll = (
+    event: NativeSyntheticEvent<NativeScrollEvent>,
+  ) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    nearBottom.current =
+      contentSize.height - (contentOffset.y + layoutMeasurement.height) < 120;
+    if (contentOffset.y <= 120 && hasOlder && !loadingOlder) {
+      void loadOlder();
+    }
   };
 
   const openSettings = () => {
@@ -189,8 +224,18 @@ export default function GroupConversation() {
             gap: 8,
           }}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+          onScroll={handleScroll}
+          scrollEventThrottle={80}
           onContentSizeChange={handleContentSizeChange}>
           {error ? <Text style={styles.notice}>{error}</Text> : null}
+          {loadingOlder ? (
+            <View style={styles.olderLoader}>
+              <ActivityIndicator size="small" color={colors.highlight} />
+              <Text style={styles.olderLoaderLabel}>LOADING EARLIER MESSAGES</Text>
+            </View>
+          ) : null}
 
           {runs.map((run) => {
             const mine = run.senderId === me.id;
@@ -227,7 +272,11 @@ export default function GroupConversation() {
                           setComposerContext({
                             kind: 'reply',
                             messageId: message.id,
-                            body: message.body,
+                            body:
+                              message.body ||
+                              (message.media?.mimeType === 'image/gif'
+                                ? 'GIF'
+                                : 'Photo'),
                           })
                         }
                         onEdit={() =>
@@ -362,5 +411,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingTop: 12,
     lineHeight: 19,
+  },
+  olderLoader: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  olderLoaderLabel: {
+    fontFamily: fonts.bold,
+    fontSize: 8,
+    letterSpacing: 0.7,
+    color: 'rgba(255,255,255,0.42)',
   },
 });

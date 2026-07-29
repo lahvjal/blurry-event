@@ -1,6 +1,17 @@
+import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
 import React, { useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Keyboard,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
@@ -14,6 +25,7 @@ import {
   LiquidGlassSurface,
 } from '@/components/liquid-glass';
 import { fonts } from '@/constants/theme';
+import { ChatMessageMediaDraft } from '@/state/types';
 
 const composerPlus = require('@/assets/figma/composer-plus.svg');
 const sendActive = require('@/assets/figma/send-active.svg');
@@ -27,6 +39,8 @@ const INPUT_ACTION_GAP = 20;
 const MIN_INPUT_HEIGHT = 16;
 const MAX_INPUT_HEIGHT = 64;
 const CONTEXT_HEIGHT = 48;
+const ATTACHMENT_SECTION_HEIGHT = 100;
+const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
 const BAR_FIXED_HEIGHT =
   BAR_PADDING * 2 + INPUT_TOP_INSET + INPUT_ACTION_GAP + ACTION_HEIGHT;
 
@@ -51,7 +65,10 @@ export function MessageComposer({
   context,
   onCancelContext,
 }: {
-  onSend?: (text: string) => void | Promise<void>;
+  onSend?: (
+    text: string,
+    attachment: ChatMessageMediaDraft | null,
+  ) => boolean | void | Promise<boolean | void>;
   onHeightChange?: (height: number) => void;
   context?: MessageComposerContext | null;
   onCancelContext?: () => void;
@@ -59,13 +76,20 @@ export function MessageComposer({
   const insets = useSafeAreaInsets();
   const [text, setText] = useState('');
   const [inputHeight, setInputHeight] = useState(MIN_INPUT_HEIGHT);
-  const hasText = text.trim().length > 0;
+  const [attachment, setAttachment] =
+    useState<ChatMessageMediaDraft | null>(null);
+  const [sending, setSending] = useState(false);
+  const hasContent = text.trim().length > 0 || attachment !== null;
   const inputRef = useRef<TextInput>(null);
+  const sendingRef = useRef(false);
   const bottomInset = Math.max(16, insets.bottom + 6);
   // Fixed space around the measured text: panel padding, the 8px text inset,
   // the 20px action gap, and the 40px action row.
   const barHeight =
-    BAR_FIXED_HEIGHT + inputHeight + (context ? CONTEXT_HEIGHT : 0);
+    BAR_FIXED_HEIGHT +
+    inputHeight +
+    (context ? CONTEXT_HEIGHT : 0) +
+    (attachment ? ATTACHMENT_SECTION_HEIGHT : 0);
   const composerHeight = BAR_TOP_INSET + barHeight + bottomInset;
   const scrimHeight = composerHeight + FLOATING_SCRIM_RISE;
 
@@ -78,15 +102,87 @@ export function MessageComposer({
   }, [context?.kind, context?.messageId]);
 
   const send = async () => {
-    if (!hasText) return;
-    await onSend?.(text.trim());
-    setText('');
+    if (!hasContent || sendingRef.current) return;
+    sendingRef.current = true;
+    Keyboard.dismiss();
+    setSending(true);
+    try {
+      const accepted = await onSend?.(text.trim(), attachment);
+      if (accepted === false) return;
+      setText('');
+      setAttachment(null);
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
+    }
   };
 
   const cancelContext = () => {
     if (context?.kind === 'edit') setText('');
     onCancelContext?.();
   };
+
+  const pickMedia = async () => {
+    if (context?.kind === 'edit' || sending) return;
+    try {
+      if (Platform.OS !== 'web') {
+        const permission =
+          await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!permission.granted) {
+          Alert.alert(
+            'Photo access needed',
+            'Allow photo access in Settings to share photos and GIFs.',
+          );
+          return;
+        }
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 1,
+        preferredAssetRepresentationMode:
+          ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+      });
+      if (result.canceled || !result.assets[0]) return;
+
+      const asset = result.assets[0];
+      const gif =
+        asset.mimeType?.toLowerCase() === 'image/gif' ||
+        asset.fileName?.toLowerCase().endsWith('.gif');
+      const selectionLimit = gif
+        ? MAX_ATTACHMENT_BYTES
+        : 40 * 1024 * 1024;
+      if (asset.fileSize !== undefined && asset.fileSize > selectionLimit) {
+        Alert.alert(
+          'Image too large',
+          gif
+            ? 'Choose a GIF smaller than 15 MB.'
+            : 'Choose a photo smaller than 40 MB.',
+        );
+        return;
+      }
+
+      setAttachment({
+        uri: asset.uri,
+        mimeType: asset.mimeType ?? null,
+        width: asset.width,
+        height: asset.height,
+        fileName: asset.fileName ?? null,
+        fileSize: asset.fileSize ?? null,
+      });
+    } catch (caught) {
+      Alert.alert(
+        'Could not add image',
+        (caught as { message?: string })?.message ??
+          'Try choosing that photo or GIF again.',
+      );
+    }
+  };
+
+  const attachmentIsGif =
+    attachment?.mimeType?.toLowerCase() === 'image/gif' ||
+    attachment?.fileName?.toLowerCase().endsWith('.gif');
 
   return (
     <View
@@ -145,6 +241,33 @@ export function MessageComposer({
               </View>
             ) : null}
 
+            {attachment ? (
+              <View style={styles.attachmentRow}>
+                <Image
+                  source={{ uri: attachment.uri }}
+                  style={styles.attachmentPreview}
+                  contentFit="cover"
+                />
+                <View style={styles.attachmentCopy}>
+                  <Text style={styles.attachmentLabel}>
+                    {attachmentIsGif ? 'GIF' : 'PHOTO'}
+                  </Text>
+                  <Text style={styles.attachmentReady}>READY TO SEND</Text>
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Remove attachment"
+                  hitSlop={8}
+                  onPress={(event) => {
+                    event.stopPropagation();
+                    setAttachment(null);
+                  }}
+                  style={styles.attachmentRemove}>
+                  <Text style={styles.attachmentRemoveLabel}>×</Text>
+                </Pressable>
+              </View>
+            ) : null}
+
             <View
               style={[
                 styles.inputRow,
@@ -178,9 +301,19 @@ export function MessageComposer({
 
             <View style={styles.actions}>
               <Pressable
-                accessibilityLabel="Add attachment"
+                accessibilityRole="button"
+                accessibilityLabel="Add photo or GIF"
+                disabled={context?.kind === 'edit' || sending}
+                onPress={(event) => {
+                  event.stopPropagation();
+                  void pickMedia();
+                }}
                 hitSlop={8}
-                style={({ pressed }) => pressed && styles.pressed}>
+                style={({ pressed }) => [
+                  pressed && styles.pressed,
+                  (context?.kind === 'edit' || sending) &&
+                    styles.actionDisabled,
+                ]}>
                 <Image
                   source={composerPlus}
                   style={styles.actionIcon}
@@ -189,16 +322,38 @@ export function MessageComposer({
               </Pressable>
 
               <Pressable
+                accessibilityRole="button"
                 accessibilityLabel="Send message"
-                disabled={!hasText}
-                onPress={() => void send()}
+                disabled={!hasContent || sending}
+                onPressIn={(event) => {
+                  if (Platform.OS !== 'web') return;
+                  // Mobile browsers can resize the viewport as the text input
+                  // blurs, moving the button before the click finishes. Start
+                  // the send on pointer-down; sendingRef prevents the later
+                  // onPress callback from submitting it twice.
+                  event.stopPropagation();
+                  void send();
+                }}
+                onPress={(event) => {
+                  event.stopPropagation();
+                  void send();
+                }}
                 hitSlop={8}
-                style={({ pressed }) => pressed && styles.pressed}>
-                <Image
-                  source={sendActive}
-                  style={styles.actionIcon}
-                  contentFit="contain"
-                />
+                style={({ pressed }) => [
+                  pressed && styles.pressed,
+                  (!hasContent || sending) && styles.actionDisabled,
+                ]}>
+                {sending ? (
+                  <View style={styles.actionIcon}>
+                    <ActivityIndicator color="#7bffb2" />
+                  </View>
+                ) : (
+                  <Image
+                    source={sendActive}
+                    style={styles.actionIcon}
+                    contentFit="contain"
+                  />
+                )}
               </Pressable>
             </View>
             </LiquidGlassSurface>
@@ -278,6 +433,54 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     color: 'rgba(255,255,255,0.72)',
   },
+  attachmentRow: {
+    height: ATTACHMENT_SECTION_HEIGHT - 12,
+    marginBottom: 12,
+    padding: 8,
+    borderRadius: 14,
+    backgroundColor: 'rgba(19,23,21,0.7)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  attachmentPreview: {
+    width: 72,
+    height: 72,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  attachmentCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  attachmentLabel: {
+    fontFamily: fonts.bold,
+    fontSize: 10,
+    letterSpacing: 0.8,
+    color: '#ffffff',
+  },
+  attachmentReady: {
+    fontFamily: fonts.bold,
+    fontSize: 8,
+    letterSpacing: 0.5,
+    color: '#7bffb2',
+  },
+  attachmentRemove: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attachmentRemoveLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 20,
+    lineHeight: 22,
+    color: 'rgba(255,255,255,0.72)',
+  },
   input: {
     width: '100%',
     fontFamily: fonts.regular,
@@ -300,5 +503,8 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.72,
+  },
+  actionDisabled: {
+    opacity: 0.4,
   },
 });

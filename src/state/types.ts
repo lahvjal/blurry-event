@@ -106,18 +106,37 @@ export type ConversationSummary = Conversation & {
   lastMessageBody: string | null;
   lastMessageAt: string | null;
   lastSenderId: string | null;
+  lastMessageMediaMimeType: string | null;
   /** Newest message or reaction activity that is relevant to this member. */
   lastActivityAt: string | null;
   lastActivityKind: 'message' | 'reaction' | null;
   lastReactionEmoji: string | null;
   lastReactorId: string | null;
   lastReactionMessageBody: string | null;
+  lastReactionMessageMediaMimeType: string | null;
   unreadCount: number;
 };
 
 export type ChatMessageReaction = {
   participantId: string;
   emoji: string;
+};
+
+export type ChatMessageMedia = {
+  url: string;
+  mimeType: string;
+  width: number | null;
+  height: number | null;
+};
+
+/** Local picker result before it is uploaded and attached to a message. */
+export type ChatMessageMediaDraft = {
+  uri: string;
+  mimeType: string | null;
+  width: number;
+  height: number;
+  fileName: string | null;
+  fileSize: number | null;
 };
 
 export type ChatMessage = {
@@ -136,6 +155,7 @@ export type ChatMessage = {
   createdAt: string;
   /** Set by the server when the sender changes the message body. */
   editedAt: string | null;
+  media: ChatMessageMedia | null;
   reactions: ChatMessageReaction[];
   /** True while the send is still sitting in the offline queue. */
   pending?: boolean;

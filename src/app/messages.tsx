@@ -147,22 +147,35 @@ function previewOf(
       participantById(conversation.lastReactorId ?? '')?.fullName.split(' ')[0] ??
       'Someone';
     const message = conversation.lastReactionMessageBody?.trim();
+    const media =
+      conversation.lastReactionMessageMediaMimeType === 'image/gif'
+        ? 'GIF'
+        : conversation.lastReactionMessageMediaMimeType
+          ? 'photo'
+          : null;
     return `${reactor} reacted ${conversation.lastReactionEmoji}${
-      message ? ` to “${message}”` : ''
+      message ? ` to “${message}”` : media ? ` to a ${media}` : ''
     }`;
   }
 
-  if (!conversation.lastMessageBody) return 'No messages yet.';
-  if (conversation.kind === 'direct') return conversation.lastMessageBody;
+  const message =
+    conversation.lastMessageBody?.trim() ||
+    (conversation.lastMessageMediaMimeType === 'image/gif'
+      ? 'GIF'
+      : conversation.lastMessageMediaMimeType
+        ? 'Photo'
+        : null);
+  if (!message) return 'No messages yet.';
+  if (conversation.kind === 'direct') return message;
 
   const senderId = conversation.lastSenderId;
-  if (!senderId) return conversation.lastMessageBody;
+  if (!senderId) return message;
 
   const name =
     senderId === myId
       ? 'You'
       : (participantById(senderId)?.fullName.split(' ')[0] ?? 'Someone');
-  return `${name}: ${conversation.lastMessageBody}`;
+  return `${name}: ${message}`;
 }
 
 const styles = StyleSheet.create({
