@@ -55,7 +55,9 @@ export function FloatingNav() {
       <View
         style={[styles.wrapper, { paddingBottom: bottomInset }]}
         pointerEvents="box-none">
-        <LiquidGlassSurface style={styles.bar} tintColor="rgba(0,0,0,0.72)">
+        <LiquidGlassSurface
+          style={styles.bar}
+          tintColor="rgba(40,49,43,0.5)">
           <View style={styles.items}>
             {tabs.map((tab) => {
               const active = pathname === tab.route;
