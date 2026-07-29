@@ -5,6 +5,8 @@ import React from 'react';
 import {
   ImageBackground,
   Linking,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,6 +16,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FloatingNav } from '@/components/floating-nav';
+import {
+  HOME_HERO_TOP_OFFSET,
+  HomeHeader,
+} from '@/components/home-header';
 import { SyncStatusLine } from '@/components/sync-status';
 import {
   AvatarStack,
@@ -26,6 +32,7 @@ import {
 } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
 import { localAvatar, useEvent } from '@/state/event';
+import { useNotificationUnread } from '@/state/notification-center';
 import {
   GAME_STYLE_LABELS,
   formatToPar,
@@ -37,7 +44,6 @@ import {
 } from '@/state/types';
 
 const clubBg = require('@/assets/figma/club-card-bg.png');
-const logoSmall = require('@/assets/figma/logo-small.svg');
 const plusCircle = require('@/assets/figma/plus-circle.svg');
 
 function daysUntil(iso: string): number {
@@ -97,6 +103,23 @@ export default function EventHome() {
   const inProgress = holesPlayed > 0;
   const complete = holesPlayed === 18;
   const total = sumScores(myScores);
+  const [headerStuck, setHeaderStuck] = React.useState(false);
+  const announcementIds = React.useMemo(
+    () => announcements.map((announcement) => announcement.id),
+    [announcements],
+  );
+  const notificationUnread = useNotificationUnread(
+    `${event.id}.${me.id}`,
+    announcementIds,
+  );
+
+  const handleScroll = React.useCallback(
+    (scrollEvent: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const next = scrollEvent.nativeEvent.contentOffset.y > 12;
+      setHeaderStuck((current) => (current === next ? current : next));
+    },
+    [],
+  );
 
   const myRank = leaderboard.findIndex((row) => row.isMine) + 1;
   const myRow = leaderboard.find((row) => row.isMine);
@@ -117,9 +140,15 @@ export default function EventHome() {
       <Noise />
       <ScrollView
         contentContainerStyle={{ paddingBottom: 130 }}
-        showsVerticalScrollIndicator={false}>
+        showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
+        onScroll={handleScroll}>
         {/* Hero */}
-        <View style={[styles.hero, { paddingTop: insets.top + 16 }]}>
+        <View
+          style={[
+            styles.hero,
+            { paddingTop: insets.top + HOME_HERO_TOP_OFFSET },
+          ]}>
           <ImageBackground
             source={clubBg}
             style={[StyleSheet.absoluteFill, { opacity: 0.45 }]}
@@ -128,17 +157,24 @@ export default function EventHome() {
             // otherwise it takes the file's own size and stops short.
             imageStyle={styles.heroImage}
           />
-          <View style={styles.heroTop}>
-            <Image source={logoSmall} style={styles.heroLogo} contentFit="contain" />
-            <Badge label={complete ? 'ROUND COMPLETE' : inProgress ? 'ROUND LIVE' : 'REGISTERED'} />
-          </View>
           <Text style={styles.eventName}>{event.name}</Text>
           <Text style={styles.eventMeta}>
             {event.courseName} · {shortLocation(event)}
           </Text>
-          <Text style={styles.countdown}>
-            {days > 0 ? `${days} DAYS OUT` : days === 0 ? 'TODAY' : 'COMPLETED'}
-          </Text>
+          <View style={styles.heroFooter}>
+            <Text style={styles.countdown}>
+              {days > 0 ? `${days} DAYS OUT` : days === 0 ? 'TODAY' : 'COMPLETED'}
+            </Text>
+            <Badge
+              label={
+                complete
+                  ? 'ROUND COMPLETE'
+                  : inProgress
+                    ? 'ROUND LIVE'
+                    : 'REGISTERED'
+              }
+            />
+          </View>
         </View>
 
         <View style={styles.body}>
@@ -286,6 +322,11 @@ export default function EventHome() {
           ) : null}
         </View>
       </ScrollView>
+      <HomeHeader
+        stuck={headerStuck}
+        unread={notificationUnread}
+        onPressNotifications={() => router.push('/notifications')}
+      />
       <FloatingNav />
     </View>
   );
@@ -320,15 +361,10 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  heroTop: {
+  heroFooter: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  heroLogo: {
-    width: 38.9,
-    height: 38.2,
   },
   eventName: {
     fontFamily: fonts.serif,
@@ -346,7 +382,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: colors.highlight,
     letterSpacing: 1,
-    marginTop: 4,
   },
   body: {
     padding: 20,

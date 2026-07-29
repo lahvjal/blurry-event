@@ -7,6 +7,10 @@ import { colors } from '@/constants/theme';
 
 const NATIVE_GLASS = Platform.OS === 'ios' && isLiquidGlassAvailable();
 
+/** Shared treatment for the composer, floating nav, and sticky home header. */
+export const FLOATING_GLASS_TINT = 'rgba(40,49,43,0.5)';
+export const FLOATING_GLASS_BLUR_INTENSITY = 100;
+
 /**
  * Floating glass surface (nav bar, page header pill, composer). Uses the
  * real iOS 26 Liquid Glass (UIGlassEffect) where available, tinted to match

@@ -8,7 +8,11 @@ import {
   FLOATING_SCRIM_RISE,
   FloatingBackdrop,
 } from '@/components/floating-backdrop';
-import { LiquidGlassSurface } from '@/components/liquid-glass';
+import {
+  FLOATING_GLASS_BLUR_INTENSITY,
+  FLOATING_GLASS_TINT,
+  LiquidGlassSurface,
+} from '@/components/liquid-glass';
 import { fonts } from '@/constants/theme';
 import { useUnreadTotal } from '@/state/unread';
 
@@ -57,7 +61,9 @@ export function FloatingNav() {
         pointerEvents="box-none">
         <LiquidGlassSurface
           style={styles.bar}
-          tintColor="rgba(40,49,43,0.5)">
+          tintColor={FLOATING_GLASS_TINT}
+          blurIntensity={FLOATING_GLASS_BLUR_INTENSITY}
+          interactive>
           <View style={styles.items}>
             {tabs.map((tab) => {
               const active = pathname === tab.route;
