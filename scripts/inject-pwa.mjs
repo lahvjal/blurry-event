@@ -76,9 +76,10 @@ const HEAD = `
         -webkit-touch-callout: none;
       }
       /*
-       * Progressive blur behind the nav. Each layer blurs the same backdrop
-       * harder than the last and is masked to begin lower, so the blur
-       * deepens toward the bottom edge instead of switching on at one line.
+       * Progressive blur behind bottom-floating controls (the nav and message
+       * composer). Each layer blurs the same backdrop harder than the last
+       * and is masked to begin lower, so the blur deepens toward the bottom
+       * edge instead of switching on at one line.
        */
       [data-nav-scrim] { pointer-events: none; }
       [data-nav-scrim="1"] {

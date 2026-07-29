@@ -1,27 +1,56 @@
 import { Image } from 'expo-image';
 import React, { useRef, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import {
+  FLOATING_SCRIM_RISE,
+  FloatingBackdrop,
+} from '@/components/floating-backdrop';
 import { LiquidGlassSurface } from '@/components/liquid-glass';
-import { colors, fonts } from '@/constants/theme';
+import { fonts } from '@/constants/theme';
 
 const composerPlus = require('@/assets/figma/composer-plus.svg');
-const sendIdle = require('@/assets/figma/send-idle.svg');
 const sendActive = require('@/assets/figma/send-active.svg');
 
+const BAR_HORIZONTAL_INSET = 13;
+const BAR_TOP_INSET = 3;
+const BAR_PADDING = 12;
+const ACTION_HEIGHT = 40;
+const INPUT_TOP_INSET = 8;
+const INPUT_ACTION_GAP = 20;
+const MIN_INPUT_HEIGHT = 16;
+const MAX_INPUT_HEIGHT = 64;
+const BAR_FIXED_HEIGHT =
+  BAR_PADDING * 2 + INPUT_TOP_INSET + INPUT_ACTION_GAP + ACTION_HEIGHT;
+
+/** Single-line wrapper before a device safe-area adjustment. */
+export const DEFAULT_MESSAGE_COMPOSER_HEIGHT =
+  BAR_TOP_INSET + BAR_FIXED_HEIGHT + MIN_INPUT_HEIGHT + 16;
+
 /**
- * Navigation / Floating — "message input" variant: 32px plus button beside a
- * glass pill input. The send icon activates (green) once text is entered.
+ * Navigation / Floating — Figma's multi-line message-input variant. The whole
+ * composer is a glass panel with a text row above its two 40px actions, and it
+ * floats over the thread with the same progressive backdrop as the main nav.
  */
 export function MessageComposer({
   onSend,
+  onHeightChange,
 }: {
   onSend?: (text: string) => void;
+  onHeightChange?: (height: number) => void;
 }) {
+  const insets = useSafeAreaInsets();
   const [text, setText] = useState('');
-  const [multiline, setMultiline] = useState(false);
+  const [inputHeight, setInputHeight] = useState(MIN_INPUT_HEIGHT);
   const hasText = text.trim().length > 0;
   const inputRef = useRef<TextInput>(null);
+  const bottomInset = Math.max(16, insets.bottom + 6);
+  // Fixed space around the measured text: panel padding, the 8px text inset,
+  // the 20px action gap, and the 40px action row.
+  const barHeight = BAR_FIXED_HEIGHT + inputHeight;
+  const composerHeight = BAR_TOP_INSET + barHeight + bottomInset;
+  const scrimHeight = composerHeight + FLOATING_SCRIM_RISE;
 
   const send = () => {
     if (!hasText) return;
@@ -30,80 +59,138 @@ export function MessageComposer({
   };
 
   return (
-    <View style={styles.row}>
-      <Pressable>
-        <Image source={composerPlus} style={styles.plus} contentFit="contain" />
-      </Pressable>
-      {/* Tapping anywhere in the pill (not just the text itself) focuses the
-          input — its own box is narrower than the visual field. */}
-      <Pressable style={styles.pillHit} onPress={() => inputRef.current?.focus()}>
-        {/* Pill is fully rounded while single-line, relaxes to 20 when text wraps */}
-        <LiquidGlassSurface
-          style={[styles.pill, { borderRadius: multiline ? 20 : 999 }]}
-          interactive
-          dataSet={{ focusRing: 'true' }}>
-          <TextInput
-            ref={inputRef}
-            value={text}
-            onChangeText={setText}
-            placeholder="Message…"
-            placeholderTextColor={colors.textMuted}
-            style={styles.input}
-            dataSet={{ skipRing: 'true' }}
-            multiline
-            onContentSizeChange={(event) =>
-              setMultiline(event.nativeEvent.contentSize.height > 24)
-            }
-            onSubmitEditing={send}
-          />
-          <Pressable onPress={send} hitSlop={8}>
-            <Image
-              source={hasText ? sendActive : sendIdle}
-              style={styles.send}
-              contentFit="contain"
-            />
-          </Pressable>
-        </LiquidGlassSurface>
-      </Pressable>
+    <View
+      style={styles.host}
+      pointerEvents="box-none"
+      onLayout={() => onHeightChange?.(composerHeight)}>
+      <FloatingBackdrop height={scrimHeight} />
+
+      <View
+        style={[
+          styles.wrapper,
+          {
+            paddingBottom: bottomInset,
+            paddingHorizontal: BAR_HORIZONTAL_INSET,
+            paddingTop: BAR_TOP_INSET,
+          },
+        ]}
+        pointerEvents="box-none">
+        {/* The full glass panel focuses the input, matching the single large
+            hit target in the Figma component. */}
+        <Pressable
+          style={styles.barHit}
+          onPress={() => inputRef.current?.focus()}>
+          <LiquidGlassSurface
+            style={[styles.bar, { height: barHeight }]}
+            tintColor="rgba(40,49,43,0.5)"
+            blurIntensity={100}
+            interactive
+            dataSet={{ focusRing: 'true' }}>
+            <View
+              style={[
+                styles.inputRow,
+                { height: inputHeight + INPUT_TOP_INSET },
+              ]}>
+              <TextInput
+                ref={inputRef}
+                value={text}
+                onChangeText={setText}
+                placeholder="Add text..."
+                placeholderTextColor="#5b645b"
+                style={[styles.input, { height: inputHeight }]}
+                dataSet={{ skipRing: 'true' }}
+                multiline
+                scrollEnabled={inputHeight >= MAX_INPUT_HEIGHT}
+                textAlignVertical="top"
+                onContentSizeChange={(event) => {
+                  const nextHeight = Math.max(
+                    MIN_INPUT_HEIGHT,
+                    Math.min(
+                      MAX_INPUT_HEIGHT,
+                      event.nativeEvent.contentSize.height,
+                    ),
+                  );
+                  setInputHeight(nextHeight);
+                }}
+              />
+            </View>
+
+            <View style={styles.actions}>
+              <Pressable
+                accessibilityLabel="Add attachment"
+                hitSlop={8}
+                style={({ pressed }) => pressed && styles.pressed}>
+                <Image
+                  source={composerPlus}
+                  style={styles.actionIcon}
+                  contentFit="contain"
+                />
+              </Pressable>
+
+              <Pressable
+                accessibilityLabel="Send message"
+                disabled={!hasText}
+                onPress={send}
+                hitSlop={8}
+                style={({ pressed }) => pressed && styles.pressed}>
+                <Image
+                  source={sendActive}
+                  style={styles.actionIcon}
+                  contentFit="contain"
+                />
+              </Pressable>
+            </View>
+          </LiquidGlassSurface>
+        </Pressable>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 10,
-    paddingHorizontal: 13,
-    paddingTop: 3,
+  host: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 20,
   },
-  plus: {
-    width: 32,
-    height: 32,
+  wrapper: {
+    position: 'relative',
   },
-  pillHit: {
-    flex: 1,
+  barHit: {
+    width: '100%',
   },
-  pill: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    gap: 14,
-    padding: 8,
+  bar: {
+    width: '100%',
+    borderRadius: 20,
     overflow: 'hidden',
+    padding: BAR_PADDING,
+  },
+  inputRow: {
+    paddingTop: INPUT_TOP_INSET,
   },
   input: {
-    flex: 1,
+    width: '100%',
     fontFamily: fonts.regular,
     fontSize: 12,
     lineHeight: 16,
     color: '#ffffff',
-    paddingLeft: 10,
-    paddingVertical: 8,
-    maxHeight: 96,
+    padding: 0,
+    margin: 0,
   },
-  send: {
-    width: 32,
-    height: 32,
+  actions: {
+    height: ACTION_HEIGHT,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: INPUT_ACTION_GAP,
+  },
+  actionIcon: {
+    width: ACTION_HEIGHT,
+    height: ACTION_HEIGHT,
+  },
+  pressed: {
+    opacity: 0.72,
   },
 });

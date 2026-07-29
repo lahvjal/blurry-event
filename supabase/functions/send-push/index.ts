@@ -86,6 +86,7 @@ async function forMessage(id: string): Promise<Fanout> {
     .from('conversation_members')
     .select('participant_id, participants!inner(claimed_by)')
     .eq('conversation_id', conversation.id)
+    .eq('notifications_enabled', true)
     .neq('participant_id', message.sender_id);
 
   const recipients = (members ?? [])

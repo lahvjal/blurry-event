@@ -13,7 +13,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { MessageComposer } from '@/components/message-composer';
+import {
+  DEFAULT_MESSAGE_COMPOSER_HEIGHT,
+  MessageComposer,
+} from '@/components/message-composer';
 import { Noise } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
 import {
@@ -125,8 +128,19 @@ export default function DirectMessage() {
   const otherInitials = initialsOf(otherName);
 
   const scroller = React.useRef<ScrollView>(null);
+  const [composerHeight, setComposerHeight] = React.useState(
+    DEFAULT_MESSAGE_COMPOSER_HEIGHT,
+  );
   const runs = groupThread(messages);
   const notice = openError ?? error;
+
+  const openSettings = () => {
+    if (!conversationId) return;
+    router.push({
+      pathname: '/conversation-settings',
+      params: { id: conversationId },
+    });
+  };
 
   return (
     <View style={styles.root}>
@@ -153,7 +167,11 @@ export default function DirectMessage() {
               </Text>
             </View>
           </View>
-          <Pressable hitSlop={12}>
+          <Pressable
+            hitSlop={12}
+            disabled={!conversationId}
+            onPress={openSettings}
+            style={!conversationId ? styles.headerActionDisabled : undefined}>
             <Image
               source={moreDots}
               style={{ width: 28, height: 5 }}
@@ -172,7 +190,9 @@ export default function DirectMessage() {
           contentContainerStyle={{
             paddingTop: insets.top + 54 + 20,
             paddingHorizontal: 20,
-            paddingBottom: 20,
+            // The composer floats over the thread, so the final message needs
+            // enough real scroll range to clear it completely.
+            paddingBottom: composerHeight + 20,
             gap: 8,
           }}
           showsVerticalScrollIndicator={false}
@@ -225,9 +245,10 @@ export default function DirectMessage() {
           ) : null}
         </ScrollView>
 
-        <View style={{ paddingBottom: insets.bottom + 6 }}>
-          <MessageComposer onSend={handleSend} />
-        </View>
+        <MessageComposer
+          onSend={handleSend}
+          onHeightChange={setComposerHeight}
+        />
       </KeyboardAvoidingView>
     </View>
   );
@@ -260,6 +281,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+  },
+  headerActionDisabled: {
+    opacity: 0.35,
   },
   headerName: {
     fontFamily: fonts.bold,

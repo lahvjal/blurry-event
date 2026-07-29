@@ -1,16 +1,17 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import { Image } from 'expo-image';
 import { usePathname, useRouter } from 'expo-router';
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import {
+  FLOATING_SCRIM_RISE,
+  FloatingBackdrop,
+} from '@/components/floating-backdrop';
 import { LiquidGlassSurface } from '@/components/liquid-glass';
 import { fonts } from '@/constants/theme';
 import { useUnreadTotal } from '@/state/unread';
 
-/** How far above the top of the bar the scrim starts fading in. */
-const SCRIM_RISE = 10;
 /** Matches styles.bar. */
 const BAR_HEIGHT = 72;
 
@@ -35,8 +36,8 @@ export function FloatingNav() {
   const unread = useUnreadTotal();
 
   const bottomInset = Math.max(20, insets.bottom + 12);
-  // Measured from the bottom edge up to SCRIM_RISE above the bar's top edge.
-  const scrimHeight = bottomInset + BAR_HEIGHT + SCRIM_RISE;
+  // Measured from the bottom edge up to the fade above the bar's top edge.
+  const scrimHeight = bottomInset + BAR_HEIGHT + FLOATING_SCRIM_RISE;
 
   return (
     <View style={styles.host} pointerEvents="box-none">
@@ -49,16 +50,7 @@ export function FloatingNav() {
         darkening. Web-only: `backdrop-filter` and `mask-image` come from the
         injected stylesheet, keyed on these data attributes.
       */}
-      <View style={[styles.scrim, { height: scrimHeight }]} pointerEvents="none">
-        <View style={StyleSheet.absoluteFill} dataSet={{ navScrim: '1' }} />
-        <View style={StyleSheet.absoluteFill} dataSet={{ navScrim: '2' }} />
-        <View style={StyleSheet.absoluteFill} dataSet={{ navScrim: '3' }} />
-        <LinearGradient
-          colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.45)', 'rgba(0,0,0,0.88)']}
-          locations={[0, 0.55, 1]}
-          style={StyleSheet.absoluteFill}
-        />
-      </View>
+      <FloatingBackdrop height={scrimHeight} />
 
       <View
         style={[styles.wrapper, { paddingBottom: bottomInset }]}
@@ -102,12 +94,6 @@ export function FloatingNav() {
 const styles = StyleSheet.create({
   /** Unpadded, so the scrim can reach the screen edges the bar insets from. */
   host: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  scrim: {
     position: 'absolute',
     left: 0,
     right: 0,

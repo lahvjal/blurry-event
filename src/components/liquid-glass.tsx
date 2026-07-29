@@ -16,12 +16,14 @@ export function LiquidGlassSurface({
   style,
   tintColor = colors.navGlass,
   interactive = false,
+  blurIntensity = 20,
   dataSet,
   children,
 }: {
   style?: StyleProp<ViewStyle>;
   tintColor?: string;
   interactive?: boolean;
+  blurIntensity?: number;
   /** Web-only passthrough (e.g. a focus-ring marker for `:focus-within`). */
   dataSet?: Record<string, string>;
   children?: React.ReactNode;
@@ -41,7 +43,7 @@ export function LiquidGlassSurface({
   return (
     <View style={style} dataSet={dataSet}>
       <BlurView
-        intensity={20}
+        intensity={blurIntensity}
         tint="dark"
         pointerEvents="none"
         style={{

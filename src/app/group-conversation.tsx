@@ -13,7 +13,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { MessageComposer } from '@/components/message-composer';
+import {
+  DEFAULT_MESSAGE_COMPOSER_HEIGHT,
+  MessageComposer,
+} from '@/components/message-composer';
 import { Noise } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
 import {
@@ -69,11 +72,17 @@ export default function GroupConversation() {
   const memberCount = conversation?.memberIds.length ?? 0;
 
   const scroller = React.useRef<ScrollView>(null);
+  const [composerHeight, setComposerHeight] = React.useState(
+    DEFAULT_MESSAGE_COMPOSER_HEIGHT,
+  );
   const runs = groupThread(messages);
 
-  const openDetails = () => {
+  const openSettings = () => {
     if (!conversationId) return;
-    router.push({ pathname: '/group-details', params: { id: conversationId } });
+    router.push({
+      pathname: '/conversation-settings',
+      params: { id: conversationId },
+    });
   };
 
   return (
@@ -92,14 +101,14 @@ export default function GroupConversation() {
               />
             </Pressable>
             <InitialsAvatar initials={initialsOf(title)} size={40} />
-            <Pressable style={{ gap: 3 }} onPress={openDetails}>
+            <Pressable style={{ gap: 3 }} onPress={openSettings}>
               <Text style={styles.headerName}>{title}</Text>
               <Text style={styles.headerStatus}>
                 {memberCount} {memberCount === 1 ? 'MEMBER' : 'MEMBERS'}
               </Text>
             </Pressable>
           </View>
-          <Pressable hitSlop={12} onPress={openDetails}>
+          <Pressable hitSlop={12} onPress={openSettings}>
             <Image
               source={moreDots}
               style={{ width: 28, height: 5 }}
@@ -118,7 +127,9 @@ export default function GroupConversation() {
           contentContainerStyle={{
             paddingTop: insets.top + 54 + 20,
             paddingHorizontal: 20,
-            paddingBottom: 20,
+            // The composer floats over the thread, so the final message needs
+            // enough real scroll range to clear it completely.
+            paddingBottom: composerHeight + 20,
             gap: 8,
           }}
           showsVerticalScrollIndicator={false}
@@ -173,9 +184,10 @@ export default function GroupConversation() {
           ) : null}
         </ScrollView>
 
-        <View style={{ paddingBottom: insets.bottom + 6 }}>
-          <MessageComposer onSend={send} />
-        </View>
+        <MessageComposer
+          onSend={send}
+          onHeightChange={setComposerHeight}
+        />
       </KeyboardAvoidingView>
     </View>
   );

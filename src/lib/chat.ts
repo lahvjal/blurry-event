@@ -190,6 +190,41 @@ export async function markConversationRead(
   if (error) throw error;
 }
 
+/** Whether this member wants push alerts for one conversation. */
+export async function fetchConversationNotifications(
+  conversationId: string,
+  participantId: string,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('conversation_members')
+    .select('notifications_enabled')
+    .eq('conversation_id', conversationId)
+    .eq('participant_id', participantId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data?.notifications_enabled ?? true;
+}
+
+/**
+ * Mutes or unmutes one thread for the signed-in participant. RLS only allows a
+ * member to update their own row, so the preference cannot be changed for
+ * anyone else.
+ */
+export async function setConversationNotifications(
+  conversationId: string,
+  participantId: string,
+  enabled: boolean,
+): Promise<void> {
+  const { error } = await supabase
+    .from('conversation_members')
+    .update({ notifications_enabled: enabled })
+    .eq('conversation_id', conversationId)
+    .eq('participant_id', participantId);
+
+  if (error) throw error;
+}
+
 /** The existing 1:1 thread with someone, or null if you've never spoken. */
 export async function findDirectConversation(
   otherParticipantId: string,

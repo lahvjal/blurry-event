@@ -271,10 +271,11 @@ function ensureBaseStyle() {
     }
 
     /*
-     * Progressive blur behind the nav. Each layer blurs the same backdrop
-     * harder than the last and is masked to begin lower, so the blur deepens
-     * toward the bottom edge instead of switching on at one line. A single
-     * masked layer only fades one radius in, which reads as a band.
+     * Progressive blur behind bottom-floating controls (the nav and message
+     * composer). Each layer blurs the same backdrop harder than the last and
+     * is masked to begin lower, so the blur deepens toward the bottom edge
+     * instead of switching on at one line. A single masked layer only fades
+     * one radius in, which reads as a band.
      */
     [data-nav-scrim] {
       pointer-events: none;

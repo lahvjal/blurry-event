@@ -20,6 +20,7 @@ export function PageHeader({
   onMore,
   onBack,
   floating = true,
+  showMore = true,
 }: {
   title: string;
   subtitle?: string;
@@ -27,6 +28,8 @@ export function PageHeader({
   /** Intercepts the back arrow, e.g. to warn about unsaved changes. */
   onBack?: () => void;
   floating?: boolean;
+  /** Preserves header balance with an empty spacer when there is no more menu. */
+  showMore?: boolean;
 }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -51,14 +54,18 @@ export function PageHeader({
           <Text style={styles.title}>{title}</Text>
           {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
         </View>
-        <Pressable hitSlop={12} onPress={onMore}>
-          <Image
-            source={moreDots}
-            style={{ width: 28, height: 5 }}
-            contentFit="contain"
-            tintColor="#ffffff"
-          />
-        </Pressable>
+        {showMore ? (
+          <Pressable hitSlop={12} onPress={onMore}>
+            <Image
+              source={moreDots}
+              style={{ width: 28, height: 5 }}
+              contentFit="contain"
+              tintColor="#ffffff"
+            />
+          </Pressable>
+        ) : (
+          <View style={styles.headerSpacer} />
+        )}
       </LiquidGlassSurface>
     </View>
   );
@@ -97,5 +104,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#5b645b',
     textAlign: 'center',
+  },
+  headerSpacer: {
+    width: 28,
   },
 });
