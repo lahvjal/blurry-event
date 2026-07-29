@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FloatingNav } from '@/components/floating-nav';
+import { ParticipantAvatar } from '@/components/participant-avatar';
 import { PushPrompt } from '@/components/push-controls';
 import { SearchField } from '@/components/search-field';
 import { Noise } from '@/components/ui';
@@ -30,6 +31,12 @@ export default function Messages() {
         conversation,
         title: conversationTitle(conversation, me.id, participantById, event.name),
         preview: previewOf(conversation, me.id, participantById),
+        directParticipant:
+          conversation.kind === 'direct'
+            ? participantById(
+                conversation.memberIds.find((id) => id !== me.id) ?? '',
+              )
+            : undefined,
       })),
     [conversations, me.id, participantById, event.name],
   );
@@ -71,7 +78,7 @@ export default function Messages() {
         {error ? <Text style={styles.notice}>{error}</Text> : null}
 
         {/* Conversations */}
-        {filtered.map(({ conversation, title, preview }) => {
+        {filtered.map(({ conversation, title, preview, directParticipant }) => {
           const unread = conversation.unreadCount > 0;
           return (
             <Pressable
@@ -86,9 +93,13 @@ export default function Messages() {
                   params: { id: conversation.id },
                 })
               }>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>{initialsOf(title)}</Text>
-              </View>
+              {directParticipant ? (
+                <ParticipantAvatar participant={directParticipant} />
+              ) : (
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>{initialsOf(title)}</Text>
+                </View>
+              )}
               <View style={styles.rowInfo}>
                 <Text style={[styles.rowName, !unread && styles.rowNameRead]}>
                   {title}

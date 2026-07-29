@@ -1,4 +1,3 @@
-import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
@@ -17,6 +16,12 @@ import {
   DEFAULT_MESSAGE_COMPOSER_HEIGHT,
   MessageComposer,
 } from '@/components/message-composer';
+import {
+  FLOATING_GLASS_BLUR_INTENSITY,
+  FLOATING_GLASS_TINT,
+  LiquidGlassSurface,
+} from '@/components/liquid-glass';
+import { ParticipantAvatar } from '@/components/participant-avatar';
 import { Noise } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
 import {
@@ -147,7 +152,11 @@ export default function DirectMessage() {
       <Noise />
       {/* Header */}
       <View style={[styles.headerWrap, { top: insets.top }]}>
-        <BlurView intensity={20} tint="dark" style={styles.headerPill}>
+        <LiquidGlassSurface
+          style={styles.headerPill}
+          tintColor={FLOATING_GLASS_TINT}
+          blurIntensity={FLOATING_GLASS_BLUR_INTENSITY}
+          interactive>
           <View style={styles.headerLeft}>
             <Pressable hitSlop={12} onPress={() => router.back()}>
               <Image
@@ -157,7 +166,11 @@ export default function DirectMessage() {
                 tintColor="#ffffff"
               />
             </Pressable>
-            <InitialsAvatar initials={otherInitials} size={40} color="#5a5f5c" />
+            {other ? (
+              <ParticipantAvatar participant={other} size={40} />
+            ) : (
+              <InitialsAvatar initials={otherInitials} size={40} color="#5a5f5c" />
+            )}
             <View style={{ gap: 3 }}>
               <Text style={styles.headerName}>{otherName}</Text>
               <Text style={styles.headerStatus}>
@@ -179,7 +192,7 @@ export default function DirectMessage() {
               tintColor="#ffffff"
             />
           </Pressable>
-        </BlurView>
+        </LiquidGlassSurface>
       </View>
 
       <KeyboardAvoidingView
@@ -201,6 +214,7 @@ export default function DirectMessage() {
 
           {runs.map((run) => {
             const mine = run.senderId === me.id;
+            const sender = mine ? me : other;
             const initials = mine ? initialsOf(me.fullName) : otherInitials;
             return (
               <View key={run.key} style={{ gap: 8 }}>
@@ -229,7 +243,11 @@ export default function DirectMessage() {
                     {i === run.messages.length - 1 ? (
                       <View
                         style={mine ? styles.bubbleAvatarRight : styles.bubbleAvatarLeft}>
-                        <InitialsAvatar initials={initials} color="#5a5f5c" />
+                        {sender ? (
+                          <ParticipantAvatar participant={sender} size={24} />
+                        ) : (
+                          <InitialsAvatar initials={initials} color="#5a5f5c" />
+                        )}
                       </View>
                     ) : null}
                   </View>
@@ -270,7 +288,6 @@ const styles = StyleSheet.create({
     height: 54,
     borderRadius: 999,
     overflow: 'hidden',
-    backgroundColor: 'rgba(74,88,80,0.1)',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',

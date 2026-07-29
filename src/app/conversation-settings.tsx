@@ -11,6 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FloatingNav } from '@/components/floating-nav';
 import { PAGE_HEADER_HEIGHT, PageHeader } from '@/components/page-header';
+import { ParticipantAvatar } from '@/components/participant-avatar';
 import { Noise } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
 import {
@@ -54,6 +55,9 @@ export default function ConversationSettings() {
     ? participantById(conversation.createdBy)?.fullName.split(' ')[0]
     : null;
   const direct = conversation?.kind === 'direct';
+  const directParticipant = direct
+    ? members.find((member) => member.id !== me.id)
+    : undefined;
   const isEventGroup = conversation?.kind === 'event_group';
 
   useEffect(() => {
@@ -147,9 +151,13 @@ export default function ConversationSettings() {
         }}
         showsVerticalScrollIndicator={false}>
         <View style={styles.conversationCard}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{initialsOf(title)}</Text>
-          </View>
+          {directParticipant ? (
+            <ParticipantAvatar participant={directParticipant} size={56} />
+          ) : (
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>{initialsOf(title)}</Text>
+            </View>
+          )}
           <View style={styles.conversationText}>
             <Text style={styles.conversationName}>{title}</Text>
             <Text style={styles.conversationMeta}>
@@ -217,9 +225,7 @@ export default function ConversationSettings() {
 
             {members.map((member) => (
               <View key={member.id} style={styles.memberRow}>
-                <View style={styles.memberAvatar}>
-                  <Text style={styles.memberAvatarText}>{member.initials}</Text>
-                </View>
+                <ParticipantAvatar participant={member} size={40} />
                 <View style={styles.memberText}>
                   <Text style={styles.memberName}>
                     {member.fullName}
@@ -368,19 +374,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 14,
     paddingVertical: 12,
-  },
-  memberAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#333634',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  memberAvatarText: {
-    fontFamily: fonts.bold,
-    fontSize: 12,
-    color: '#5a5f5c',
   },
   memberText: {
     flex: 1,

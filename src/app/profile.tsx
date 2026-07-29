@@ -1,4 +1,3 @@
-import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -15,13 +14,14 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FloatingNav } from '@/components/floating-nav';
+import { ParticipantAvatar } from '@/components/participant-avatar';
 import { PushToggleRow } from '@/components/push-controls';
 import { Badge, InfoRow, Noise, SectionLabel } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
 import { clearBadge } from '@/lib/badge';
 import { clearPushForSignOut } from '@/lib/push';
 import { supabase } from '@/lib/supabase';
-import { localAvatar, useEvent } from '@/state/event';
+import { useEvent } from '@/state/event';
 import { GAME_STYLE_LABELS } from '@/state/types';
 
 export default function Profile() {
@@ -34,8 +34,6 @@ export default function Profile() {
   const [handicap, setHandicap] = useState(
     me.handicap === null ? '' : String(me.handicap),
   );
-
-  const avatarSource = me.avatarUrl ? { uri: me.avatarUrl } : localAvatar(me.id);
 
   const pickPhoto = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -90,13 +88,7 @@ export default function Profile() {
         {/* Identity */}
         <View style={styles.identity}>
           <Pressable onPress={pickPhoto} style={styles.avatarWrap}>
-            {avatarSource ? (
-              <Image source={avatarSource} style={styles.avatar} />
-            ) : (
-              <View style={[styles.avatar, styles.avatarFallback]}>
-                <Text style={styles.avatarInitials}>{me.initials}</Text>
-              </View>
-            )}
+            <ParticipantAvatar participant={me} size={96} />
             <View style={styles.avatarEdit}>
               <Text style={styles.avatarEditText}>EDIT</Text>
             </View>
@@ -165,7 +157,6 @@ export default function Profile() {
             </SectionLabel>
             <View>
               {teammates.map((mate, i) => {
-                const src = localAvatar(mate.id);
                 return (
                   <Pressable
                     key={mate.id}
@@ -179,13 +170,7 @@ export default function Profile() {
                       styles.mateRow,
                       i < teammates.length - 1 && styles.mateRowBorder,
                     ]}>
-                    {src ? (
-                      <Image source={src} style={styles.mateAvatar} />
-                    ) : (
-                      <View style={[styles.mateAvatar, styles.avatarFallback]}>
-                        <Text style={styles.mateInitials}>{mate.initials}</Text>
-                      </View>
-                    )}
+                    <ParticipantAvatar participant={mate} size={36} />
                     <Text style={styles.mateName}>{mate.fullName}</Text>
                     <Text style={styles.mateHcp}>
                       {mate.handicap === null ? '—' : `${mate.handicap} HCP`}
@@ -229,21 +214,6 @@ const styles = StyleSheet.create({
   },
   avatarWrap: {
     alignItems: 'center',
-  },
-  avatar: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-  },
-  avatarFallback: {
-    backgroundColor: '#333634',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarInitials: {
-    fontFamily: fonts.bold,
-    fontSize: 28,
-    color: '#5a5f5c',
   },
   avatarEdit: {
     marginTop: -12,
@@ -319,16 +289,6 @@ const styles = StyleSheet.create({
   mateRowBorder: {
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.05)',
-  },
-  mateAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-  },
-  mateInitials: {
-    fontFamily: fonts.bold,
-    fontSize: 11,
-    color: '#5a5f5c',
   },
   mateName: {
     flex: 1,

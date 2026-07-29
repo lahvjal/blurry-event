@@ -3,8 +3,11 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useMemo, useState } from 'react';
+import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import {
   Alert,
+  Modal,
   Pressable,
   ScrollView,
   Share,
@@ -26,6 +29,64 @@ import { useEvent } from '@/state/event';
 import { NewParticipantInput, Participant } from '@/state/types';
 
 type Filter = 'all' | 'pending' | 'claimed';
+
+function RemoveParticipantModal({
+  participant,
+  error,
+  removing,
+  onCancel,
+  onConfirm,
+}: {
+  participant: Participant | null;
+  error: string | null;
+  removing: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Modal
+      visible={participant !== null}
+      transparent
+      animationType="fade"
+      onRequestClose={onCancel}>
+      <View style={styles.confirmBackdrop}>
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          accessibilityLabel="Cancel player removal"
+          onPress={onCancel}
+        />
+        <View style={styles.confirmCard} accessibilityViewIsModal>
+          <Text style={styles.confirmEyebrow}>REMOVE PLAYER</Text>
+          <Text style={styles.confirmTitle}>
+            Remove {participant?.fullName}?
+          </Text>
+          <Text style={styles.confirmMessage}>
+            {participant?.claimed
+              ? 'They have already signed in. Removing them revokes their access to the event.'
+              : 'Their invite code will stop working.'}
+          </Text>
+          {error ? <Text style={styles.confirmError}>{error}</Text> : null}
+          <View style={styles.confirmActions}>
+            <Pressable
+              style={[styles.confirmCancel, removing && styles.buttonBusy]}
+              disabled={removing}
+              onPress={onCancel}>
+              <Text style={styles.confirmCancelText}>CANCEL</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.confirmRemove, removing && styles.buttonBusy]}
+              disabled={removing}
+              onPress={onConfirm}>
+              <Text style={styles.confirmRemoveText}>
+                {removing ? 'REMOVING…' : 'YES, REMOVE'}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
 
 export default function AdminRoster() {
   const insets = useSafeAreaInsets();
@@ -49,6 +110,10 @@ export default function AdminRoster() {
   const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newHandicap, setNewHandicap] = useState('');
+  const [addError, setAddError] = useState<string | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<Participant | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  const [removing, setRemoving] = useState(false);
   /** Disables every send control while one is in flight, so a slow network
    *  can't turn an impatient second tap into a duplicate email. */
   const [emailing, setEmailing] = useState(false);
@@ -183,24 +248,36 @@ export default function AdminRoster() {
   const addManually = async () => {
     const name = newName.trim();
     if (!name) {
-      Alert.alert('Name required', 'Enter the participant’s name.');
+      setAddError('Enter the player’s full name.');
+      return;
+    }
+    const email = newEmail.trim().toLowerCase();
+    if (!email) {
+      setAddError('Enter the player’s email address.');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setAddError(`“${email}” doesn’t look like a valid email address.`);
       return;
     }
     const handicap = newHandicap.trim() === '' ? null : Number(newHandicap);
     if (handicap !== null && Number.isNaN(handicap)) {
-      Alert.alert('Check the handicap', 'Enter a number, for example 8.4.');
+      setAddError('Enter a numeric handicap, for example 8.4.');
       return;
     }
+    setAddError(null);
     const row: NewParticipantInput = {
       fullName: name,
-      email: newEmail.trim() ? newEmail.trim().toLowerCase() : null,
+      email,
       handicap,
       isAdmin: false,
     };
     const { added, duplicates } = await addParticipants([row]);
     if (added === 0) {
       if (duplicates.length > 0) {
-        Alert.alert('Already on the roster', `${duplicates[0]} is already a participant.`);
+        setAddError(`${duplicates[0]} is already on the roster.`);
+      } else {
+        setAddError('The player could not be added. Try again.');
       }
       // The save was refused and has already been reported; keep what they typed.
       return;
@@ -275,23 +352,34 @@ export default function AdminRoster() {
   };
 
   const confirmRemove = (participant: Participant) => {
-    Alert.alert(
-      `Remove ${participant.fullName}?`,
-      participant.claimed
-        ? 'They have already signed in. Removing them revokes their access to the event.'
-        : 'Their invite code will stop working.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: () => {
-            removeParticipant(participant.id);
-            setExpandedId(null);
-          },
-        },
-      ],
-    );
+    setRemoveError(null);
+    setRemoveTarget(participant);
+  };
+
+  const cancelRemove = () => {
+    if (removing) return;
+    setRemoveError(null);
+    setRemoveTarget(null);
+  };
+
+  const removeConfirmed = async () => {
+    if (!removeTarget) return;
+    setRemoving(true);
+    setRemoveError(null);
+    try {
+      await removeParticipant(removeTarget.id);
+      setExpandedId(null);
+      setEditingId(null);
+      setRemoveTarget(null);
+    } catch (error) {
+      setRemoveError(
+        error instanceof Error
+          ? error.message
+          : 'The player could not be removed. Try again.',
+      );
+    } finally {
+      setRemoving(false);
+    }
   };
 
   const confirmRegenerate = (participant: Participant) => {
@@ -310,7 +398,7 @@ export default function AdminRoster() {
   };
 
   return (
-    <View style={styles.root}>
+    <GestureHandlerRootView style={styles.root}>
       <LinearGradient colors={['#203329', '#1b2a22']} style={StyleSheet.absoluteFill} />
       <Noise />
       <PageHeader title="roster" subtitle={`${participants.length} PARTICIPANTS`} />
@@ -403,7 +491,10 @@ export default function AdminRoster() {
             </Pressable>
             <Pressable
               style={styles.secondaryButton}
-              onPress={() => setAdding((v) => !v)}>
+              onPress={() => {
+                setAdding((v) => !v);
+                setAddError(null);
+              }}>
               <Text style={styles.secondaryButtonText}>
                 {adding ? 'CLOSE' : 'ADD PLAYER'}
               </Text>
@@ -419,7 +510,10 @@ export default function AdminRoster() {
             </SectionLabel>
             <TextInput
               value={newName}
-              onChangeText={setNewName}
+              onChangeText={(value) => {
+                setNewName(value);
+                setAddError(null);
+              }}
               style={styles.input}
               placeholder="Full name"
               placeholderTextColor="rgba(255,255,255,0.3)"
@@ -427,23 +521,33 @@ export default function AdminRoster() {
             />
             <TextInput
               value={newEmail}
-              onChangeText={setNewEmail}
+              onChangeText={(value) => {
+                setNewEmail(value);
+                setAddError(null);
+              }}
               style={styles.input}
-              placeholder="Email (optional)"
+              placeholder="Email (required)"
               placeholderTextColor="rgba(255,255,255,0.3)"
               keyboardType="email-address"
               autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="email"
+              accessibilityLabel="Email, required"
               selectionColor={colors.highlight}
             />
             <TextInput
               value={newHandicap}
-              onChangeText={setNewHandicap}
+              onChangeText={(value) => {
+                setNewHandicap(value);
+                setAddError(null);
+              }}
               style={styles.input}
               placeholder="Handicap (optional)"
               placeholderTextColor="rgba(255,255,255,0.3)"
               keyboardType="decimal-pad"
               selectionColor={colors.highlight}
             />
+            {addError ? <Text style={styles.addError}>{addError}</Text> : null}
             <ActionButton label="ADD TO ROSTER" height={54} onPress={addManually} />
           </View>
         ) : null}
@@ -476,31 +580,48 @@ export default function AdminRoster() {
             const team = teamOf(p.id);
             return (
               <View key={p.id}>
-                <Pressable
-                  style={[styles.row, expanded && styles.rowExpanded]}
-                  onPress={() => setExpandedId(expanded ? null : p.id)}>
-                  <View style={{ flex: 1, gap: 5 }}>
-                    <View style={styles.nameLine}>
-                      <Text style={styles.name}>{p.fullName}</Text>
-                      {p.isAdmin ? <Text style={styles.adminTag}>ADMIN</Text> : null}
+                <ReanimatedSwipeable
+                  friction={2}
+                  rightThreshold={44}
+                  overshootRight={false}
+                  renderRightActions={(_progress, _translation, swipeable) => (
+                    <Pressable
+                      style={styles.swipeRemove}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${p.fullName}`}
+                      onPress={() => {
+                        swipeable.close();
+                        confirmRemove(p);
+                      }}>
+                      <Text style={styles.swipeRemoveText}>REMOVE</Text>
+                    </Pressable>
+                  )}>
+                  <Pressable
+                    style={[styles.row, expanded && styles.rowExpanded]}
+                    onPress={() => setExpandedId(expanded ? null : p.id)}>
+                    <View style={{ flex: 1, gap: 5 }}>
+                      <View style={styles.nameLine}>
+                        <Text style={styles.name}>{p.fullName}</Text>
+                        {p.isAdmin ? <Text style={styles.adminTag}>ADMIN</Text> : null}
+                      </View>
+                      <Text style={styles.code}>{p.inviteCode}</Text>
+                      <Text style={styles.meta}>
+                        {p.handicap === null ? 'no handicap' : `${p.handicap} HCP`}
+                        {team ? ` · ${team.name}` : ' · no team'}
+                      </Text>
                     </View>
-                    <Text style={styles.code}>{p.inviteCode}</Text>
-                    <Text style={styles.meta}>
-                      {p.handicap === null ? 'no handicap' : `${p.handicap} HCP`}
-                      {team ? ` · ${team.name}` : ' · no team'}
-                    </Text>
-                  </View>
-                  <View
-                    style={[styles.statusPill, p.claimed && styles.statusPillClaimed]}>
-                    <Text
-                      style={[
-                        styles.statusText,
-                        p.claimed && { color: colors.highlight },
-                      ]}>
-                      {p.claimed ? 'SIGNED UP' : 'PENDING'}
-                    </Text>
-                  </View>
-                </Pressable>
+                    <View
+                      style={[styles.statusPill, p.claimed && styles.statusPillClaimed]}>
+                      <Text
+                        style={[
+                          styles.statusText,
+                          p.claimed && { color: colors.highlight },
+                        ]}>
+                        {p.claimed ? 'SIGNED UP' : 'PENDING'}
+                      </Text>
+                    </View>
+                  </Pressable>
+                </ReanimatedSwipeable>
 
                 {expanded && editingId === p.id ? (
                   <View style={styles.expandedPanel}>
@@ -670,7 +791,14 @@ export default function AdminRoster() {
           </Text>
         </View>
       </ScrollView>
-    </View>
+      <RemoveParticipantModal
+        participant={removeTarget}
+        error={removeError}
+        removing={removing}
+        onCancel={cancelRemove}
+        onConfirm={removeConfirmed}
+      />
+    </GestureHandlerRootView>
   );
 }
 
@@ -755,6 +883,12 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 10,
     backgroundColor: 'rgba(15,17,16,0.5)',
+  },
+  addError: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    lineHeight: 16,
+    color: '#ffb4b4',
   },
   input: {
     backgroundColor: 'rgba(0,0,0,0.35)',
@@ -853,6 +987,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: '#1b2a22',
   },
   rowExpanded: {
     backgroundColor: 'rgba(15,17,16,0.5)',
@@ -957,6 +1092,84 @@ const styles = StyleSheet.create({
   },
   chipDangerText: {
     color: '#ffb4b4',
+  },
+  swipeRemove: {
+    width: 96,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#651f35',
+  },
+  swipeRemoveText: {
+    fontFamily: fonts.bold,
+    fontSize: 10,
+    color: '#ffced7',
+  },
+  confirmBackdrop: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+  },
+  confirmCard: {
+    width: '100%',
+    maxWidth: 420,
+    padding: 22,
+    gap: 12,
+    backgroundColor: '#18261f',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  confirmEyebrow: {
+    fontFamily: fonts.bold,
+    fontSize: 9,
+    color: '#ff9aab',
+  },
+  confirmTitle: {
+    fontFamily: fonts.serif,
+    fontSize: 28,
+    color: '#ffffff',
+  },
+  confirmMessage: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    lineHeight: 19,
+    color: 'rgba(255,255,255,0.62)',
+  },
+  confirmError: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    lineHeight: 16,
+    color: '#ffb4b4',
+  },
+  confirmActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 8,
+  },
+  confirmCancel: {
+    flex: 1,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.07)',
+  },
+  confirmCancelText: {
+    fontFamily: fonts.bold,
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.75)',
+  },
+  confirmRemove: {
+    flex: 1,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#651f35',
+  },
+  confirmRemoveText: {
+    fontFamily: fonts.bold,
+    fontSize: 10,
+    color: '#ffced7',
   },
   bulk: {
     paddingHorizontal: 20,

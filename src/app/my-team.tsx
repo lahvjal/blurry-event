@@ -1,4 +1,3 @@
-import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
@@ -7,9 +6,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FloatingNav } from '@/components/floating-nav';
 import { PageHeader } from '@/components/page-header';
+import { ParticipantAvatar } from '@/components/participant-avatar';
 import { ActionButton, Badge, InfoRow, Noise, SectionLabel } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
-import { localAvatar, useEvent } from '@/state/event';
+import { useEvent } from '@/state/event';
 import { GAME_STYLE_LABELS, isTeamFormat, teamSize } from '@/state/types';
 
 export default function MyTeam() {
@@ -98,7 +98,6 @@ export default function MyTeam() {
           </SectionLabel>
           <View>
             {members.map((member, i) => {
-              const src = localAvatar(member.id);
               const isMe = member.id === me.id;
               return (
                 <View
@@ -107,13 +106,7 @@ export default function MyTeam() {
                     styles.memberRow,
                     i < members.length - 1 && styles.memberRowBorder,
                   ]}>
-                  {src ? (
-                    <Image source={src} style={styles.avatar} />
-                  ) : (
-                    <View style={[styles.avatar, styles.avatarFallback]}>
-                      <Text style={styles.avatarInitials}>{member.initials}</Text>
-                    </View>
-                  )}
+                  <ParticipantAvatar participant={member} size={36} />
                   <View style={{ flex: 1, gap: 4 }}>
                     <Text style={styles.memberName}>{member.fullName}</Text>
                     {isMe ? <Text style={styles.youTag}>YOU</Text> : null}
@@ -280,21 +273,6 @@ const styles = StyleSheet.create({
   memberRowBorder: {
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.05)',
-  },
-  avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-  },
-  avatarFallback: {
-    backgroundColor: '#333634',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarInitials: {
-    fontFamily: fonts.bold,
-    fontSize: 11,
-    color: '#5a5f5c',
   },
   memberName: {
     fontFamily: fonts.bold,

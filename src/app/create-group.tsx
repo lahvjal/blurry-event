@@ -5,6 +5,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PageHeader } from '@/components/page-header';
+import { ParticipantAvatar } from '@/components/participant-avatar';
 import { SearchField } from '@/components/search-field';
 import { Noise } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
@@ -111,9 +112,7 @@ export default function CreateGroup() {
                 key={player.id}
                 style={styles.memberRow}
                 onPress={() => toggle(player.id)}>
-                <View style={styles.avatar}>
-                  <Text style={styles.avatarText}>{player.initials}</Text>
-                </View>
+                <ParticipantAvatar participant={player} size={40} />
                 <View style={{ flex: 1, gap: 5 }}>
                   <Text style={styles.memberName}>{player.fullName}</Text>
                   <Text style={styles.memberMeta}>
@@ -187,19 +186,6 @@ const styles = StyleSheet.create({
     gap: 14,
     paddingHorizontal: 20,
     paddingVertical: 12,
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#333634',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    fontFamily: fonts.bold,
-    fontSize: 12,
-    color: '#5a5f5c',
   },
   memberName: {
     fontFamily: fonts.bold,

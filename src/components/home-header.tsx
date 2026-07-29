@@ -1,6 +1,13 @@
 import { Image } from 'expo-image';
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  Easing,
+  interpolate,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
@@ -27,6 +34,25 @@ export function HomeHeader({
   onPressNotifications: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  const glassOpacity = useSharedValue(stuck ? 1 : 0);
+
+  React.useEffect(() => {
+    glassOpacity.value = withTiming(stuck ? 1 : 0, {
+      duration: 240,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [glassOpacity, stuck]);
+
+  const animatedGlassStyle = useAnimatedStyle(() => ({
+    opacity: glassOpacity.value,
+  }));
+  const animatedBarStyle = useAnimatedStyle(() => ({
+    paddingHorizontal: interpolate(
+      glassOpacity.value,
+      [0, 1],
+      [7, 20],
+    ),
+  }));
 
   const contents = (
     <>
@@ -55,17 +81,19 @@ export function HomeHeader({
     <View
       pointerEvents="box-none"
       style={[styles.host, { top: insets.top + 8 }]}>
-      {stuck ? (
-        <LiquidGlassSurface
-          style={styles.bar}
-          tintColor={FLOATING_GLASS_TINT}
-          blurIntensity={FLOATING_GLASS_BLUR_INTENSITY}
-          interactive>
-          {contents}
-        </LiquidGlassSurface>
-      ) : (
-        <View style={styles.bar}>{contents}</View>
-      )}
+      <Animated.View style={[styles.bar, animatedBarStyle]}>
+        <Animated.View
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFill, animatedGlassStyle]}>
+          <LiquidGlassSurface
+            style={StyleSheet.absoluteFill}
+            tintColor={FLOATING_GLASS_TINT}
+            blurIntensity={FLOATING_GLASS_BLUR_INTENSITY}
+            interactive
+          />
+        </Animated.View>
+        {contents}
+      </Animated.View>
     </View>
   );
 }

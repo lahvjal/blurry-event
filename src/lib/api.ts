@@ -498,8 +498,15 @@ export async function apiUpdateParticipant(
 }
 
 export async function apiRemoveParticipant(id: string) {
-  const { error } = await supabase.from('participants').delete().eq('id', id);
+  const { data, error } = await supabase
+    .from('participants')
+    .delete()
+    .eq('id', id)
+    .select('id');
   if (error) throw error;
+  if (!data || data.length !== 1) {
+    throw new Error('The player was not removed. Check your admin access and try again.');
+  }
 }
 
 export async function apiRegenerateInviteCode(id: string, hasRealEmail: boolean) {

@@ -1,4 +1,3 @@
-import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
@@ -17,6 +16,12 @@ import {
   DEFAULT_MESSAGE_COMPOSER_HEIGHT,
   MessageComposer,
 } from '@/components/message-composer';
+import {
+  FLOATING_GLASS_BLUR_INTENSITY,
+  FLOATING_GLASS_TINT,
+  LiquidGlassSurface,
+} from '@/components/liquid-glass';
+import { ParticipantAvatar } from '@/components/participant-avatar';
 import { Noise } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
 import {
@@ -90,7 +95,11 @@ export default function GroupConversation() {
       <Noise />
       {/* Header */}
       <View style={[styles.headerWrap, { top: insets.top }]}>
-        <BlurView intensity={20} tint="dark" style={styles.headerPill}>
+        <LiquidGlassSurface
+          style={styles.headerPill}
+          tintColor={FLOATING_GLASS_TINT}
+          blurIntensity={FLOATING_GLASS_BLUR_INTENSITY}
+          interactive>
           <View style={styles.headerLeft}>
             <Pressable hitSlop={12} onPress={() => router.back()}>
               <Image
@@ -116,7 +125,7 @@ export default function GroupConversation() {
               tintColor="#ffffff"
             />
           </Pressable>
-        </BlurView>
+        </LiquidGlassSurface>
       </View>
 
       <KeyboardAvoidingView
@@ -138,9 +147,8 @@ export default function GroupConversation() {
 
           {runs.map((run) => {
             const mine = run.senderId === me.id;
-            const senderName = mine
-              ? 'Me'
-              : (participantById(run.senderId)?.fullName ?? 'Someone');
+            const sender = mine ? me : participantById(run.senderId);
+            const senderName = mine ? 'Me' : (sender?.fullName ?? 'Someone');
             return (
               <View key={run.key} style={{ gap: 6 }}>
                 {run.dayLabel ? (
@@ -165,11 +173,15 @@ export default function GroupConversation() {
                       </View>
                       {/* Avatar sits beside the last bubble of a run only. */}
                       {last && mine ? (
-                        <InitialsAvatar initials={initialsOf(me.fullName)} />
+                        <ParticipantAvatar participant={me} size={24} />
                       ) : null}
                       {last && !mine ? (
                         <View style={styles.bubbleAvatarLeft}>
-                          <InitialsAvatar initials={initialsOf(senderName)} />
+                          {sender ? (
+                            <ParticipantAvatar participant={sender} size={24} />
+                          ) : (
+                            <InitialsAvatar initials={initialsOf(senderName)} />
+                          )}
                         </View>
                       ) : null}
                     </View>
@@ -209,7 +221,6 @@ const styles = StyleSheet.create({
     height: 54,
     borderRadius: 999,
     overflow: 'hidden',
-    backgroundColor: 'rgba(74,88,80,0.1)',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',

@@ -294,7 +294,7 @@ type EventState = {
     id: string,
     patch: Partial<Pick<Participant, 'fullName' | 'handicap' | 'isAdmin' | 'authEmail'>>,
   ) => void;
-  removeParticipant: (id: string) => void;
+  removeParticipant: (id: string) => Promise<void>;
   regenerateInviteCode: (id: string) => Promise<void>;
 };
 
@@ -963,7 +963,13 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   );
 
   const removeParticipant = useCallback(
-    (id: string) => {
+    async (id: string) => {
+      // Keep destructive writes non-optimistic. A row that disappears and
+      // silently comes back after an RLS or network failure looks like a broken
+      // Remove button and can prompt repeated taps.
+      if (isLive) {
+        await apiRemoveParticipant(id);
+      }
       setParticipants((prev) => prev.filter((p) => p.id !== id));
       setTeams((prev) =>
         prev.map((team) => ({
@@ -971,9 +977,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           memberIds: team.memberIds.filter((memberId) => memberId !== id),
         })),
       );
-      void persist('the roster', () => apiRemoveParticipant(id));
     },
-    [persist],
+    [isLive],
   );
 
   /** Invalidates the old code — use when an invite leaks or needs resending. */

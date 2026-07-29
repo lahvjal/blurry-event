@@ -22,7 +22,6 @@ import {
 } from '@/components/home-header';
 import { SyncStatusLine } from '@/components/sync-status';
 import {
-  AvatarStack,
   Badge,
   Chevron,
   GradientPanel,
@@ -30,8 +29,9 @@ import {
   Noise,
   SectionLabel,
 } from '@/components/ui';
+import { ParticipantAvatarStack } from '@/components/participant-avatar';
 import { colors, fonts } from '@/constants/theme';
-import { localAvatar, useEvent } from '@/state/event';
+import { useEvent } from '@/state/event';
 import { useNotificationUnread } from '@/state/notification-center';
 import {
   GAME_STYLE_LABELS,
@@ -129,10 +129,6 @@ export default function EventHome() {
         .map((id) => participantById(id))
         .filter((p): p is NonNullable<typeof p> => Boolean(p))
     : [];
-
-  const teamAvatars = teammates
-    .map((p) => localAvatar(p.id))
-    .filter((src): src is number => src !== null);
 
   return (
     <View style={styles.root}>
@@ -250,7 +246,9 @@ export default function EventHome() {
                       {teammates.map((p) => p.fullName.split(' ')[0]).join(' · ')}
                     </Text>
                   </View>
-                  {teamAvatars.length > 0 ? <AvatarStack sources={teamAvatars} /> : null}
+                  {teammates.length > 0 ? (
+                    <ParticipantAvatarStack participants={teammates} />
+                  ) : null}
                   <Chevron />
                 </View>
               </Pressable>

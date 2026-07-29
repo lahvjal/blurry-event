@@ -4,7 +4,11 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { LiquidGlassSurface } from '@/components/liquid-glass';
+import {
+  FLOATING_GLASS_BLUR_INTENSITY,
+  FLOATING_GLASS_TINT,
+  LiquidGlassSurface,
+} from '@/components/liquid-glass';
 import { fonts } from '@/constants/theme';
 
 const backArrow = require('@/assets/figma/back-arrow.svg');
@@ -41,7 +45,11 @@ export function PageHeader({
         floating && { position: 'absolute', top: insets.top, left: 0, right: 0, zIndex: 10 },
       ]}
       pointerEvents="box-none">
-      <LiquidGlassSurface style={styles.pill} tintColor="rgba(74,88,80,0.1)">
+      <LiquidGlassSurface
+        style={styles.pill}
+        tintColor={FLOATING_GLASS_TINT}
+        blurIntensity={FLOATING_GLASS_BLUR_INTENSITY}
+        interactive>
         <Pressable hitSlop={12} onPress={onBack ?? (() => router.back())}>
           <Image
             source={backArrow}

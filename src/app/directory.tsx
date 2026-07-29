@@ -1,4 +1,3 @@
-import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
@@ -7,22 +6,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FloatingNav } from '@/components/floating-nav';
 import { PageHeader } from '@/components/page-header';
+import { ParticipantAvatar } from '@/components/participant-avatar';
 import { SearchField } from '@/components/search-field';
 import { Noise } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
-import { localAvatar, useEvent } from '@/state/event';
+import { useEvent } from '@/state/event';
 
 type Tab = 'players' | 'teams';
-
-function Avatar({ id, initials }: { id: string; initials: string }) {
-  const src = localAvatar(id);
-  if (src) return <Image source={src} style={styles.avatar} />;
-  return (
-    <View style={[styles.avatar, styles.avatarFallback]}>
-      <Text style={styles.avatarInitials}>{initials}</Text>
-    </View>
-  );
-}
 
 export default function Directory() {
   const router = useRouter();
@@ -89,7 +79,7 @@ export default function Directory() {
               const isMe = player.id === me.id;
               return (
                 <View key={player.id} style={styles.playerRow}>
-                  <Avatar id={player.id} initials={player.initials} />
+                  <ParticipantAvatar participant={player} />
                   <View style={{ flex: 1, gap: 5 }}>
                     <Text style={styles.playerName}>
                       {player.fullName}
@@ -140,7 +130,7 @@ export default function Directory() {
                   </View>
                   {members.map((member) => (
                     <View key={member.id} style={styles.teamMemberRow}>
-                      <Avatar id={member.id} initials={member.initials} />
+                      <ParticipantAvatar participant={member} />
                       <Text style={styles.teamMemberName}>{member.fullName}</Text>
                       <Text style={styles.teamMemberHcp}>
                         {member.handicap === null ? '—' : member.handicap}
@@ -203,21 +193,6 @@ const styles = StyleSheet.create({
     gap: 14,
     paddingHorizontal: 12,
     paddingVertical: 14,
-  },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-  },
-  avatarFallback: {
-    backgroundColor: '#333634',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarInitials: {
-    fontFamily: fonts.bold,
-    fontSize: 13,
-    color: '#5a5f5c',
   },
   playerName: {
     fontFamily: fonts.bold,

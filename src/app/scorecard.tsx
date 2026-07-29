@@ -1,4 +1,3 @@
-import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useRef, useState } from 'react';
 import {
@@ -12,19 +11,20 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FloatingNav } from '@/components/floating-nav';
+import {
+  ParticipantAvatar,
+  ParticipantAvatarStack,
+} from '@/components/participant-avatar';
 import { SyncStatusLine } from '@/components/sync-status';
 import { PageHeader } from '@/components/page-header';
 import { Chevron, GradientPanel, Noise } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
-import { localAvatar, useEvent } from '@/state/event';
+import { useEvent } from '@/state/event';
 import {
   GAME_STYLE_LABELS,
   isTeamFormat,
   sumScores,
 } from '@/state/types';
-
-import { AvatarStack } from '@/components/ui';
-
 const TABLE_BORDER = '#191b1a';
 
 /**
@@ -204,11 +204,9 @@ export default function Scorecard() {
   const totalScore = sumScores(scores);
 
   /** Whose card this is: the team's avatars for a scramble, yours for solo. */
-  const cardAvatars = (
-    teamFormat && myTeam ? myTeam.memberIds : [me.id]
-  )
-    .map((id) => localAvatar(id))
-    .filter((src): src is number => src !== null);
+  const cardParticipants = (teamFormat && myTeam ? myTeam.memberIds : [me.id])
+    .map((id) => participantById(id))
+    .filter((player): player is NonNullable<typeof player> => Boolean(player));
 
   /*
    * Inverse sticky. Each summary is parked above the nav while its real place
@@ -315,10 +313,18 @@ export default function Scorecard() {
             <View style={{ width: 40 }} />
           </View>
           <View style={styles.scoreArea}>
-            {cardAvatars.length > 1 ? (
-              <AvatarStack sources={cardAvatars} size={26} overlap={12} />
-            ) : cardAvatars.length === 1 ? (
-              <Image source={cardAvatars[0]} style={styles.playerAvatar} />
+            {cardParticipants.length > 1 ? (
+              <ParticipantAvatarStack
+                participants={cardParticipants}
+                size={26}
+                overlap={12}
+              />
+            ) : cardParticipants.length === 1 ? (
+              <ParticipantAvatar
+                participant={cardParticipants[0]}
+                size={30}
+                style={styles.playerAvatar}
+              />
             ) : null}
           </View>
         </View>
@@ -394,9 +400,6 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   playerAvatar: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
     borderWidth: 2,
     borderColor: 'rgba(255,255,255,0.9)',
   },

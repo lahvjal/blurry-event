@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FloatingNav } from '@/components/floating-nav';
 import { PageHeader } from '@/components/page-header';
+import { ParticipantAvatar } from '@/components/participant-avatar';
 import { SearchField } from '@/components/search-field';
 import { Noise } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
@@ -61,9 +62,7 @@ export default function NewMessage() {
           const team = teamOf(player.id);
           return (
             <View key={player.id} style={styles.memberRow}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>{player.initials}</Text>
-              </View>
+              <ParticipantAvatar participant={player} />
               <View style={{ flex: 1, gap: 5 }}>
                 <Text style={styles.memberName}>{player.fullName}</Text>
                 <Text style={styles.memberMeta}>
@@ -147,19 +146,6 @@ const styles = StyleSheet.create({
     gap: 14,
     paddingHorizontal: 12,
     paddingVertical: 14,
-  },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#333634',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    fontFamily: fonts.bold,
-    fontSize: 13,
-    color: '#5a5f5c',
   },
   memberName: {
     fontFamily: fonts.bold,
