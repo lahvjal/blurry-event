@@ -114,29 +114,32 @@ const HEAD = `
           if (!el) return false;
           return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable;
         };
-        var releaseViewport = function () {
-          root.style.removeProperty('--app-height');
-          root.style.removeProperty('--app-offset-top');
-        };
+        // Always an explicit pixel height — never handed back to 100dvh. iOS
+        // can leave viewport units stale after a keyboard is dismissed, which
+        // is exactly when this runs, so the shell stayed short even once the
+        // override was cleared. innerHeight is the layout viewport, which the
+        // keyboard overlays rather than resizes, so it holds the full height.
         var syncViewport = function () {
           var covered = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-          if (isEditing() && covered >= 120) {
-            root.style.setProperty('--app-height', vv.height + 'px');
-            root.style.setProperty('--app-offset-top', vv.offsetTop + 'px');
-          } else {
-            releaseViewport();
-          }
+          var shrink = isEditing() && covered >= 120;
+          root.style.setProperty('--app-height', (shrink ? vv.height : window.innerHeight) + 'px');
+          root.style.setProperty('--app-offset-top', (shrink ? vv.offsetTop : 0) + 'px');
           window.scrollTo(0, 0);
         };
         syncViewport();
         vv.addEventListener('resize', syncViewport);
         vv.addEventListener('scroll', syncViewport);
         window.addEventListener('scroll', syncViewport);
+        window.addEventListener('resize', syncViewport);
+        window.addEventListener('orientationchange', syncViewport);
+        window.addEventListener('pageshow', syncViewport);
+        document.addEventListener('visibilitychange', syncViewport);
         document.addEventListener('focusin', syncViewport);
-        // Release on blur rather than waiting for a viewport event that may
-        // never arrive, then settle again after the keyboard animates away.
+        // Blur restores full height straight away rather than waiting on a
+        // viewport event that may never arrive, then settles again once the
+        // keyboard has animated out.
         document.addEventListener('focusout', function () {
-          releaseViewport();
+          syncViewport();
           setTimeout(syncViewport, 300);
         });
       }
