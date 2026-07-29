@@ -11,6 +11,10 @@ import {
 } from 'react-native';
 
 import { fonts } from '@/constants/theme';
+import {
+  playScoreDialClick,
+  prepareScoreDialAudio,
+} from '@/lib/score-dial-audio';
 
 /** On-screen size of one number. Purely visual — see STEP for the gesture. */
 const ITEM_HEIGHT = 150;
@@ -113,6 +117,7 @@ export function ScoreDial({
       index.current = next;
       snapTo(next);
       Haptics.selectionAsync();
+      playScoreDialClick();
       onChangeRef.current(values[next]);
     },
     [snapTo, values],
@@ -127,6 +132,7 @@ export function ScoreDial({
         onPanResponderTerminationRequest: () => false,
 
         onPanResponderGrant: () => {
+          prepareScoreDialAudio();
           dragFrom.current = index.current;
         },
 
