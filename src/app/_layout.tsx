@@ -8,17 +8,50 @@ import {
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect } from 'react';
-import { StatusBar } from 'expo-status-bar';
+import { useCallback, useEffect } from 'react';
+import { Alert } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 
+import { PullToRefreshProvider } from '@/components/pull-to-refresh';
 import { colors } from '@/constants/theme';
 import { setupPwa } from '@/lib/offline/pwa';
 import { syncPush } from '@/lib/push';
 import { startSync } from '@/lib/sync';
-import { EventProvider } from '@/state/event';
+import { EventProvider, useEvent } from '@/state/event';
 
 SplashScreen.preventAutoHideAsync();
+
+const PULL_TO_REFRESH_EXCLUDED_PATHNAMES = ['/score-input'];
+
+function AppNavigator() {
+  const { refresh } = useEvent();
+
+  const handleRefresh = useCallback(async () => {
+    try {
+      await refresh();
+    } catch {
+      Alert.alert(
+        "Couldn't refresh",
+        'Check your connection and try again.',
+      );
+    }
+  }, [refresh]);
+
+  return (
+    <PullToRefreshProvider
+      onRefresh={handleRefresh}
+      excludedPathnames={PULL_TO_REFRESH_EXCLUDED_PATHNAMES}>
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: colors.bg },
+          animation: 'fade',
+        }}
+      />
+    </PullToRefreshProvider>
+  );
+}
 
 export default function RootLayout() {
   const [loaded] = useFonts({
@@ -53,13 +86,7 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <EventProvider>
         <StatusBar style="light" />
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: colors.bg },
-            animation: 'fade',
-          }}
-        />
+        <AppNavigator />
       </EventProvider>
     </SafeAreaProvider>
   );

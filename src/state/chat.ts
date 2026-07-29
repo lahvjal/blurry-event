@@ -1,6 +1,7 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 
+import { useRefreshOnPull } from '@/components/pull-to-refresh';
 import {
   fetchConversation,
   fetchConversationSummaries,
@@ -71,6 +72,7 @@ export function useConversations() {
       void reload();
     }, [reload]),
   );
+  useRefreshOnPull(reload);
 
   // Any incoming message restacks the list and lights an unread badge.
   useEffect(() => subscribeToMessages(null, () => void reload()), [reload]);
@@ -105,6 +107,7 @@ export function useConversationDetail(conversationId: string | null) {
       void reload();
     }, [reload]),
   );
+  useRefreshOnPull(reload);
 
   return { conversation, loading, error, reload };
 }
@@ -135,6 +138,7 @@ export function useConversation(conversationId: string | null) {
     setLoading(true);
     void reload();
   }, [reload]);
+  useRefreshOnPull(reload);
 
   useEffect(() => {
     if (!conversationId) return;
