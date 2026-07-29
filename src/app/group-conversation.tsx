@@ -16,6 +16,7 @@ import {
   DEFAULT_MESSAGE_COMPOSER_HEIGHT,
   MessageComposer,
 } from '@/components/message-composer';
+import { ChatMessageBubble } from '@/components/chat-message-bubble';
 import {
   FLOATING_GLASS_BLUR_INTENSITY,
   FLOATING_GLASS_TINT,
@@ -69,7 +70,8 @@ export default function GroupConversation() {
   const conversationId = params.id ?? null;
 
   const { conversation } = useConversationDetail(conversationId);
-  const { messages, loading, error, send } = useConversation(conversationId);
+  const { messages, loading, error, send, react } =
+    useConversation(conversationId);
 
   const title = conversation
     ? conversationTitle(conversation, me.id, participantById, event.name)
@@ -77,10 +79,23 @@ export default function GroupConversation() {
   const memberCount = conversation?.memberIds.length ?? 0;
 
   const scroller = React.useRef<ScrollView>(null);
+  const lastAutoScrolledMessage = React.useRef<string | null>(null);
   const [composerHeight, setComposerHeight] = React.useState(
     DEFAULT_MESSAGE_COMPOSER_HEIGHT,
   );
   const runs = groupThread(messages);
+  const newestMessageClientId = messages[messages.length - 1]?.clientId ?? null;
+
+  const handleContentSizeChange = () => {
+    if (
+      !newestMessageClientId ||
+      newestMessageClientId === lastAutoScrolledMessage.current
+    ) {
+      return;
+    }
+    lastAutoScrolledMessage.current = newestMessageClientId;
+    scroller.current?.scrollToEnd({ animated: false });
+  };
 
   const openSettings = () => {
     if (!conversationId) return;
@@ -142,7 +157,7 @@ export default function GroupConversation() {
             gap: 8,
           }}
           showsVerticalScrollIndicator={false}
-          onContentSizeChange={() => scroller.current?.scrollToEnd({ animated: false })}>
+          onContentSizeChange={handleContentSizeChange}>
           {error ? <Text style={styles.notice}>{error}</Text> : null}
 
           {runs.map((run) => {
@@ -163,14 +178,12 @@ export default function GroupConversation() {
                     <View
                       key={message.clientId}
                       style={mine ? styles.outgoingRow : styles.incomingRow}>
-                      <View
-                        style={[
-                          styles.bubble,
-                          mine ? styles.bubbleOutgoing : styles.bubbleIncoming,
-                          message.pending && styles.bubblePending,
-                        ]}>
-                        <Text style={styles.bubbleText}>{message.body}</Text>
-                      </View>
+                      <ChatMessageBubble
+                        message={message}
+                        mine={mine}
+                        myParticipantId={me.id}
+                        onReact={(emoji) => react(message.id, emoji)}
+                      />
                       {/* Avatar sits beside the last bubble of a run only. */}
                       {last && mine ? (
                         <ParticipantAvatar participant={me} size={24} />
@@ -272,27 +285,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     bottom: 0,
-  },
-  bubble: {
-    maxWidth: '82%',
-    paddingHorizontal: 16,
-    paddingVertical: 18,
-  },
-  bubbleIncoming: {
-    backgroundColor: '#1c211e',
-  },
-  bubbleOutgoing: {
-    backgroundColor: '#1e3629',
-  },
-  /** Queued while offline; firms up once the server has it. */
-  bubblePending: {
-    opacity: 0.55,
-  },
-  bubbleText: {
-    fontFamily: fonts.regular,
-    fontSize: 14,
-    lineHeight: 20,
-    color: '#ffffff',
   },
   notice: {
     fontFamily: fonts.regular,

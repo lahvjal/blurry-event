@@ -109,6 +109,11 @@ export type ConversationSummary = Conversation & {
   unreadCount: number;
 };
 
+export type ChatMessageReaction = {
+  participantId: string;
+  emoji: string;
+};
+
 export type ChatMessage = {
   id: string;
   conversationId: string;
@@ -121,6 +126,7 @@ export type ChatMessage = {
    */
   clientId: string;
   createdAt: string;
+  reactions: ChatMessageReaction[];
   /** True while the send is still sitting in the offline queue. */
   pending?: boolean;
 };

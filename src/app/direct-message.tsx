@@ -16,6 +16,7 @@ import {
   DEFAULT_MESSAGE_COMPOSER_HEIGHT,
   MessageComposer,
 } from '@/components/message-composer';
+import { ChatMessageBubble } from '@/components/chat-message-bubble';
 import {
   FLOATING_GLASS_BLUR_INTENSITY,
   FLOATING_GLASS_TINT,
@@ -103,7 +104,8 @@ export default function DirectMessage() {
   }, [params.id, params.participant]);
 
   const { conversation } = useConversationDetail(conversationId);
-  const { messages, loading, error, send } = useConversation(conversationId);
+  const { messages, loading, error, send, react } =
+    useConversation(conversationId);
 
   /** The first message to a new person is what brings the thread into being. */
   const handleSend = async (text: string) => {
@@ -133,11 +135,24 @@ export default function DirectMessage() {
   const otherInitials = initialsOf(otherName);
 
   const scroller = React.useRef<ScrollView>(null);
+  const lastAutoScrolledMessage = React.useRef<string | null>(null);
   const [composerHeight, setComposerHeight] = React.useState(
     DEFAULT_MESSAGE_COMPOSER_HEIGHT,
   );
   const runs = groupThread(messages);
   const notice = openError ?? error;
+  const newestMessageClientId = messages[messages.length - 1]?.clientId ?? null;
+
+  const handleContentSizeChange = () => {
+    if (
+      !newestMessageClientId ||
+      newestMessageClientId === lastAutoScrolledMessage.current
+    ) {
+      return;
+    }
+    lastAutoScrolledMessage.current = newestMessageClientId;
+    scroller.current?.scrollToEnd({ animated: false });
+  };
 
   const openSettings = () => {
     if (!conversationId) return;
@@ -209,7 +224,7 @@ export default function DirectMessage() {
             gap: 8,
           }}
           showsVerticalScrollIndicator={false}
-          onContentSizeChange={() => scroller.current?.scrollToEnd({ animated: false })}>
+          onContentSizeChange={handleContentSizeChange}>
           {notice ? <Text style={styles.notice}>{notice}</Text> : null}
 
           {runs.map((run) => {
@@ -228,17 +243,12 @@ export default function DirectMessage() {
                   <View
                     key={message.clientId}
                     style={mine ? styles.outgoingRow : styles.incomingRow}>
-                    <View
-                      style={[
-                        styles.bubble,
-                        mine ? styles.bubbleOutgoing : styles.bubbleIncoming,
-                        message.pending && styles.bubblePending,
-                      ]}>
-                      <Text
-                        style={[styles.bubbleText, mine && { textAlign: 'right' }]}>
-                        {message.body}
-                      </Text>
-                    </View>
+                    <ChatMessageBubble
+                      message={message}
+                      mine={mine}
+                      myParticipantId={me.id}
+                      onReact={(emoji) => react(message.id, emoji)}
+                    />
                     {/* Avatar sits beside the last bubble of a run only. */}
                     {i === run.messages.length - 1 ? (
                       <View
@@ -348,27 +358,6 @@ const styles = StyleSheet.create({
   },
   bubbleAvatarRight: {
     marginBottom: 2,
-  },
-  bubble: {
-    maxWidth: '82%',
-    paddingHorizontal: 16,
-    paddingVertical: 18,
-  },
-  bubbleIncoming: {
-    backgroundColor: '#1c211e',
-  },
-  bubbleOutgoing: {
-    backgroundColor: '#1e3629',
-  },
-  /** Queued while offline; firms up once the server has it. */
-  bubblePending: {
-    opacity: 0.55,
-  },
-  bubbleText: {
-    fontFamily: fonts.regular,
-    fontSize: 14,
-    lineHeight: 20,
-    color: '#ffffff',
   },
   notice: {
     fontFamily: fonts.regular,

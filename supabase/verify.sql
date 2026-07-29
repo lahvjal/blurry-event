@@ -85,6 +85,14 @@ select * from (values
   ('0010  team arrangement locked to signed-in callers',
    not has_function_privilege('anon', 'public.apply_team_assignments(uuid, jsonb)', 'execute')),
 
+  ('0017  message reactions table present',
+   exists (select 1 from information_schema.tables
+     where table_schema='public' and table_name='message_reactions')),
+
+  ('0017  reactions in the realtime publication',
+   exists (select 1 from pg_publication_tables
+     where pubname='supabase_realtime' and tablename='message_reactions')),
+
   ('RLS   enabled on every public table',
    not exists (select 1 from pg_tables
      where schemaname='public' and rowsecurity = false)),

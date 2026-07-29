@@ -2,6 +2,7 @@ import { isPermanentError, supabase } from '@/lib/supabase';
 import { enqueue } from '@/lib/sync';
 import {
   ChatMessage,
+  ChatMessageReaction,
   Conversation,
   ConversationKind,
   ConversationSummary,
@@ -36,6 +37,13 @@ type MessageRow = {
   body: string;
   client_id: string;
   created_at: string;
+  message_reactions?: ReactionRow[] | null;
+};
+
+type ReactionRow = {
+  message_id?: string;
+  participant_id: string;
+  emoji: string;
 };
 
 /**
@@ -64,6 +72,10 @@ function toMessage(row: MessageRow): ChatMessage {
     body: row.body,
     clientId: row.client_id,
     createdAt: row.created_at,
+    reactions: (row.message_reactions ?? []).map((reaction) => ({
+      participantId: reaction.participant_id,
+      emoji: reaction.emoji,
+    })),
   };
 }
 
@@ -116,15 +128,28 @@ export async function fetchConversation(id: string): Promise<Conversation | null
 export async function fetchMessages(conversationId: string): Promise<ChatMessage[]> {
   // Newest-first with a limit uses the (conversation_id, created_at desc)
   // index and keeps the most recent page; flip it for display.
-  const { data, error } = await supabase
-    .from('messages')
-    .select('id, conversation_id, sender_id, body, client_id, created_at')
-    .eq('conversation_id', conversationId)
-    .order('created_at', { ascending: false })
-    .limit(MESSAGE_PAGE);
+  const query = (selection: string) =>
+    supabase
+      .from('messages')
+      .select(selection)
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: false })
+      .limit(MESSAGE_PAGE);
+
+  let { data, error } = await query(
+    'id, conversation_id, sender_id, body, client_id, created_at, message_reactions(participant_id, emoji)',
+  );
+
+  // Keeps chat readable during the short rollout window before migration 0017
+  // reaches Supabase. Reactions simply remain empty until the table exists.
+  if (error?.code === 'PGRST200' || error?.code === 'PGRST205') {
+    ({ data, error } = await query(
+      'id, conversation_id, sender_id, body, client_id, created_at',
+    ));
+  }
 
   if (error) throw error;
-  return ((data ?? []) as MessageRow[]).map(toMessage).reverse();
+  return ((data ?? []) as unknown as MessageRow[]).map(toMessage).reverse();
 }
 
 /**
@@ -149,6 +174,7 @@ export async function sendMessage(params: {
     body: params.body,
     clientId,
     createdAt: new Date().toISOString(),
+    reactions: [],
     pending: true,
   };
 
@@ -175,6 +201,38 @@ export async function sendMessage(params: {
   });
 
   return optimistic;
+}
+
+/**
+ * Adds or removes one participant's emoji on a message. The caller updates the
+ * bubble optimistically; realtime then mirrors the same change to everyone
+ * else with the thread open.
+ */
+export async function toggleMessageReaction(params: {
+  messageId: string;
+  participantId: string;
+  emoji: string;
+  remove: boolean;
+}): Promise<void> {
+  if (params.remove) {
+    const { error } = await supabase
+      .from('message_reactions')
+      .delete()
+      .eq('message_id', params.messageId)
+      .eq('participant_id', params.participantId)
+      .eq('emoji', params.emoji);
+    if (error) throw error;
+    return;
+  }
+
+  const { error } = await supabase.from('message_reactions').insert({
+    message_id: params.messageId,
+    participant_id: params.participantId,
+    emoji: params.emoji,
+  });
+
+  // The composite key makes a repeated tap/retry harmless.
+  if (error && error.code !== '23505') throw error;
 }
 
 /** Clears the unread badge. Failures are the caller's to ignore. */
@@ -303,6 +361,52 @@ export function subscribeToMessages(
           : {}),
       },
       (payload) => onInsert(toMessage(payload.new as MessageRow)),
+    )
+    .subscribe();
+
+  return () => {
+    void supabase.removeChannel(channel);
+  };
+}
+
+export type MessageReactionChange = {
+  event: 'INSERT' | 'DELETE';
+  messageId: string;
+  reaction: ChatMessageReaction;
+};
+
+/** Live reaction changes for any readable message; the open thread ignores
+ * rows whose message id is not currently on screen. */
+export function subscribeToMessageReactions(
+  onChange: (change: MessageReactionChange) => void,
+): () => void {
+  channelSequence += 1;
+  const channel = supabase
+    .channel(`message-reactions:${channelSequence}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'message_reactions',
+      },
+      (payload) => {
+        if (payload.eventType !== 'INSERT' && payload.eventType !== 'DELETE') {
+          return;
+        }
+        const row = (
+          payload.eventType === 'DELETE' ? payload.old : payload.new
+        ) as ReactionRow;
+        if (!row.message_id || !row.participant_id || !row.emoji) return;
+        onChange({
+          event: payload.eventType,
+          messageId: row.message_id,
+          reaction: {
+            participantId: row.participant_id,
+            emoji: row.emoji,
+          },
+        });
+      },
     )
     .subscribe();
 

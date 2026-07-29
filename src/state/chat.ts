@@ -8,13 +8,16 @@ import {
   fetchMessages,
   markConversationRead,
   sendMessage,
+  subscribeToMessageReactions,
   subscribeToMessages,
+  toggleMessageReaction,
 } from '@/lib/chat';
 import { refreshUnread, setUnreadTotal } from '@/state/unread';
 import { supabase } from '@/lib/supabase';
 import { useEvent } from '@/state/event';
 import {
   ChatMessage,
+  ChatMessageReaction,
   Conversation,
   ConversationSummary,
   Participant,
@@ -147,6 +150,15 @@ export function useConversation(conversationId: string | null) {
     );
   }, [conversationId]);
 
+  useEffect(() => {
+    if (!conversationId) return;
+    return subscribeToMessageReactions((change) =>
+      setMessages((prev) =>
+        mergeReaction(prev, change.messageId, change.reaction, change.event),
+      ),
+    );
+  }, [conversationId]);
+
   // Clear the badge on open, and again as messages arrive while it's open.
   useEffect(() => {
     if (!conversationId || messages.length === 0 || !me.claimed) return;
@@ -177,7 +189,56 @@ export function useConversation(conversationId: string | null) {
     [conversationId, me.id],
   );
 
-  return { messages, loading, error, send, reload };
+  const react = useCallback(
+    async (messageId: string, emoji: string) => {
+      const cleaned = emoji.trim();
+      const message = messages.find((candidate) => candidate.id === messageId);
+      if (
+        !message ||
+        message.pending ||
+        message.id.startsWith('local-') ||
+        !cleaned
+      ) {
+        return;
+      }
+
+      const reaction: ChatMessageReaction = {
+        participantId: me.id,
+        emoji: cleaned,
+      };
+      const remove = message.reactions.some(
+        (item) =>
+          item.participantId === reaction.participantId &&
+          item.emoji === reaction.emoji,
+      );
+
+      setMessages((prev) =>
+        mergeReaction(
+          prev,
+          messageId,
+          reaction,
+          remove ? 'DELETE' : 'INSERT',
+        ),
+      );
+
+      try {
+        await toggleMessageReaction({
+          messageId,
+          participantId: me.id,
+          emoji: cleaned,
+          remove,
+        });
+        setError(null);
+      } catch (caught) {
+        setError(errorText(caught));
+        // The server remains authoritative if the optimistic change failed.
+        void reload();
+      }
+    },
+    [me.id, messages, reload],
+  );
+
+  return { messages, loading, error, send, react, reload };
 }
 
 /**
@@ -188,10 +249,42 @@ function mergeMessage(list: ChatMessage[], incoming: ChatMessage): ChatMessage[]
   const at = list.findIndex((m) => m.clientId === incoming.clientId);
   if (at !== -1) {
     const next = [...list];
-    next[at] = incoming;
+    next[at] = {
+      ...incoming,
+      reactions:
+        incoming.reactions.length > 0
+          ? incoming.reactions
+          : list[at].reactions,
+    };
     return next;
   }
   return [...list, incoming].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+function mergeReaction(
+  list: ChatMessage[],
+  messageId: string,
+  reaction: ChatMessageReaction,
+  event: 'INSERT' | 'DELETE',
+): ChatMessage[] {
+  return list.map((message) => {
+    if (message.id !== messageId) return message;
+
+    const matches = (item: ChatMessageReaction) =>
+      item.participantId === reaction.participantId &&
+      item.emoji === reaction.emoji;
+    const exists = message.reactions.some(matches);
+
+    if (event === 'INSERT') {
+      if (exists) return message;
+      return { ...message, reactions: [...message.reactions, reaction] };
+    }
+    if (!exists) return message;
+    return {
+      ...message,
+      reactions: message.reactions.filter((item) => !matches(item)),
+    };
+  });
 }
 
 // --- Display helpers --------------------------------------------------------
@@ -269,6 +362,13 @@ export function formatInboxTime(iso: string | null): string {
   return new Date(iso).toLocaleDateString(undefined, {
     month: 'numeric',
     day: 'numeric',
+  });
+}
+
+export function formatMessageTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
   });
 }
 
