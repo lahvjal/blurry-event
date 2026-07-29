@@ -266,7 +266,7 @@ type EventState = {
         | 'teeColor'
       >
     >,
-  ) => void;
+  ) => Promise<boolean>;
   /** Edits one hole of the scorecard. `hole` is 1-based. */
   updateHole: (hole: number, patch: Partial<Pick<Hole, 'par' | 'yards'>>) => void;
   postAnnouncement: (body: string) => void;
@@ -439,12 +439,14 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
    */
   const persist = useCallback(
     async (what: string, work: () => Promise<void>) => {
-      if (!isLive) return;
+      if (!isLive) return true;
       try {
         await work();
+        return true;
       } catch (error) {
         Alert.alert(`Couldn't save ${what}`, reasonFor(error));
         await loadFromServer().catch(() => {});
+        return false;
       }
     },
     [isLive, loadFromServer],
@@ -680,10 +682,9 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   );
 
   const updateEvent = useCallback<EventState['updateEvent']>(
-    (patch) => {
-      setEvent((prev) => ({ ...prev, ...patch }));
-
-      void persist('the event details', async () => {
+    async (patch) => {
+      let savedPatch = patch;
+      const saved = await persist('the event details', async () => {
         // A freshly picked course map is a local file:// uri, which resolves to
         // nothing on anybody else's phone. The bytes go to Storage first and the
         // public url is what gets saved.
@@ -692,13 +693,15 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
             ? await apiUploadImage('course', patch.courseMapUrl)
             : null;
 
-        await apiUpdateEvent(event.id, {
+        savedPatch = {
           ...patch,
           courseMapUrl: uploaded ?? patch.courseMapUrl,
-        });
-
-        if (uploaded) setEvent((prev) => ({ ...prev, courseMapUrl: uploaded }));
+        };
+        await apiUpdateEvent(event.id, savedPatch);
       });
+
+      if (saved) setEvent((prev) => ({ ...prev, ...savedPatch }));
+      return saved;
     },
     [event.id, persist],
   );

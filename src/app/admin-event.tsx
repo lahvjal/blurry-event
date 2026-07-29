@@ -95,6 +95,42 @@ function dateFromTime(value: string): Date {
   return date;
 }
 
+function showMessage(title: string, message: string) {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    window.alert(`${title}\n\n${message}`);
+    return;
+  }
+  Alert.alert(title, message);
+}
+
+function confirmAction({
+  title,
+  message,
+  confirmLabel,
+  destructive = false,
+  onConfirm,
+}: {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  destructive?: boolean;
+  onConfirm: () => void;
+}) {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    if (window.confirm(`${title}\n\n${message}`)) onConfirm();
+    return;
+  }
+
+  Alert.alert(title, message, [
+    { text: 'Cancel', style: 'cancel' },
+    {
+      text: confirmLabel,
+      style: destructive ? 'destructive' : 'default',
+      onPress: onConfirm,
+    },
+  ]);
+}
+
 type Picker = 'date' | 'checkIn' | 'start' | 'firstTee' | null;
 
 export default function AdminEvent() {
@@ -104,6 +140,7 @@ export default function AdminEvent() {
 
   const [draft, setDraft] = useState<EventDraft>(() => draftFrom(event));
   const [picker, setPicker] = useState<Picker>(null);
+  const [saving, setSaving] = useState(false);
 
   // Tee time generator inputs (not part of the draft — they're just controls).
   const [firstTee, setFirstTee] = useState(event.teeTimes[0] ?? '8:00 AM');
@@ -137,33 +174,43 @@ export default function AdminEvent() {
   const patch = (next: Partial<EventDraft>) => setDraft((prev) => ({ ...prev, ...next }));
 
   const save = () => {
+    if (saving) return;
     if (draft.name.trim() === '') {
-      Alert.alert('Name required', 'The event needs a name.');
+      showMessage('Name required', 'The event needs a name.');
       return;
     }
 
-    const commit = () => {
-      updateEvent({
+    const commit = async () => {
+      setSaving(true);
+      const saved = await updateEvent({
         ...draft,
         name: draft.name.trim(),
         courseName: draft.courseName.trim(),
       });
+      if (!saved) {
+        setSaving(false);
+        showMessage(
+          "Couldn't save event details",
+          'Check your connection and admin access, then try again.',
+        );
+        return;
+      }
+
       // Clearing happens here, not while editing, so discarding leaves teams alone.
       orphanedTeams.forEach((t) => updateTeam(t.id, { teeTime: null }));
       router.back();
     };
 
     if (orphanedTeams.length > 0) {
-      Alert.alert(
-        'Some tee times will be cleared',
-        `${orphanedTeams.map((t) => t.name).join(', ')} ${orphanedTeams.length === 1 ? 'is' : 'are'} on a slot that's no longer in the list. Their tee time will be cleared so you can reassign it.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Save', style: 'destructive', onPress: commit },
-        ],
-      );
+      confirmAction({
+        title: 'Some tee times will be cleared',
+        message: `${orphanedTeams.map((t) => t.name).join(', ')} ${orphanedTeams.length === 1 ? 'is' : 'are'} on a slot that's no longer in the list. Their tee time will be cleared so you can reassign it.`,
+        confirmLabel: 'Save',
+        destructive: true,
+        onConfirm: () => void commit(),
+      });
     } else {
-      commit();
+      void commit();
     }
   };
 
@@ -588,11 +635,19 @@ export default function AdminEvent() {
       {/* Save bar — only present when there's something to save. */}
       {dirty ? (
         <View style={[styles.saveBar, { paddingBottom: insets.bottom + 12 }]}>
-          <Pressable style={styles.discardButton} onPress={discard}>
+          <Pressable
+            style={[styles.discardButton, saving && styles.buttonDisabled]}
+            disabled={saving}
+            onPress={discard}>
             <Text style={styles.discardText}>DISCARD</Text>
           </Pressable>
-          <Pressable style={styles.saveButton} onPress={save}>
-            <Text style={styles.saveText}>SAVE CHANGES</Text>
+          <Pressable
+            style={[styles.saveButton, saving && styles.buttonDisabled]}
+            disabled={saving}
+            onPress={save}>
+            <Text style={styles.saveText}>
+              {saving ? 'SAVING…' : 'SAVE CHANGES'}
+            </Text>
           </Pressable>
         </View>
       ) : null}
@@ -878,5 +933,8 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     fontSize: 12,
     color: '#0d1a12',
+  },
+  buttonDisabled: {
+    opacity: 0.55,
   },
 });
