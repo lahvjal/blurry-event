@@ -258,7 +258,7 @@ export function useConversation(conversationId: string | null) {
         return true;
       } catch (caught) {
         setError(errorText(caught));
-        return false;
+        throw caught;
       }
     },
     [conversationId, me.id],

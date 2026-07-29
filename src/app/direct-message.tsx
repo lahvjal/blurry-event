@@ -169,7 +169,7 @@ export default function DirectMessage() {
       setOpenError(
         (caught as { message?: string })?.message ?? 'Could not send that message.',
       );
-      return false;
+      throw caught;
     }
   };
 

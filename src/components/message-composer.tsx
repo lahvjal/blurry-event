@@ -108,9 +108,23 @@ export function MessageComposer({
     setSending(true);
     try {
       const accepted = await onSend?.(text.trim(), attachment);
-      if (accepted === false) return;
+      if (accepted === false) {
+        Alert.alert(
+          attachment ? 'Photo not sent' : 'Message not sent',
+          'Please try again.',
+        );
+        return;
+      }
       setText('');
       setAttachment(null);
+    } catch (caught) {
+      const message =
+        caught && typeof caught === 'object' && 'message' in caught
+          ? String((caught as { message: unknown }).message)
+          : attachment
+            ? 'The photo could not be prepared or uploaded.'
+            : 'The message could not be sent.';
+      Alert.alert(attachment ? 'Photo not sent' : 'Message not sent', message);
     } finally {
       sendingRef.current = false;
       setSending(false);

@@ -325,7 +325,10 @@ async function readMediaBytes(uri: string): Promise<ArrayBuffer> {
 }
 
 /**
- * Resizes photos before encoding them as WebP. Animated GIFs are deliberately
+ * Resizes photos before encoding them as JPEG. JPEG is used because iOS PWAs
+ * do not consistently expose WebP encoding through canvas.toBlob, while Expo's
+ * JPEG path is supported across native iOS, Android, and web. GIFs are
+ * deliberately
  * kept intact: image re-encoders flatten them to one frame, so their safety
  * control is the upload cap rather than destructive recompression.
  */
@@ -365,7 +368,7 @@ async function prepareMessageMedia(
   const rendered = await context.renderAsync();
   const result = await rendered.saveAsync({
     compress: PHOTO_COMPRESSION,
-    format: SaveFormat.WEBP,
+    format: SaveFormat.JPEG,
   });
   const compressedBytes = await readMediaBytes(result.uri);
   if (compressedBytes.byteLength > MAX_MESSAGE_MEDIA_BYTES) {
@@ -374,8 +377,8 @@ async function prepareMessageMedia(
 
   return {
     bytes: compressedBytes,
-    mimeType: 'image/webp',
-    extension: 'webp',
+    mimeType: 'image/jpeg',
+    extension: 'jpg',
     width: result.width || null,
     height: result.height || null,
   };
