@@ -119,9 +119,22 @@ const HEAD = `
         // is exactly when this runs, so the shell stayed short even once the
         // override was cleared. innerHeight is the layout viewport, which the
         // keyboard overlays rather than resizes, so it holds the full height.
+        // Runs only while the shell is actually shrunk. A keyboard can be
+        // dismissed without blurring the field — swipe-down and Done both
+        // leave the message composer focused — so there is no focusout, and
+        // iOS does not reliably emit a viewport event either. Without this
+        // the shell would stay short indefinitely. Self-limiting: starts on
+        // shrink, stops the moment there isn't one.
+        var watchdog = null;
         var syncViewport = function () {
           var covered = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
           var shrink = isEditing() && covered >= 120;
+          if (shrink && watchdog === null) {
+            watchdog = setInterval(syncViewport, 250);
+          } else if (!shrink && watchdog !== null) {
+            clearInterval(watchdog);
+            watchdog = null;
+          }
           root.style.setProperty('--app-height', (shrink ? vv.height : window.innerHeight) + 'px');
           root.style.setProperty('--app-offset-top', (shrink ? vv.offsetTop : 0) + 'px');
           window.scrollTo(0, 0);

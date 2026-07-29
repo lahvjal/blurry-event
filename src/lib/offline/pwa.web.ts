@@ -85,9 +85,31 @@ function ensureViewportPinned() {
   const vv = window.visualViewport;
   const root = document.documentElement;
 
+  /**
+   * Runs only while the shell is actually shrunk.
+   *
+   * A keyboard can be dismissed without blurring the field — swipe-down, or
+   * the Done key, both leave the message composer focused. There is then no
+   * `focusout`, and iOS does not reliably emit a viewport event either, so
+   * nothing tells us to grow back and the shell stays short indefinitely.
+   * Every other field in the app gets blurred by tapping away, which is why
+   * the composer was the one that kept doing this.
+   *
+   * Self-limiting: it starts when a shrink is applied and stops the moment one
+   * isn't, so it never ticks while the app is simply sitting there.
+   */
+  let watchdog: ReturnType<typeof setInterval> | null = null;
+
   const sync = () => {
     const covered = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
     const shrink = isEditing() && covered >= KEYBOARD_MIN_INSET;
+
+    if (shrink && watchdog === null) {
+      watchdog = setInterval(sync, 250);
+    } else if (!shrink && watchdog !== null) {
+      clearInterval(watchdog);
+      watchdog = null;
+    }
 
     // Always an explicit pixel height — never handed back to `100dvh`.
     // Falling back to the unit was the bug: iOS can leave viewport units stale
