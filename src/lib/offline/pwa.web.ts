@@ -59,18 +59,17 @@ function ensurePinchZoomBlocked() {
  * Shrinks `#root` to the visible area **only while a field is being typed
  * into**, and restores it the moment that field is done.
  *
- * Two conditions, and the focus one is what makes this safe. Deciding from the
- * measurement alone meant a keyboard that closed without the viewport
- * reporting all the way back left the app permanently short, showing a strip
- * of bare `body` under the nav until reload. Focus is unambiguous: nothing
- * focused, nothing covering the app, full height. The measurement then only
- * decides *how much* to shrink, never whether to stay shrunk.
+ * Two conditions make this safe: an editable field must be focused and the
+ * visible viewport must be materially shorter than the cached full height.
+ * Focus alone is not enough because iOS leaves the composer focused after the
+ * keyboard is dismissed.
  *
  * The covered gap is measured rather than heights compared, because Safari
  * both shortens the visual viewport and pans it — `offsetTop` is the panned
  * part and counts toward what the keyboard hides.
  */
 const KEYBOARD_MIN_INSET = 120;
+const VIEWPORT_HANDLER_ATTRIBUTE = 'data-blurry-viewport-handler';
 
 function isEditing(): boolean {
   const el = document.activeElement as HTMLElement | null;
@@ -84,9 +83,20 @@ function ensureViewportPinned() {
   if (!window.visualViewport) return;
   const vv = window.visualViewport;
   const root = document.documentElement;
+  // The production HTML installs this before React starts. This guard also
+  // prevents duplicate listeners when development Strict Mode re-runs effects.
+  if (root.hasAttribute(VIEWPORT_HANDLER_ATTRIBUTE)) return;
+  root.setAttribute(VIEWPORT_HANDLER_ATTRIBUTE, '');
+
+  // Capture the unobstructed layout before a field can summon the keyboard.
+  // On iOS, `innerHeight` can shrink with the keyboard even when
+  // `interactive-widget=overlays-content` is requested, so it cannot be used
+  // as the restoration height after editing has begun.
+  let fullHeight = Math.max(window.innerHeight, vv.height + vv.offsetTop);
 
   /**
-   * Runs only while the shell is actually shrunk.
+   * Runs only while the keyboard is covering the app or finishing its closing
+   * animation.
    *
    * A keyboard can be dismissed without blurring the field — swipe-down, or
    * the Done key, both leave the message composer focused. There is then no
@@ -95,31 +105,54 @@ function ensureViewportPinned() {
    * Every other field in the app gets blurred by tapping away, which is why
    * the composer was the one that kept doing this.
    *
-   * Self-limiting: it starts when a shrink is applied and stops the moment one
-   * isn't, so it never ticks while the app is simply sitting there.
+   * Self-limiting: it starts when a shrink is applied and stops once the full
+   * viewport measurements return, so it never ticks while the app is idle.
    */
   let watchdog: ReturnType<typeof setInterval> | null = null;
+  let keyboardActive = false;
 
   const sync = () => {
-    const covered = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-    const shrink = isEditing() && covered >= KEYBOARD_MIN_INSET;
+    const editing = isEditing();
+    const measuredHeight = Math.max(
+      window.innerHeight,
+      vv.height + vv.offsetTop,
+    );
 
-    if (shrink && watchdog === null) {
+    // Browser chrome can disappear and reveal more space while a field is
+    // focused, so the baseline may grow. Do not let it shrink until a previous
+    // keyboard has visibly finished closing: focusout fires at the start of
+    // that animation, while all of Safari's height readings are still short.
+    fullHeight =
+      editing || keyboardActive
+        ? Math.max(fullHeight, measuredHeight)
+        : measuredHeight;
+
+    const covered = Math.max(0, fullHeight - vv.height - vv.offsetTop);
+    const shrink = editing && covered >= KEYBOARD_MIN_INSET;
+    if (shrink) {
+      keyboardActive = true;
+    } else if (
+      keyboardActive &&
+      measuredHeight >= fullHeight - 1 &&
+      covered < KEYBOARD_MIN_INSET
+    ) {
+      keyboardActive = false;
+    }
+
+    if ((shrink || keyboardActive) && watchdog === null) {
       watchdog = setInterval(sync, 250);
-    } else if (!shrink && watchdog !== null) {
+    } else if (!shrink && !keyboardActive && watchdog !== null) {
       clearInterval(watchdog);
       watchdog = null;
     }
 
-    // Always an explicit pixel height — never handed back to `100dvh`.
-    // Falling back to the unit was the bug: iOS can leave viewport units stale
-    // after a keyboard is dismissed, which is exactly when this runs, so the
-    // shell stayed short even once the override was correctly cleared.
-    // `innerHeight` is the layout viewport, which the keyboard overlays rather
-    // than resizes, so it holds the true full height throughout.
+    // Keep the page backdrop at the cached full height. Otherwise a stale
+    // `100dvh` on `body` clips the restored root because body overflow is
+    // intentionally hidden.
+    root.style.setProperty('--app-full-height', `${fullHeight}px`);
     root.style.setProperty(
       '--app-height',
-      `${shrink ? vv.height : window.innerHeight}px`,
+      `${shrink ? vv.height : fullHeight}px`,
     );
     root.style.setProperty(
       '--app-offset-top',
@@ -195,16 +228,16 @@ function ensureBaseStyle() {
   style.textContent = `
     html, body {
       height: 100vh !important;
-      height: 100dvh !important;
+      height: var(--app-full-height, 100dvh) !important;
       min-height: 100vh !important;
-      min-height: 100dvh !important;
+      min-height: var(--app-full-height, 100dvh) !important;
       background-color: #131715;
       touch-action: pan-x pan-y;
     }
     #root {
       /* 100vh first for anything without dvh; the var line then wins where it
-         parses. With no keyboard the var is unset, so this is plain 100dvh —
-         the full screen, flush to the bottom edge. */
+         parses. 100dvh covers the moment before the viewport handler writes
+         its first explicit pixel height. */
       height: 100vh !important;
       height: var(--app-height, 100dvh) !important;
       min-height: 100vh !important;

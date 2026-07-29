@@ -34,16 +34,16 @@ const HEAD = `
     <style id="blurry-shell">
       html, body {
         height: 100vh !important;
-        height: 100dvh !important;
+        height: var(--app-full-height, 100dvh) !important;
         min-height: 100vh !important;
-        min-height: 100dvh !important;
+        min-height: var(--app-full-height, 100dvh) !important;
         background-color: #131715;
         touch-action: pan-x pan-y;
       }
       #root {
         /* 100vh first for anything without dvh; the var line then wins where
-           it parses. With no keyboard the var is unset, so this is plain
-           100dvh — the full screen, flush to the bottom edge. */
+           it parses. 100dvh covers the moment before the viewport handler
+           writes its first explicit pixel height. */
         height: 100vh !important;
         height: var(--app-height, 100dvh) !important;
         min-height: 100vh !important;
@@ -102,9 +102,14 @@ const HEAD = `
     </style>
     <script>
       document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
-      if (window.visualViewport) {
+      if (window.visualViewport && !document.documentElement.hasAttribute('data-blurry-viewport-handler')) {
         var vv = window.visualViewport;
         var root = document.documentElement;
+        root.setAttribute('data-blurry-viewport-handler', '');
+        // Capture the unobstructed layout before a field can summon the
+        // keyboard. iOS may resize innerHeight even though overlays-content
+        // was requested, so it is not a safe restoration height after focus.
+        var fullHeight = Math.max(window.innerHeight, vv.height + vv.offsetTop);
         // Shrink only while a field is actually being typed into. Deciding
         // from the measurement alone meant a keyboard that closed without the
         // viewport reporting all the way back left the app permanently short,
@@ -114,28 +119,40 @@ const HEAD = `
           if (!el) return false;
           return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable;
         };
-        // Always an explicit pixel height — never handed back to 100dvh. iOS
-        // can leave viewport units stale after a keyboard is dismissed, which
-        // is exactly when this runs, so the shell stayed short even once the
-        // override was cleared. innerHeight is the layout viewport, which the
-        // keyboard overlays rather than resizes, so it holds the full height.
-        // Runs only while the shell is actually shrunk. A keyboard can be
-        // dismissed without blurring the field — swipe-down and Done both
-        // leave the message composer focused — so there is no focusout, and
-        // iOS does not reliably emit a viewport event either. Without this
-        // the shell would stay short indefinitely. Self-limiting: starts on
-        // shrink, stops the moment there isn't one.
+        // Always use explicit pixel heights. iOS can leave both viewport units
+        // and innerHeight short after the keyboard is dismissed, so the cached
+        // pre-focus height is the only safe restoration target.
+        // Runs only while the keyboard is covering the app or finishing its
+        // closing animation. Swipe-down and Done can leave the composer
+        // focused, and iOS does not reliably emit a viewport event for the
+        // dismissal. Self-limiting: starts on shrink, stops when the full
+        // measurements return.
         var watchdog = null;
+        var keyboardActive = false;
         var syncViewport = function () {
-          var covered = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-          var shrink = isEditing() && covered >= 120;
-          if (shrink && watchdog === null) {
+          var editing = isEditing();
+          var measuredHeight = Math.max(window.innerHeight, vv.height + vv.offsetTop);
+          // A focused keyboard is allowed to make the measurements shorter,
+          // but it must never redefine the cached full device height. Keep the
+          // baseline through focusout too, while the keyboard is animating.
+          fullHeight = editing || keyboardActive
+            ? Math.max(fullHeight, measuredHeight)
+            : measuredHeight;
+          var covered = Math.max(0, fullHeight - vv.height - vv.offsetTop);
+          var shrink = editing && covered >= 120;
+          if (shrink) {
+            keyboardActive = true;
+          } else if (keyboardActive && measuredHeight >= fullHeight - 1 && covered < 120) {
+            keyboardActive = false;
+          }
+          if ((shrink || keyboardActive) && watchdog === null) {
             watchdog = setInterval(syncViewport, 250);
-          } else if (!shrink && watchdog !== null) {
+          } else if (!shrink && !keyboardActive && watchdog !== null) {
             clearInterval(watchdog);
             watchdog = null;
           }
-          root.style.setProperty('--app-height', (shrink ? vv.height : window.innerHeight) + 'px');
+          root.style.setProperty('--app-full-height', fullHeight + 'px');
+          root.style.setProperty('--app-height', (shrink ? vv.height : fullHeight) + 'px');
           root.style.setProperty('--app-offset-top', (shrink ? vv.offsetTop : 0) + 'px');
           window.scrollTo(0, 0);
         };
