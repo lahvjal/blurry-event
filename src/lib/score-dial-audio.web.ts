@@ -1,77 +1,122 @@
-type WebkitAudioWindow = Window & {
-  webkitAudioContext?: typeof AudioContext;
-};
+const SAMPLE_RATE = 44_100;
+const CLICK_DURATION_SECONDS = 0.034;
+const PLAYER_COUNT = 4;
+const CLICK_VOLUME = 0.55;
 
-let audioContext: AudioContext | null = null;
+let clickUrl: string | null = null;
+let players: HTMLAudioElement[] | null = null;
+let nextPlayer = 0;
+let isPrepared = false;
 
-function getAudioContext(): AudioContext | null {
-  if (audioContext) return audioContext;
-  if (typeof window === 'undefined') return null;
-
-  const AudioContextConstructor =
-    window.AudioContext ??
-    (window as WebkitAudioWindow).webkitAudioContext;
-  if (!AudioContextConstructor) return null;
-
-  audioContext = new AudioContextConstructor();
-  return audioContext;
+function writeAscii(view: DataView, offset: number, value: string): void {
+  for (let i = 0; i < value.length; i += 1) {
+    view.setUint8(offset + i, value.charCodeAt(i));
+  }
 }
 
 /**
- * Browsers will not start audio until it is unlocked by a user gesture. The
- * dial calls this as soon as the finger lands so the first detent can click.
+ * Builds a tiny PCM WAV in memory. A short low knock under a brighter noise
+ * transient makes the detent audible through a phone speaker without sounding
+ * like a notification or requiring an asset download.
  */
-export function prepareScoreDialAudio(): void {
-  const context = getAudioContext();
-  if (context?.state === 'suspended') {
-    void context.resume().catch(() => {});
+function createClickUrl(): string {
+  if (clickUrl) return clickUrl;
+
+  const sampleCount = Math.ceil(SAMPLE_RATE * CLICK_DURATION_SECONDS);
+  const bytesPerSample = 2;
+  const wav = new ArrayBuffer(44 + sampleCount * bytesPerSample);
+  const view = new DataView(wav);
+
+  writeAscii(view, 0, 'RIFF');
+  view.setUint32(4, 36 + sampleCount * bytesPerSample, true);
+  writeAscii(view, 8, 'WAVE');
+  writeAscii(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, SAMPLE_RATE, true);
+  view.setUint32(28, SAMPLE_RATE * bytesPerSample, true);
+  view.setUint16(32, bytesPerSample, true);
+  view.setUint16(34, 16, true);
+  writeAscii(view, 36, 'data');
+  view.setUint32(40, sampleCount * bytesPerSample, true);
+
+  for (let i = 0; i < sampleCount; i += 1) {
+    const time = i / SAMPLE_RATE;
+    const attack = Math.min(1, time / 0.0007);
+    const decay = Math.exp(-time / 0.0075);
+    const noise = Math.random() * 2 - 1;
+    const knock =
+      Math.sin(2 * Math.PI * 720 * time) * 0.7 +
+      Math.sin(2 * Math.PI * 1240 * time) * 0.3;
+    const sample = Math.max(
+      -1,
+      Math.min(1, (noise * 0.52 + knock * 0.48) * attack * decay * 0.82),
+    );
+    view.setInt16(44 + i * bytesPerSample, sample * 0x7fff, true);
   }
+
+  clickUrl = URL.createObjectURL(new Blob([wav], { type: 'audio/wav' }));
+  return clickUrl;
 }
 
-function emitClick(context: AudioContext): void {
-  const now = context.currentTime;
-  const duration = 0.018;
-  const frameCount = Math.ceil(context.sampleRate * duration);
-  const buffer = context.createBuffer(1, frameCount, context.sampleRate);
-  const samples = buffer.getChannelData(0);
+function getPlayers(): HTMLAudioElement[] {
+  if (players) return players;
 
-  // A tiny, quickly decaying burst of noise reads as a physical dial detent
-  // without needing to download or decode an audio asset.
-  for (let i = 0; i < frameCount; i += 1) {
-    const decay = 1 - i / frameCount;
-    samples[i] = (Math.random() * 2 - 1) * decay;
+  const url = createClickUrl();
+  players = Array.from({ length: PLAYER_COUNT }, () => {
+    const player = new Audio(url);
+    player.preload = 'auto';
+    player.volume = CLICK_VOLUME;
+    player.setAttribute('playsinline', '');
+    player.load();
+    return player;
+  });
+  return players;
+}
+
+/**
+ * iOS requires media playback to be unlocked by a direct touch. Prime every
+ * player silently as soon as the finger lands so later dial detents can replay
+ * immediately during the drag.
+ */
+export function prepareScoreDialAudio(): void {
+  if (isPrepared) return;
+  isPrepared = true;
+
+  for (const player of getPlayers()) {
+    player.muted = true;
+    const playback = player.play();
+    if (!playback) {
+      player.pause();
+      player.currentTime = 0;
+      player.muted = false;
+      continue;
+    }
+    void playback
+      .then(() => {
+        player.pause();
+        player.currentTime = 0;
+        player.muted = false;
+      })
+      .catch(() => {
+        player.muted = false;
+        isPrepared = false;
+      });
   }
-
-  const source = context.createBufferSource();
-  const filter = context.createBiquadFilter();
-  const gain = context.createGain();
-
-  source.buffer = buffer;
-  filter.type = 'bandpass';
-  filter.frequency.setValueAtTime(1400, now);
-  filter.Q.setValueAtTime(0.8, now);
-  gain.gain.setValueAtTime(0.0001, now);
-  gain.gain.exponentialRampToValueAtTime(0.09, now + 0.001);
-  gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
-
-  source.connect(filter);
-  filter.connect(gain);
-  gain.connect(context.destination);
-  source.start(now);
-  source.stop(now + duration);
 }
 
 export function playScoreDialClick(): void {
-  const context = getAudioContext();
-  if (!context) return;
+  const pool = getPlayers();
+  const player = pool[nextPlayer];
+  nextPlayer = (nextPlayer + 1) % pool.length;
 
-  if (context.state === 'suspended') {
-    void context
-      .resume()
-      .then(() => emitClick(context))
-      .catch(() => {});
-    return;
-  }
-
-  emitClick(context);
+  player.pause();
+  player.currentTime = 0;
+  player.muted = false;
+  void player.play().catch(() => {
+    // A later touch can prepare the pool again if the browser rejected this
+    // playback attempt.
+    isPrepared = false;
+  });
 }
