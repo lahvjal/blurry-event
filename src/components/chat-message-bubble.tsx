@@ -1,10 +1,13 @@
+import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import React from 'react';
 import {
+  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -17,10 +20,20 @@ import { formatMessageTime } from '@/state/chat';
 import { ChatMessage } from '@/state/types';
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '⛳️'];
-const REACTION_PICKER_WIDTH = 266;
-const REACTION_PICKER_HEIGHT = 64;
-const REACTION_PICKER_GAP = 10;
+const REACTION_MENU_WIDTH = 266;
+const REACTION_MENU_HEIGHT = 64;
+const ACTION_MENU_WIDTH = 202;
+const ACTION_ROW_HEIGHT = 48;
+const REACTION_DETAILS_WIDTH = 260;
+const REACTION_DETAILS_HEADER_HEIGHT = 44;
+const REACTION_DETAILS_ROW_HEIGHT = 44;
+const REACTION_DETAILS_MAX_ROWS = 5;
+const MENU_GAP = 10;
 const SCREEN_EDGE_GAP = 12;
+const DOUBLE_TAP_DELAY = 280;
+const LONG_PRESS_DELAY = 400;
+
+type OverlayMode = 'reactions' | 'actions' | 'reactionDetails' | null;
 
 type ReactionSummary = {
   emoji: string;
@@ -60,27 +73,85 @@ function summarizeReactions(
 
 export function ChatMessageBubble({
   message,
+  replyToMessage,
   mine,
   myParticipantId,
+  participantNameById,
   onReact,
+  onReply,
+  onEdit,
+  onUnsend,
 }: {
   message: ChatMessage;
+  replyToMessage?: ChatMessage;
   mine: boolean;
   myParticipantId: string;
+  participantNameById: (participantId: string) => string;
   onReact: (emoji: string) => void;
+  onReply: () => void;
+  onEdit: () => void;
+  onUnsend: () => void;
 }) {
   const { width: windowWidth } = useWindowDimensions();
   const bubbleRef = React.useRef<View>(null);
-  const [pickerOpen, setPickerOpen] = React.useState(false);
+  const lastTapAt = React.useRef(0);
+  const longPressTriggered = React.useRef(false);
+  const copyCloseTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [overlayMode, setOverlayMode] = React.useState<OverlayMode>(null);
   const [addingCustom, setAddingCustom] = React.useState(false);
   const [customEmoji, setCustomEmoji] = React.useState('');
+  const [copyState, setCopyState] = React.useState<
+    'idle' | 'copied' | 'failed'
+  >('idle');
   const [anchor, setAnchor] = React.useState({
     x: SCREEN_EDGE_GAP,
-    y: REACTION_PICKER_HEIGHT + SCREEN_EDGE_GAP,
-    width: REACTION_PICKER_WIDTH,
+    y: REACTION_MENU_HEIGHT + SCREEN_EDGE_GAP,
+    width: REACTION_MENU_WIDTH,
   });
+
   const summaries = summarizeReactions(message, myParticipantId);
-  const canReact = !message.pending && !message.id.startsWith('local-');
+  const reactionUsers = React.useMemo(() => {
+    const byParticipant = new Map<string, string[]>();
+    for (const reaction of message.reactions) {
+      const emojis = byParticipant.get(reaction.participantId) ?? [];
+      if (!emojis.includes(reaction.emoji)) emojis.push(reaction.emoji);
+      byParticipant.set(reaction.participantId, emojis);
+    }
+    return [...byParticipant.entries()]
+      .map(([participantId, emojis]) => ({
+        participantId,
+        name:
+          participantId === myParticipantId
+            ? 'You'
+            : participantNameById(participantId),
+        emojis,
+      }))
+      .sort((a, b) => {
+        if (a.participantId === myParticipantId) return -1;
+        if (b.participantId === myParticipantId) return 1;
+        return a.name.localeCompare(b.name);
+      });
+  }, [message.reactions, myParticipantId, participantNameById]);
+  const canChangeMessage =
+    !message.pending && !message.id.startsWith('local-');
+  const actionCount = canChangeMessage ? (mine ? 4 : 2) : 1;
+  const actionMenuHeight = actionCount * ACTION_ROW_HEIGHT;
+  const reactionDetailsHeight =
+    REACTION_DETAILS_HEADER_HEIGHT +
+    Math.min(reactionUsers.length, REACTION_DETAILS_MAX_ROWS) *
+      REACTION_DETAILS_ROW_HEIGHT;
+  const menuWidth =
+    overlayMode === 'actions'
+      ? ACTION_MENU_WIDTH
+      : overlayMode === 'reactionDetails'
+        ? REACTION_DETAILS_WIDTH
+        : REACTION_MENU_WIDTH;
+  const menuHeight =
+    overlayMode === 'actions'
+      ? actionMenuHeight
+      : overlayMode === 'reactionDetails'
+        ? reactionDetailsHeight
+        : REACTION_MENU_HEIGHT;
 
   const reactedWith = React.useMemo(
     () =>
@@ -92,17 +163,68 @@ export function ChatMessageBubble({
     [message.reactions, myParticipantId],
   );
 
-  const closePicker = () => {
-    setPickerOpen(false);
+  const closeOverlay = () => {
+    if (copyCloseTimer.current) {
+      clearTimeout(copyCloseTimer.current);
+      copyCloseTimer.current = null;
+    }
+    setOverlayMode(null);
     setAddingCustom(false);
     setCustomEmoji('');
+    setCopyState('idle');
+  };
+
+  React.useEffect(
+    () => () => {
+      if (copyCloseTimer.current) clearTimeout(copyCloseTimer.current);
+    },
+    [],
+  );
+
+  const openOverlay = (mode: Exclude<OverlayMode, null>) => {
+    if (mode === 'reactions' && !canChangeMessage) return;
+    bubbleRef.current?.measureInWindow((x, y, width) => {
+      void Haptics.selectionAsync();
+      setAnchor({ x, y, width });
+      setOverlayMode(mode);
+    });
+  };
+
+  const openReactionDetails = (nextAnchor: {
+    x: number;
+    y: number;
+    width: number;
+  }) => {
+    void Haptics.selectionAsync();
+    setAnchor(nextAnchor);
+    setOverlayMode('reactionDetails');
+  };
+
+  const handlePress = () => {
+    if (longPressTriggered.current) {
+      longPressTriggered.current = false;
+      return;
+    }
+    const now = Date.now();
+    if (now - lastTapAt.current <= DOUBLE_TAP_DELAY) {
+      lastTapAt.current = 0;
+      openOverlay('reactions');
+      return;
+    }
+    lastTapAt.current = now;
+  };
+
+  const handleLongPress = () => {
+    longPressTriggered.current = true;
+    lastTapAt.current = 0;
+    openOverlay('actions');
   };
 
   const chooseReaction = (emoji: string) => {
-    if (!canReact) return;
+    if (!canChangeMessage) return;
     void Haptics.selectionAsync();
     onReact(emoji);
-    closePicker();
+    closeOverlay();
   };
 
   const submitCustom = () => {
@@ -111,24 +233,69 @@ export function ChatMessageBubble({
     chooseReaction(emoji);
   };
 
-  const openPicker = () => {
-    if (!canReact) return;
-    bubbleRef.current?.measureInWindow((x, y, width) => {
-      setAnchor({ x, y, width });
-      setPickerOpen(true);
-    });
+  const copyMessage = async () => {
+    try {
+      const copied = await Clipboard.setStringAsync(message.body);
+      if (!copied) {
+        setCopyState('failed');
+        return;
+      }
+      void Haptics.notificationAsync(
+        Haptics.NotificationFeedbackType.Success,
+      );
+      setCopyState('copied');
+      copyCloseTimer.current = setTimeout(closeOverlay, 650);
+    } catch {
+      setCopyState('failed');
+    }
   };
 
-  const pickerLeft = Math.max(
+  const chooseReply = () => {
+    closeOverlay();
+    onReply();
+  };
+
+  const chooseEdit = () => {
+    closeOverlay();
+    onEdit();
+  };
+
+  const confirmUnsend = () => {
+    closeOverlay();
+    Alert.alert(
+      'Unsend message?',
+      'This message will be removed for everyone in the conversation.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unsend',
+          style: 'destructive',
+          onPress: onUnsend,
+        },
+      ],
+    );
+  };
+
+  const webContextMenuProps =
+    Platform.OS === 'web'
+      ? {
+          onContextMenu: (event: { preventDefault: () => void }) => {
+            event.preventDefault();
+            openOverlay('actions');
+          },
+        }
+      : {};
+
+  const menuLeft = Math.max(
     SCREEN_EDGE_GAP,
     Math.min(
-      mine ? anchor.x + anchor.width - REACTION_PICKER_WIDTH : anchor.x,
-      windowWidth - REACTION_PICKER_WIDTH - SCREEN_EDGE_GAP,
+      mine ? anchor.x + anchor.width - menuWidth : anchor.x,
+      windowWidth - menuWidth - SCREEN_EDGE_GAP,
     ),
   );
-  const pickerTop = Math.max(
+  const menuTop = Math.max(
     SCREEN_EDGE_GAP,
-    anchor.y - REACTION_PICKER_HEIGHT - REACTION_PICKER_GAP,
+    anchor.y - menuHeight - MENU_GAP,
   );
 
   return (
@@ -144,20 +311,53 @@ export function ChatMessageBubble({
           accessibilityLabel={`${message.body}. Sent at ${formatMessageTime(
             message.createdAt,
           )}`}
-          accessibilityHint={canReact ? 'Tap to react to this message' : undefined}
-          disabled={!canReact}
-          onPress={openPicker}
-          onLongPress={openPicker}
+          accessibilityHint="Double tap to react. Press and hold for message actions."
+          accessibilityActions={[
+            { name: 'activate', label: 'Open reactions' },
+            { name: 'longpress', label: 'Open message actions' },
+          ]}
+          onAccessibilityAction={(event) => {
+            if (event.nativeEvent.actionName === 'activate') {
+              openOverlay('reactions');
+            } else if (event.nativeEvent.actionName === 'longpress') {
+              openOverlay('actions');
+            }
+          }}
+          delayLongPress={LONG_PRESS_DELAY}
+          onPressIn={() => {
+            longPressTriggered.current = false;
+          }}
+          onPress={handlePress}
+          onLongPress={handleLongPress}
+          {...webContextMenuProps}
           style={[
             styles.bubble,
             mine ? styles.bubbleOutgoing : styles.bubbleIncoming,
             message.pending && styles.bubblePending,
           ]}>
-          <Text style={[styles.bubbleText, mine && styles.textMine]}>
+          {message.replyToId ? (
+            <View style={styles.replyPreview}>
+              <Text selectable={false} style={styles.replyPreviewLabel}>
+                REPLY
+              </Text>
+              <Text
+                selectable={false}
+                numberOfLines={2}
+                style={styles.replyPreviewBody}>
+                {replyToMessage?.body ?? 'Message no longer available'}
+              </Text>
+            </View>
+          ) : null}
+          <Text
+            selectable={false}
+            style={[styles.bubbleText, mine && styles.textMine]}>
             {message.body}
           </Text>
-          <Text style={[styles.timestamp, mine && styles.timestampMine]}>
+          <Text
+            selectable={false}
+            style={[styles.timestamp, mine && styles.timestampMine]}>
             {message.pending ? 'SENDING · ' : ''}
+            {message.editedAt ? 'EDITED · ' : ''}
             {formatMessageTime(message.createdAt)}
           </Text>
         </Pressable>
@@ -169,96 +369,280 @@ export function ChatMessageBubble({
               mine && styles.reactionSummaryMine,
             ]}>
             {summaries.map((reaction) => (
-              <Pressable
+              <ReactionChip
                 key={reaction.emoji}
-                accessibilityRole="button"
-                accessibilityLabel={`${reaction.emoji}, ${reaction.count} ${
-                  reaction.count === 1 ? 'reaction' : 'reactions'
-                }`}
+                reaction={reaction}
                 onPress={() => chooseReaction(reaction.emoji)}
-                style={[
-                  styles.reactionChip,
-                  reaction.reactedByMe && styles.reactionChipMine,
-                ]}>
-                <Text style={styles.reactionEmoji}>{reaction.emoji}</Text>
-                <Text style={styles.reactionCount}>{reaction.count}</Text>
-              </Pressable>
+                onShowDetails={openReactionDetails}
+              />
             ))}
           </View>
         ) : null}
       </View>
 
       <Modal
-        visible={pickerOpen}
+        visible={overlayMode !== null}
         transparent
         animationType="fade"
-        onRequestClose={closePicker}>
+        onRequestClose={closeOverlay}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.modalRoot}>
-          <Pressable style={styles.modalBackdrop} onPress={closePicker}>
-            <Pressable
-              accessibilityRole="none"
-              onPress={(event) => event.stopPropagation()}
-              style={[
-                styles.reactionPicker,
-                { left: pickerLeft, top: pickerTop },
-              ]}>
-              {!addingCustom ? (
-                <>
-                  {QUICK_REACTIONS.map((emoji) => (
+          <Pressable style={styles.modalBackdrop} onPress={closeOverlay}>
+            {overlayMode === 'reactions' ? (
+              <Pressable
+                accessibilityRole="none"
+                onPress={(event) => event.stopPropagation()}
+                style={[
+                  styles.reactionMenu,
+                  { left: menuLeft, top: menuTop },
+                ]}>
+                {!addingCustom ? (
+                  <>
+                    {QUICK_REACTIONS.map((emoji) => (
+                      <Pressable
+                        key={emoji}
+                        accessibilityRole="button"
+                        accessibilityLabel={`React with ${emoji}`}
+                        onPress={() => chooseReaction(emoji)}
+                        style={[
+                          styles.quickReaction,
+                          reactedWith.has(emoji) && styles.quickReactionSelected,
+                        ]}>
+                        <Text style={styles.quickReactionEmoji}>{emoji}</Text>
+                      </Pressable>
+                    ))}
                     <Pressable
-                      key={emoji}
                       accessibilityRole="button"
-                      accessibilityLabel={`React with ${emoji}`}
-                      onPress={() => chooseReaction(emoji)}
-                      style={[
-                        styles.quickReaction,
-                        reactedWith.has(emoji) && styles.quickReactionSelected,
-                      ]}>
-                      <Text style={styles.quickReactionEmoji}>{emoji}</Text>
+                      accessibilityLabel="Add a different emoji"
+                      onPress={() => setAddingCustom(true)}
+                      style={styles.quickReaction}>
+                      <Text style={styles.addReaction}>＋</Text>
                     </Pressable>
-                  ))}
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Add a different emoji"
-                    onPress={() => setAddingCustom(true)}
-                    style={styles.quickReaction}>
-                    <Text style={styles.addReaction}>＋</Text>
-                  </Pressable>
-                </>
-              ) : (
-                <View style={styles.customReactionRow}>
-                  <TextInput
-                    autoFocus
-                    value={customEmoji}
-                    onChangeText={setCustomEmoji}
-                    onSubmitEditing={submitCustom}
-                    maxLength={16}
-                    returnKeyType="done"
-                    keyboardAppearance="dark"
-                    placeholder="Emoji"
-                    placeholderTextColor="rgba(255,255,255,0.35)"
-                    style={styles.emojiInput}
-                  />
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Add emoji reaction"
-                    disabled={!customEmoji.trim()}
-                    onPress={submitCustom}
-                    style={[
-                      styles.addCustomButton,
-                      !customEmoji.trim() && styles.addCustomButtonDisabled,
-                    ]}>
-                    <Text style={styles.addCustomLabel}>ADD</Text>
-                  </Pressable>
+                  </>
+                ) : (
+                  <View style={styles.customReactionRow}>
+                    <TextInput
+                      autoFocus
+                      value={customEmoji}
+                      onChangeText={setCustomEmoji}
+                      onSubmitEditing={submitCustom}
+                      maxLength={16}
+                      returnKeyType="done"
+                      keyboardAppearance="dark"
+                      placeholder="Emoji"
+                      placeholderTextColor="rgba(255,255,255,0.35)"
+                      style={styles.emojiInput}
+                    />
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Add emoji reaction"
+                      disabled={!customEmoji.trim()}
+                      onPress={submitCustom}
+                      style={[
+                        styles.addCustomButton,
+                        !customEmoji.trim() && styles.addCustomButtonDisabled,
+                      ]}>
+                      <Text style={styles.addCustomLabel}>ADD</Text>
+                    </Pressable>
+                  </View>
+                )}
+              </Pressable>
+            ) : null}
+
+            {overlayMode === 'actions' ? (
+              <Pressable
+                accessibilityRole="none"
+                onPress={(event) => event.stopPropagation()}
+                style={[
+                  styles.actionMenu,
+                  {
+                    height: actionMenuHeight,
+                    left: menuLeft,
+                    top: menuTop,
+                  },
+                ]}>
+                {canChangeMessage ? (
+                  <MessageAction label="REPLY" onPress={chooseReply} />
+                ) : null}
+                <MessageAction
+                  label={
+                    copyState === 'copied'
+                      ? 'COPIED'
+                      : copyState === 'failed'
+                        ? 'COPY FAILED'
+                        : 'COPY'
+                  }
+                  error={copyState === 'failed'}
+                  last={!canChangeMessage || !mine}
+                  onPress={() => void copyMessage()}
+                />
+                {mine && canChangeMessage ? (
+                  <>
+                    <MessageAction
+                      label="UNSEND"
+                      destructive
+                      onPress={confirmUnsend}
+                    />
+                    <MessageAction label="EDIT" onPress={chooseEdit} last />
+                  </>
+                ) : null}
+              </Pressable>
+            ) : null}
+
+            {overlayMode === 'reactionDetails' ? (
+              <Pressable
+                accessibilityRole="none"
+                onPress={(event) => event.stopPropagation()}
+                style={[
+                  styles.reactionDetails,
+                  {
+                    height: reactionDetailsHeight,
+                    left: menuLeft,
+                    top: menuTop,
+                  },
+                ]}>
+                <View style={styles.reactionDetailsHeader}>
+                  <Text style={styles.reactionDetailsTitle}>REACTIONS</Text>
+                  <Text style={styles.reactionDetailsCount}>
+                    {message.reactions.length}
+                  </Text>
                 </View>
-              )}
-            </Pressable>
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  style={styles.reactionDetailsScroll}>
+                  {reactionUsers.map((user) => (
+                    <View
+                      key={user.participantId}
+                      style={styles.reactionUserRow}>
+                      <Text numberOfLines={1} style={styles.reactionUserName}>
+                        {user.name}
+                      </Text>
+                      <Text style={styles.reactionUserEmojis}>
+                        {user.emojis.join('  ')}
+                      </Text>
+                    </View>
+                  ))}
+                </ScrollView>
+              </Pressable>
+            ) : null}
           </Pressable>
         </KeyboardAvoidingView>
       </Modal>
     </>
+  );
+}
+
+function ReactionChip({
+  reaction,
+  onPress,
+  onShowDetails,
+}: {
+  reaction: ReactionSummary;
+  onPress: () => void;
+  onShowDetails: (anchor: {
+    x: number;
+    y: number;
+    width: number;
+  }) => void;
+}) {
+  const chipRef = React.useRef<View>(null);
+  const held = React.useRef(false);
+
+  const showDetails = () => {
+    held.current = true;
+    chipRef.current?.measureInWindow((x, y, width) => {
+      onShowDetails({ x, y, width });
+    });
+  };
+
+  const webContextMenuProps =
+    Platform.OS === 'web'
+      ? {
+          onContextMenu: (event: { preventDefault: () => void }) => {
+            event.preventDefault();
+            showDetails();
+          },
+        }
+      : {};
+
+  return (
+    <Pressable
+      ref={chipRef}
+      accessibilityRole="button"
+      accessibilityLabel={`${reaction.emoji}, ${reaction.count} ${
+        reaction.count === 1 ? 'reaction' : 'reactions'
+      }`}
+      accessibilityHint="Tap to toggle. Press and hold to see who reacted."
+      accessibilityActions={[
+        { name: 'activate', label: 'Toggle reaction' },
+        { name: 'longpress', label: 'Show reaction details' },
+      ]}
+      onAccessibilityAction={(event) => {
+        if (event.nativeEvent.actionName === 'activate') {
+          onPress();
+        } else if (event.nativeEvent.actionName === 'longpress') {
+          showDetails();
+        }
+      }}
+      delayLongPress={LONG_PRESS_DELAY}
+      onPressIn={() => {
+        held.current = false;
+      }}
+      onLongPress={showDetails}
+      onPress={() => {
+        if (held.current) {
+          held.current = false;
+          return;
+        }
+        onPress();
+      }}
+      {...webContextMenuProps}
+      style={[
+        styles.reactionChip,
+        reaction.reactedByMe && styles.reactionChipMine,
+      ]}>
+      <Text selectable={false} style={styles.reactionEmoji}>
+        {reaction.emoji}
+      </Text>
+      <Text selectable={false} style={styles.reactionCount}>
+        {reaction.count}
+      </Text>
+    </Pressable>
+  );
+}
+
+function MessageAction({
+  label,
+  destructive = false,
+  error = false,
+  last = false,
+  onPress,
+}: {
+  label: string;
+  destructive?: boolean;
+  error?: boolean;
+  last?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label.toLowerCase()}
+      onPress={onPress}
+      style={[
+        styles.messageAction,
+        !last && styles.messageActionDivider,
+      ]}>
+      <Text
+        style={[
+          styles.messageActionLabel,
+          destructive && styles.messageActionDestructive,
+          error && styles.messageActionError,
+        ]}>
+        {label}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -280,6 +664,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 14,
     paddingBottom: 10,
+    userSelect: 'none',
+    touchAction: 'manipulation',
   },
   bubbleIncoming: {
     backgroundColor: '#1c211e',
@@ -289,6 +675,25 @@ const styles = StyleSheet.create({
   },
   bubblePending: {
     opacity: 0.55,
+  },
+  replyPreview: {
+    marginBottom: 10,
+    paddingLeft: 9,
+    borderLeftWidth: 2,
+    borderLeftColor: '#7bffb2',
+    gap: 3,
+  },
+  replyPreviewLabel: {
+    fontFamily: fonts.bold,
+    fontSize: 8,
+    letterSpacing: 0.7,
+    color: '#7bffb2',
+  },
+  replyPreviewBody: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    lineHeight: 15,
+    color: 'rgba(255,255,255,0.48)',
   },
   bubbleText: {
     fontFamily: fonts.regular,
@@ -340,6 +745,61 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: 'rgba(255,255,255,0.72)',
   },
+  reactionDetails: {
+    position: 'absolute',
+    width: REACTION_DETAILS_WIDTH,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(40,49,43,0.97)',
+    overflow: 'hidden',
+    shadowColor: '#000000',
+    shadowOpacity: 0.35,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 12,
+  },
+  reactionDetailsHeader: {
+    height: REACTION_DETAILS_HEADER_HEIGHT,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  reactionDetailsTitle: {
+    fontFamily: fonts.bold,
+    fontSize: 10,
+    letterSpacing: 0.9,
+    color: 'rgba(255,255,255,0.82)',
+  },
+  reactionDetailsCount: {
+    fontFamily: fonts.bold,
+    fontSize: 10,
+    color: '#7bffb2',
+  },
+  reactionDetailsScroll: {
+    flex: 1,
+  },
+  reactionUserRow: {
+    height: REACTION_DETAILS_ROW_HEIGHT,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  reactionUserName: {
+    flex: 1,
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.74)',
+  },
+  reactionUserEmojis: {
+    fontSize: 18,
+  },
   modalRoot: {
     flex: 1,
   },
@@ -347,10 +807,10 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.42)',
   },
-  reactionPicker: {
+  reactionMenu: {
     position: 'absolute',
-    width: REACTION_PICKER_WIDTH,
-    height: REACTION_PICKER_HEIGHT,
+    width: REACTION_MENU_WIDTH,
+    height: REACTION_MENU_HEIGHT,
     borderRadius: 999,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.14)',
@@ -366,6 +826,41 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
     shadowOffset: { width: 0, height: 10 },
     elevation: 12,
+  },
+  actionMenu: {
+    position: 'absolute',
+    width: ACTION_MENU_WIDTH,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(40,49,43,0.97)',
+    overflow: 'hidden',
+    shadowColor: '#000000',
+    shadowOpacity: 0.35,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 12,
+  },
+  messageAction: {
+    height: ACTION_ROW_HEIGHT,
+    paddingHorizontal: 18,
+    justifyContent: 'center',
+  },
+  messageActionDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+  },
+  messageActionLabel: {
+    fontFamily: fonts.bold,
+    fontSize: 10,
+    letterSpacing: 0.9,
+    color: 'rgba(255,255,255,0.82)',
+  },
+  messageActionDestructive: {
+    color: '#ff9d9d',
+  },
+  messageActionError: {
+    color: '#ff9d9d',
   },
   quickReaction: {
     width: 42,

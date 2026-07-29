@@ -9,6 +9,7 @@ import {
   FLOATING_GLASS_TINT,
   LiquidGlassSurface,
 } from '@/components/liquid-glass';
+import { FloatingGradientStroke } from '@/components/floating-gradient-stroke';
 import { fonts } from '@/constants/theme';
 
 const backArrow = require('@/assets/figma/back-arrow.svg');
@@ -45,36 +46,39 @@ export function PageHeader({
         floating && { position: 'absolute', top: insets.top, left: 0, right: 0, zIndex: 10 },
       ]}
       pointerEvents="box-none">
-      <LiquidGlassSurface
-        style={styles.pill}
-        tintColor={FLOATING_GLASS_TINT}
-        blurIntensity={FLOATING_GLASS_BLUR_INTENSITY}
-        interactive>
-        <Pressable hitSlop={12} onPress={onBack ?? (() => router.back())}>
-          <Image
-            source={backArrow}
-            style={{ width: 28, height: 12.2 }}
-            contentFit="contain"
-            tintColor="#ffffff"
-          />
-        </Pressable>
-        <View style={styles.titleBlock}>
-          <Text style={styles.title}>{title}</Text>
-          {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
-        </View>
-        {showMore ? (
-          <Pressable hitSlop={12} onPress={onMore}>
+      <View style={styles.pillFrame}>
+        <LiquidGlassSurface
+          style={styles.pill}
+          tintColor={FLOATING_GLASS_TINT}
+          blurIntensity={FLOATING_GLASS_BLUR_INTENSITY}
+          interactive>
+          <Pressable hitSlop={12} onPress={onBack ?? (() => router.back())}>
             <Image
-              source={moreDots}
-              style={{ width: 28, height: 5 }}
+              source={backArrow}
+              style={{ width: 28, height: 12.2 }}
               contentFit="contain"
               tintColor="#ffffff"
             />
           </Pressable>
-        ) : (
-          <View style={styles.headerSpacer} />
-        )}
-      </LiquidGlassSurface>
+          <View style={styles.titleBlock}>
+            <Text style={styles.title}>{title}</Text>
+            {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+          </View>
+          {showMore ? (
+            <Pressable hitSlop={12} onPress={onMore}>
+              <Image
+                source={moreDots}
+                style={{ width: 28, height: 5 }}
+                contentFit="contain"
+                tintColor="#ffffff"
+              />
+            </Pressable>
+          ) : (
+            <View style={styles.headerSpacer} />
+          )}
+        </LiquidGlassSurface>
+        <FloatingGradientStroke borderRadius={999} />
+      </View>
     </View>
   );
 }
@@ -86,8 +90,12 @@ const styles = StyleSheet.create({
   wrapper: {
     paddingHorizontal: 20,
   },
+  pillFrame: {
+    height: PAGE_HEADER_HEIGHT,
+    borderRadius: 999,
+  },
   pill: {
-    height: 54,
+    height: PAGE_HEADER_HEIGHT,
     borderRadius: 999,
     overflow: 'hidden',
     flexDirection: 'row',

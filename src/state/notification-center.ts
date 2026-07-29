@@ -78,7 +78,7 @@ export async function markAnnouncementsSeen(
 
 /**
  * The bell represents two things the app can reconstruct reliably today:
- * unread chat messages from the server and announcements not yet viewed on
+ * unread chat activity from the server and announcements not yet viewed on
  * this device.
  */
 export function useNotificationUnread(

@@ -110,7 +110,7 @@ export default function Messages() {
               </View>
               <View style={styles.rowMeta}>
                 <Text style={styles.rowTime}>
-                  {formatInboxTime(conversation.lastMessageAt)}
+                  {formatInboxTime(conversation.lastActivityAt)}
                 </Text>
                 {unread ? <View style={styles.unreadDot} /> : null}
               </View>
@@ -139,6 +139,19 @@ function previewOf(
   myId: string,
   participantById: (id: string) => { fullName: string } | undefined,
 ): string {
+  if (
+    conversation.lastActivityKind === 'reaction' &&
+    conversation.lastReactionEmoji
+  ) {
+    const reactor =
+      participantById(conversation.lastReactorId ?? '')?.fullName.split(' ')[0] ??
+      'Someone';
+    const message = conversation.lastReactionMessageBody?.trim();
+    return `${reactor} reacted ${conversation.lastReactionEmoji}${
+      message ? ` to “${message}”` : ''
+    }`;
+  }
+
   if (!conversation.lastMessageBody) return 'No messages yet.';
   if (conversation.kind === 'direct') return conversation.lastMessageBody;
 

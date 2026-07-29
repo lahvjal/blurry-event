@@ -1,11 +1,15 @@
 import { useEffect, useSyncExternalStore } from 'react';
 
 import { setBadge } from '@/lib/badge';
-import { fetchConversationSummaries, subscribeToMessages } from '@/lib/chat';
+import {
+  fetchConversationSummaries,
+  subscribeToMessageReactions,
+  subscribeToMessages,
+} from '@/lib/chat';
 import { supabase } from '@/lib/supabase';
 
 /**
- * One source of truth for "how many unread messages", read by the nav tab
+ * One source of truth for unread chat activity, read by the nav tab
  * badge, the inbox, and the home screen icon.
  *
  * A module-level store rather than context because FloatingNav renders on
@@ -64,6 +68,7 @@ export function useUnreadTotal(): number {
     started = true;
     void refreshUnread();
     subscribeToMessages(null, () => void refreshUnread());
+    subscribeToMessageReactions(() => void refreshUnread());
   }, []);
 
   return useSyncExternalStore(

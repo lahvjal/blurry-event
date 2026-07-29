@@ -8,6 +8,7 @@ import {
   FLOATING_SCRIM_RISE,
   FloatingBackdrop,
 } from '@/components/floating-backdrop';
+import { FloatingGradientStroke } from '@/components/floating-gradient-stroke';
 import {
   FLOATING_GLASS_BLUR_INTENSITY,
   FLOATING_GLASS_TINT,
@@ -59,41 +60,44 @@ export function FloatingNav() {
       <View
         style={[styles.wrapper, { paddingBottom: bottomInset }]}
         pointerEvents="box-none">
-        <LiquidGlassSurface
-          style={styles.bar}
-          tintColor={FLOATING_GLASS_TINT}
-          blurIntensity={FLOATING_GLASS_BLUR_INTENSITY}
-          interactive>
-          <View style={styles.items}>
-            {tabs.map((tab) => {
-              const active = pathname === tab.route;
-              return (
-                <Pressable
-                  key={tab.key}
-                  style={styles.tab}
-                  onPress={() => router.navigate(tab.route)}>
-                  <View style={[styles.tabPill, active && styles.tabPillActive]}>
-                    <View style={styles.iconWrap}>
-                      <Image
-                        source={icons[tab.key]}
-                        style={{ width: 22, height: 22 }}
-                        contentFit="contain"
-                        tintColor={active ? '#282f2b' : '#ffffff'}
-                      />
-                      {tab.key === 'messages' && unread > 0 ? (
-                        <View style={styles.badge}>
-                          <Text style={styles.badgeText}>
-                            {unread > 99 ? '99+' : unread}
-                          </Text>
-                        </View>
-                      ) : null}
+        <View style={styles.barFrame}>
+          <LiquidGlassSurface
+            style={styles.bar}
+            tintColor={FLOATING_GLASS_TINT}
+            blurIntensity={FLOATING_GLASS_BLUR_INTENSITY}
+            interactive>
+            <View style={styles.items}>
+              {tabs.map((tab) => {
+                const active = pathname === tab.route;
+                return (
+                  <Pressable
+                    key={tab.key}
+                    style={styles.tab}
+                    onPress={() => router.navigate(tab.route)}>
+                    <View style={[styles.tabPill, active && styles.tabPillActive]}>
+                      <View style={styles.iconWrap}>
+                        <Image
+                          source={icons[tab.key]}
+                          style={{ width: 22, height: 22 }}
+                          contentFit="contain"
+                          tintColor={active ? '#282f2b' : '#ffffff'}
+                        />
+                        {tab.key === 'messages' && unread > 0 ? (
+                          <View style={styles.badge}>
+                            <Text style={styles.badgeText}>
+                              {unread > 99 ? '99+' : unread}
+                            </Text>
+                          </View>
+                        ) : null}
+                      </View>
                     </View>
-                  </View>
-                </Pressable>
-              );
-            })}
-          </View>
-        </LiquidGlassSurface>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </LiquidGlassSurface>
+          <FloatingGradientStroke borderRadius={70} />
+        </View>
       </View>
     </View>
   );
@@ -113,8 +117,12 @@ const styles = StyleSheet.create({
     paddingTop: 5,
     paddingBottom: 20,
   },
+  barFrame: {
+    height: BAR_HEIGHT,
+    borderRadius: 70,
+  },
   bar: {
-    height: 72,
+    height: BAR_HEIGHT,
     borderRadius: 70,
     overflow: 'hidden',
   },

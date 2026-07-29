@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   DEFAULT_MESSAGE_COMPOSER_HEIGHT,
+  MessageComposerContext,
   MessageComposer,
 } from '@/components/message-composer';
 import { ChatMessageBubble } from '@/components/chat-message-bubble';
@@ -22,6 +23,7 @@ import {
   FLOATING_GLASS_TINT,
   LiquidGlassSurface,
 } from '@/components/liquid-glass';
+import { FloatingGradientStroke } from '@/components/floating-gradient-stroke';
 import { ParticipantAvatar } from '@/components/participant-avatar';
 import { Noise } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
@@ -70,8 +72,10 @@ export default function GroupConversation() {
   const conversationId = params.id ?? null;
 
   const { conversation } = useConversationDetail(conversationId);
-  const { messages, loading, error, send, react } =
+  const { messages, loading, error, send, react, edit, unsend } =
     useConversation(conversationId);
+  const [composerContext, setComposerContext] =
+    React.useState<MessageComposerContext | null>(null);
 
   const title = conversation
     ? conversationTitle(conversation, me.id, participantById, event.name)
@@ -84,7 +88,22 @@ export default function GroupConversation() {
     DEFAULT_MESSAGE_COMPOSER_HEIGHT,
   );
   const runs = groupThread(messages);
+  const messageById = new Map(messages.map((message) => [message.id, message]));
   const newestMessageClientId = messages[messages.length - 1]?.clientId ?? null;
+
+  const handleSend = async (text: string) => {
+    if (composerContext?.kind === 'edit') {
+      await edit(composerContext.messageId, text);
+    } else {
+      await send(
+        text,
+        composerContext?.kind === 'reply'
+          ? composerContext.messageId
+          : null,
+      );
+    }
+    setComposerContext(null);
+  };
 
   const handleContentSizeChange = () => {
     if (
@@ -110,37 +129,40 @@ export default function GroupConversation() {
       <Noise />
       {/* Header */}
       <View style={[styles.headerWrap, { top: insets.top }]}>
-        <LiquidGlassSurface
-          style={styles.headerPill}
-          tintColor={FLOATING_GLASS_TINT}
-          blurIntensity={FLOATING_GLASS_BLUR_INTENSITY}
-          interactive>
-          <View style={styles.headerLeft}>
-            <Pressable hitSlop={12} onPress={() => router.back()}>
+        <View style={styles.headerFrame}>
+          <LiquidGlassSurface
+            style={styles.headerPill}
+            tintColor={FLOATING_GLASS_TINT}
+            blurIntensity={FLOATING_GLASS_BLUR_INTENSITY}
+            interactive>
+            <View style={styles.headerLeft}>
+              <Pressable hitSlop={12} onPress={() => router.back()}>
+                <Image
+                  source={backArrow}
+                  style={{ width: 28, height: 12.2 }}
+                  contentFit="contain"
+                  tintColor="#ffffff"
+                />
+              </Pressable>
+              <InitialsAvatar initials={initialsOf(title)} size={40} />
+              <Pressable style={{ gap: 3 }} onPress={openSettings}>
+                <Text style={styles.headerName}>{title}</Text>
+                <Text style={styles.headerStatus}>
+                  {memberCount} {memberCount === 1 ? 'MEMBER' : 'MEMBERS'}
+                </Text>
+              </Pressable>
+            </View>
+            <Pressable hitSlop={12} onPress={openSettings}>
               <Image
-                source={backArrow}
-                style={{ width: 28, height: 12.2 }}
+                source={moreDots}
+                style={{ width: 28, height: 5 }}
                 contentFit="contain"
                 tintColor="#ffffff"
               />
             </Pressable>
-            <InitialsAvatar initials={initialsOf(title)} size={40} />
-            <Pressable style={{ gap: 3 }} onPress={openSettings}>
-              <Text style={styles.headerName}>{title}</Text>
-              <Text style={styles.headerStatus}>
-                {memberCount} {memberCount === 1 ? 'MEMBER' : 'MEMBERS'}
-              </Text>
-            </Pressable>
-          </View>
-          <Pressable hitSlop={12} onPress={openSettings}>
-            <Image
-              source={moreDots}
-              style={{ width: 28, height: 5 }}
-              contentFit="contain"
-              tintColor="#ffffff"
-            />
-          </Pressable>
-        </LiquidGlassSurface>
+          </LiquidGlassSurface>
+          <FloatingGradientStroke borderRadius={999} />
+        </View>
       </View>
 
       <KeyboardAvoidingView
@@ -180,9 +202,37 @@ export default function GroupConversation() {
                       style={mine ? styles.outgoingRow : styles.incomingRow}>
                       <ChatMessageBubble
                         message={message}
+                        replyToMessage={
+                          message.replyToId
+                            ? messageById.get(message.replyToId)
+                            : undefined
+                        }
                         mine={mine}
                         myParticipantId={me.id}
+                        participantNameById={(participantId) =>
+                          participantById(participantId)?.fullName ?? 'Player'
+                        }
                         onReact={(emoji) => react(message.id, emoji)}
+                        onReply={() =>
+                          setComposerContext({
+                            kind: 'reply',
+                            messageId: message.id,
+                            body: message.body,
+                          })
+                        }
+                        onEdit={() =>
+                          setComposerContext({
+                            kind: 'edit',
+                            messageId: message.id,
+                            body: message.body,
+                          })
+                        }
+                        onUnsend={() => {
+                          if (composerContext?.messageId === message.id) {
+                            setComposerContext(null);
+                          }
+                          void unsend(message.id);
+                        }}
                       />
                       {/* Avatar sits beside the last bubble of a run only. */}
                       {last && mine ? (
@@ -210,8 +260,10 @@ export default function GroupConversation() {
         </ScrollView>
 
         <MessageComposer
-          onSend={send}
+          onSend={handleSend}
           onHeightChange={setComposerHeight}
+          context={composerContext}
+          onCancelContext={() => setComposerContext(null)}
         />
       </KeyboardAvoidingView>
     </View>
@@ -229,6 +281,10 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 10,
     paddingHorizontal: 20,
+  },
+  headerFrame: {
+    height: 54,
+    borderRadius: 999,
   },
   headerPill: {
     height: 54,

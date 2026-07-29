@@ -93,6 +93,30 @@ select * from (values
    exists (select 1 from pg_publication_tables
      where pubname='supabase_realtime' and tablename='message_reactions')),
 
+  ('0018  message action columns present',
+   exists (select 1 from information_schema.columns
+     where table_schema='public' and table_name='messages'
+       and column_name='reply_to_id')
+   and exists (select 1 from information_schema.columns
+     where table_schema='public' and table_name='messages'
+       and column_name='edited_at')),
+
+  ('0019  reaction notifications trigger present',
+   exists (select 1 from pg_trigger
+     where tgname='message_reactions_push' and not tgisinternal)),
+
+  ('0019  reaction activity fields in conversation summaries',
+   exists (
+     select 1
+     from pg_proc p
+     join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname='public'
+       and p.proname='conversation_summaries'
+       and pg_get_function_result(p.oid) like '%last_activity_at%'
+       and pg_get_function_result(p.oid) like '%last_reaction_emoji%'
+       and pg_get_function_result(p.oid) like '%last_reactor_id%'
+   )),
+
   ('RLS   enabled on every public table',
    not exists (select 1 from pg_tables
      where schemaname='public' and rowsecurity = false)),

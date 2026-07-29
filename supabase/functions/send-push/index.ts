@@ -118,6 +118,75 @@ async function forMessage(id: string): Promise<Fanout> {
   };
 }
 
+async function forReaction(
+  messageId: string,
+  participantId: string,
+  emoji: string,
+): Promise<Fanout> {
+  const { data: message } = await admin
+    .from('messages')
+    .select('body, sender_id, conversation_id')
+    .eq('id', messageId)
+    .maybeSingle();
+  if (!message || message.sender_id === participantId) return null;
+
+  const { data: conversation } = await admin
+    .from('conversations')
+    .select('id, kind, name, event_id')
+    .eq('id', message.conversation_id)
+    .maybeSingle();
+  if (!conversation) return null;
+
+  const { data: reactor } = await admin
+    .from('participants')
+    .select('full_name')
+    .eq('id', participantId)
+    .maybeSingle();
+
+  // A reaction is personal activity for the message author, not a broadcast
+  // to everyone else in a group conversation.
+  const { data: recipient } = await admin
+    .from('conversation_members')
+    .select('participants!inner(claimed_by)')
+    .eq('conversation_id', conversation.id)
+    .eq('participant_id', message.sender_id)
+    .eq('notifications_enabled', true)
+    .maybeSingle();
+
+  const userId = (
+    recipient?.participants as { claimed_by: string | null } | undefined
+  )?.claimed_by;
+  if (!userId) return null;
+
+  const direct = conversation.kind === 'direct';
+  let groupTitle = conversation.name?.trim();
+  if (!direct && !groupTitle) {
+    const { data: event } = await admin
+      .from('events')
+      .select('name')
+      .eq('id', conversation.event_id)
+      .maybeSingle();
+    groupTitle = event?.name ?? 'Event chat';
+  }
+
+  const trimmed = message.body.trim();
+  const excerpt =
+    trimmed.length > 72 ? `${trimmed.slice(0, 71)}…` : trimmed;
+  const reactorName = reactor?.full_name ?? 'Someone';
+
+  return {
+    recipients: [userId],
+    payload: {
+      title: direct ? reactorName : groupTitle!,
+      body: direct
+        ? `${emoji} reacted to “${excerpt}”`
+        : `${firstName(reactorName)} reacted ${emoji} to “${excerpt}”`,
+      url: `/${direct ? 'direct-message' : 'group-conversation'}?id=${conversation.id}`,
+      tag: `conversation-${conversation.id}`,
+    },
+  };
+}
+
 async function forAnnouncement(id: string): Promise<Fanout> {
   const { data: announcement } = await admin
     .from('announcements')
@@ -303,6 +372,8 @@ Deno.serve(async (request) => {
   let event: {
     type?: string;
     id?: string;
+    message_id?: string;
+    emoji?: string;
     team_id?: string;
     participant_id?: string;
   };
@@ -317,6 +388,16 @@ Deno.serve(async (request) => {
     switch (event.type) {
       case 'message':
         fanout = event.id ? await forMessage(event.id) : null;
+        break;
+      case 'reaction':
+        fanout =
+          event.message_id && event.participant_id && event.emoji
+            ? await forReaction(
+                event.message_id,
+                event.participant_id,
+                event.emoji,
+              )
+            : null;
         break;
       case 'announcement':
         fanout = event.id ? await forAnnouncement(event.id) : null;

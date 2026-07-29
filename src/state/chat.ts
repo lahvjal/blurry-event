@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { useRefreshOnPull } from '@/components/pull-to-refresh';
 import {
+  editMessageBody,
   fetchConversation,
   fetchConversationSummaries,
   fetchMessages,
@@ -11,6 +12,7 @@ import {
   subscribeToMessageReactions,
   subscribeToMessages,
   toggleMessageReaction,
+  unsendMessage,
 } from '@/lib/chat';
 import { refreshUnread, setUnreadTotal } from '@/state/unread';
 import { supabase } from '@/lib/supabase';
@@ -79,6 +81,10 @@ export function useConversations() {
 
   // Any incoming message restacks the list and lights an unread badge.
   useEffect(() => subscribeToMessages(null, () => void reload()), [reload]);
+  useEffect(
+    () => subscribeToMessageReactions(() => void reload()),
+    [reload],
+  );
 
   return { conversations, loading, error, reload };
 }
@@ -145,8 +151,12 @@ export function useConversation(conversationId: string | null) {
 
   useEffect(() => {
     if (!conversationId) return;
-    return subscribeToMessages(conversationId, (incoming) =>
-      setMessages((prev) => mergeMessage(prev, incoming)),
+    return subscribeToMessages(conversationId, (change) =>
+      setMessages((prev) =>
+        change.event === 'DELETE'
+          ? prev.filter((message) => message.id !== change.messageId)
+          : mergeMessage(prev, change.message),
+      ),
     );
   }, [conversationId]);
 
@@ -159,7 +169,13 @@ export function useConversation(conversationId: string | null) {
     );
   }, [conversationId]);
 
-  // Clear the badge on open, and again as messages arrive while it's open.
+  const reactionCount = messages.reduce(
+    (total, message) => total + message.reactions.length,
+    0,
+  );
+
+  // Clear the badge on open, and again as messages or reactions arrive while
+  // the conversation is visible.
   useEffect(() => {
     if (!conversationId || messages.length === 0 || !me.claimed) return;
     void markConversationRead(conversationId, me.id)
@@ -168,10 +184,16 @@ export function useConversation(conversationId: string | null) {
       .catch(() => {
         // A stale badge isn't worth interrupting anyone over.
       });
-  }, [conversationId, me.claimed, me.id, messages.length]);
+  }, [
+    conversationId,
+    me.claimed,
+    me.id,
+    messages.length,
+    reactionCount,
+  ]);
 
   const send = useCallback(
-    async (body: string) => {
+    async (body: string, replyToId?: string | null) => {
       const text = body.trim();
       if (!conversationId || !text) return;
       try {
@@ -179,6 +201,7 @@ export function useConversation(conversationId: string | null) {
           conversationId,
           senderId: me.id,
           body: text,
+          replyToId: replyToId ?? null,
         });
         setMessages((prev) => mergeMessage(prev, sent));
         setError(null);
@@ -187,6 +210,67 @@ export function useConversation(conversationId: string | null) {
       }
     },
     [conversationId, me.id],
+  );
+
+  const edit = useCallback(
+    async (messageId: string, body: string) => {
+      const text = body.trim();
+      const message = messages.find((candidate) => candidate.id === messageId);
+      if (
+        !message ||
+        message.senderId !== me.id ||
+        message.pending ||
+        message.id.startsWith('local-') ||
+        !text
+      ) {
+        return;
+      }
+
+      const editedAt = new Date().toISOString();
+      setMessages((prev) =>
+        prev.map((candidate) =>
+          candidate.id === messageId
+            ? { ...candidate, body: text, editedAt }
+            : candidate,
+        ),
+      );
+
+      try {
+        await editMessageBody(messageId, text);
+        setError(null);
+      } catch (caught) {
+        setError(errorText(caught));
+        void reload();
+      }
+    },
+    [me.id, messages, reload],
+  );
+
+  const unsend = useCallback(
+    async (messageId: string) => {
+      const message = messages.find((candidate) => candidate.id === messageId);
+      if (
+        !message ||
+        message.senderId !== me.id ||
+        message.pending ||
+        message.id.startsWith('local-')
+      ) {
+        return;
+      }
+
+      setMessages((prev) =>
+        prev.filter((candidate) => candidate.id !== messageId),
+      );
+
+      try {
+        await unsendMessage(messageId);
+        setError(null);
+      } catch (caught) {
+        setError(errorText(caught));
+        void reload();
+      }
+    },
+    [me.id, messages, reload],
   );
 
   const react = useCallback(
@@ -238,7 +322,7 @@ export function useConversation(conversationId: string | null) {
     [me.id, messages, reload],
   );
 
-  return { messages, loading, error, send, react, reload };
+  return { messages, loading, error, send, react, edit, unsend, reload };
 }
 
 /**

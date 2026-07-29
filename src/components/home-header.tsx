@@ -15,6 +15,7 @@ import {
   FLOATING_GLASS_TINT,
   LiquidGlassSurface,
 } from '@/components/liquid-glass';
+import { FloatingGradientStroke } from '@/components/floating-gradient-stroke';
 import { fonts } from '@/constants/theme';
 
 const logo = require('@/assets/figma/logo-small.svg');
@@ -86,11 +87,12 @@ export function HomeHeader({
           pointerEvents="none"
           style={[StyleSheet.absoluteFill, animatedGlassStyle]}>
           <LiquidGlassSurface
-            style={StyleSheet.absoluteFill}
+            style={styles.glassSurface}
             tintColor={FLOATING_GLASS_TINT}
             blurIntensity={FLOATING_GLASS_BLUR_INTENSITY}
             interactive
           />
+          <FloatingGradientStroke borderRadius={70} />
         </Animated.View>
         {contents}
       </Animated.View>
@@ -108,11 +110,19 @@ const styles = StyleSheet.create({
   bar: {
     height: HEADER_HEIGHT,
     borderRadius: 70,
-    overflow: 'hidden',
     paddingHorizontal: 7,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  glassSurface: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    borderRadius: 70,
+    overflow: 'hidden',
   },
   logo: {
     width: 38.9,

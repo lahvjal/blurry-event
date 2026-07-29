@@ -1,12 +1,13 @@
 import { Image } from 'expo-image';
 import React, { useRef, useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   FLOATING_SCRIM_RISE,
   FloatingBackdrop,
 } from '@/components/floating-backdrop';
+import { FloatingGradientStroke } from '@/components/floating-gradient-stroke';
 import {
   FLOATING_GLASS_BLUR_INTENSITY,
   FLOATING_GLASS_TINT,
@@ -25,12 +26,19 @@ const INPUT_TOP_INSET = 8;
 const INPUT_ACTION_GAP = 20;
 const MIN_INPUT_HEIGHT = 16;
 const MAX_INPUT_HEIGHT = 64;
+const CONTEXT_HEIGHT = 48;
 const BAR_FIXED_HEIGHT =
   BAR_PADDING * 2 + INPUT_TOP_INSET + INPUT_ACTION_GAP + ACTION_HEIGHT;
 
 /** Single-line wrapper before a device safe-area adjustment. */
 export const DEFAULT_MESSAGE_COMPOSER_HEIGHT =
   BAR_TOP_INSET + BAR_FIXED_HEIGHT + MIN_INPUT_HEIGHT + 16;
+
+export type MessageComposerContext = {
+  kind: 'reply' | 'edit';
+  messageId: string;
+  body: string;
+};
 
 /**
  * Navigation / Floating — Figma's multi-line message-input variant. The whole
@@ -40,9 +48,13 @@ export const DEFAULT_MESSAGE_COMPOSER_HEIGHT =
 export function MessageComposer({
   onSend,
   onHeightChange,
+  context,
+  onCancelContext,
 }: {
-  onSend?: (text: string) => void;
+  onSend?: (text: string) => void | Promise<void>;
   onHeightChange?: (height: number) => void;
+  context?: MessageComposerContext | null;
+  onCancelContext?: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const [text, setText] = useState('');
@@ -52,14 +64,28 @@ export function MessageComposer({
   const bottomInset = Math.max(16, insets.bottom + 6);
   // Fixed space around the measured text: panel padding, the 8px text inset,
   // the 20px action gap, and the 40px action row.
-  const barHeight = BAR_FIXED_HEIGHT + inputHeight;
+  const barHeight =
+    BAR_FIXED_HEIGHT + inputHeight + (context ? CONTEXT_HEIGHT : 0);
   const composerHeight = BAR_TOP_INSET + barHeight + bottomInset;
   const scrimHeight = composerHeight + FLOATING_SCRIM_RISE;
 
-  const send = () => {
+  React.useEffect(() => {
+    if (!context) return;
+    if (context.kind === 'edit') {
+      setText(context.body);
+    }
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [context?.kind, context?.messageId]);
+
+  const send = async () => {
     if (!hasText) return;
-    onSend?.(text.trim());
+    await onSend?.(text.trim());
     setText('');
+  };
+
+  const cancelContext = () => {
+    if (context?.kind === 'edit') setText('');
+    onCancelContext?.();
   };
 
   return (
@@ -84,12 +110,41 @@ export function MessageComposer({
         <Pressable
           style={styles.barHit}
           onPress={() => inputRef.current?.focus()}>
-          <LiquidGlassSurface
-            style={[styles.bar, { height: barHeight }]}
-            tintColor={FLOATING_GLASS_TINT}
-            blurIntensity={FLOATING_GLASS_BLUR_INTENSITY}
-            interactive
-            dataSet={{ focusRing: 'true' }}>
+          <View style={[styles.barFrame, { height: barHeight }]}>
+            <LiquidGlassSurface
+              style={[styles.bar, { height: barHeight }]}
+              tintColor={FLOATING_GLASS_TINT}
+              blurIntensity={FLOATING_GLASS_BLUR_INTENSITY}
+              interactive
+              dataSet={{ focusRing: 'true' }}>
+            {context ? (
+              <View style={styles.contextRow}>
+                <View style={styles.contextCopy}>
+                  <Text style={styles.contextLabel}>
+                    {context.kind === 'edit'
+                      ? 'EDITING MESSAGE'
+                      : 'REPLYING TO MESSAGE'}
+                  </Text>
+                  <Text numberOfLines={1} style={styles.contextBody}>
+                    {context.body}
+                  </Text>
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    context.kind === 'edit' ? 'Cancel edit' : 'Cancel reply'
+                  }
+                  hitSlop={8}
+                  onPress={(event) => {
+                    event.stopPropagation();
+                    cancelContext();
+                  }}
+                  style={styles.contextClose}>
+                  <Text style={styles.contextCloseLabel}>×</Text>
+                </Pressable>
+              </View>
+            ) : null}
+
             <View
               style={[
                 styles.inputRow,
@@ -99,7 +154,9 @@ export function MessageComposer({
                 ref={inputRef}
                 value={text}
                 onChangeText={setText}
-                placeholder="Add text..."
+                placeholder={
+                  context?.kind === 'edit' ? 'Edit message...' : 'Add text...'
+                }
                 placeholderTextColor="#5b645b"
                 style={[styles.input, { height: inputHeight }]}
                 dataSet={{ skipRing: 'true' }}
@@ -134,7 +191,7 @@ export function MessageComposer({
               <Pressable
                 accessibilityLabel="Send message"
                 disabled={!hasText}
-                onPress={send}
+                onPress={() => void send()}
                 hitSlop={8}
                 style={({ pressed }) => pressed && styles.pressed}>
                 <Image
@@ -144,7 +201,9 @@ export function MessageComposer({
                 />
               </Pressable>
             </View>
-          </LiquidGlassSurface>
+            </LiquidGlassSurface>
+            <FloatingGradientStroke borderRadius={20} />
+          </View>
         </Pressable>
       </View>
     </View>
@@ -165,6 +224,10 @@ const styles = StyleSheet.create({
   barHit: {
     width: '100%',
   },
+  barFrame: {
+    width: '100%',
+    borderRadius: 20,
+  },
   bar: {
     width: '100%',
     borderRadius: 20,
@@ -173,6 +236,47 @@ const styles = StyleSheet.create({
   },
   inputRow: {
     paddingTop: INPUT_TOP_INSET,
+  },
+  contextRow: {
+    height: CONTEXT_HEIGHT,
+    marginHorizontal: -BAR_PADDING,
+    marginTop: -BAR_PADDING,
+    marginBottom: BAR_PADDING,
+    paddingHorizontal: BAR_PADDING,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  contextCopy: {
+    flex: 1,
+    gap: 3,
+  },
+  contextLabel: {
+    fontFamily: fonts.bold,
+    fontSize: 8,
+    letterSpacing: 0.7,
+    color: '#7bffb2',
+  },
+  contextBody: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.58)',
+  },
+  contextClose: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  contextCloseLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 20,
+    lineHeight: 22,
+    color: 'rgba(255,255,255,0.72)',
   },
   input: {
     width: '100%',

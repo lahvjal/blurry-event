@@ -106,6 +106,12 @@ export type ConversationSummary = Conversation & {
   lastMessageBody: string | null;
   lastMessageAt: string | null;
   lastSenderId: string | null;
+  /** Newest message or reaction activity that is relevant to this member. */
+  lastActivityAt: string | null;
+  lastActivityKind: 'message' | 'reaction' | null;
+  lastReactionEmoji: string | null;
+  lastReactorId: string | null;
+  lastReactionMessageBody: string | null;
   unreadCount: number;
 };
 
@@ -119,6 +125,8 @@ export type ChatMessage = {
   conversationId: string;
   senderId: string;
   body: string;
+  /** The message this one replies to, if any. */
+  replyToId: string | null;
   /**
    * Generated on the device before the send. Lets an offline send that gets
    * retried on reconnect be recognised as the same message, and lets the
@@ -126,6 +134,8 @@ export type ChatMessage = {
    */
   clientId: string;
   createdAt: string;
+  /** Set by the server when the sender changes the message body. */
+  editedAt: string | null;
   reactions: ChatMessageReaction[];
   /** True while the send is still sitting in the offline queue. */
   pending?: boolean;

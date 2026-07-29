@@ -60,7 +60,7 @@ export default function Notifications() {
     }));
 
     const messageRows: NotificationRow[] = conversations
-      .filter((conversation) => Boolean(conversation.lastMessageAt))
+      .filter((conversation) => Boolean(conversation.lastActivityAt))
       .map((conversation) => ({
         id: `message-${conversation.id}`,
         kind: 'message',
@@ -71,7 +71,7 @@ export default function Notifications() {
           event.name,
         ),
         body: messagePreview(conversation, me.id, participantById),
-        createdAt: conversation.lastMessageAt ?? '',
+        createdAt: conversation.lastActivityAt ?? '',
         unread: conversation.unreadCount > 0,
         conversation,
       }));
@@ -155,7 +155,7 @@ export default function Notifications() {
             </View>
             <Text style={styles.emptyTitle}>YOU'RE ALL CAUGHT UP</Text>
             <Text style={styles.emptyBody}>
-              Announcements and recent messages will appear here.
+              Announcements and recent chat activity will appear here.
             </Text>
           </View>
         ) : null}
@@ -170,6 +170,19 @@ function messagePreview(
   myId: string,
   participantById: (id: string) => { fullName: string } | undefined,
 ): string {
+  if (
+    conversation.lastActivityKind === 'reaction' &&
+    conversation.lastReactionEmoji
+  ) {
+    const reactor =
+      participantById(conversation.lastReactorId ?? '')?.fullName.split(' ')[0] ??
+      'Someone';
+    const message = conversation.lastReactionMessageBody?.trim();
+    return `${reactor} reacted ${conversation.lastReactionEmoji}${
+      message ? ` to “${message}”` : ''
+    }`;
+  }
+
   if (!conversation.lastMessageBody) return 'No messages yet.';
   if (conversation.kind === 'direct') return conversation.lastMessageBody;
 

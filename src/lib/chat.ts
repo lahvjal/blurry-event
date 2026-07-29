@@ -27,6 +27,11 @@ type SummaryRow = {
   last_message_body: string | null;
   last_message_at: string | null;
   last_sender_id: string | null;
+  last_activity_at?: string | null;
+  last_activity_kind?: 'message' | 'reaction' | null;
+  last_reaction_emoji?: string | null;
+  last_reactor_id?: string | null;
+  last_reaction_message_body?: string | null;
   unread_count: number;
 };
 
@@ -35,8 +40,10 @@ type MessageRow = {
   conversation_id: string;
   sender_id: string;
   body: string;
+  reply_to_id?: string | null;
   client_id: string;
   created_at: string;
+  edited_at?: string | null;
   message_reactions?: ReactionRow[] | null;
 };
 
@@ -70,8 +77,10 @@ function toMessage(row: MessageRow): ChatMessage {
     conversationId: row.conversation_id,
     senderId: row.sender_id,
     body: row.body,
+    replyToId: row.reply_to_id ?? null,
     clientId: row.client_id,
     createdAt: row.created_at,
+    editedAt: row.edited_at ?? null,
     reactions: (row.message_reactions ?? []).map((reaction) => ({
       participantId: reaction.participant_id,
       emoji: reaction.emoji,
@@ -92,6 +101,15 @@ export async function fetchConversationSummaries(): Promise<ConversationSummary[
     lastMessageBody: row.last_message_body,
     lastMessageAt: row.last_message_at,
     lastSenderId: row.last_sender_id,
+    // These fields arrive with migration 0019. Falling back to the newest
+    // message keeps the inbox usable while the app and database roll out.
+    lastActivityAt: row.last_activity_at ?? row.last_message_at,
+    lastActivityKind:
+      row.last_activity_kind ??
+      (row.last_message_at ? 'message' : null),
+    lastReactionEmoji: row.last_reaction_emoji ?? null,
+    lastReactorId: row.last_reactor_id ?? null,
+    lastReactionMessageBody: row.last_reaction_message_body ?? null,
     unreadCount: row.unread_count ?? 0,
   }));
 }
@@ -137,12 +155,29 @@ export async function fetchMessages(conversationId: string): Promise<ChatMessage
       .limit(MESSAGE_PAGE);
 
   let { data, error } = await query(
-    'id, conversation_id, sender_id, body, client_id, created_at, message_reactions(participant_id, emoji)',
+    'id, conversation_id, sender_id, body, reply_to_id, client_id, created_at, edited_at, message_reactions(participant_id, emoji)',
   );
 
-  // Keeps chat readable during the short rollout window before migration 0017
-  // reaches Supabase. Reactions simply remain empty until the table exists.
-  if (error?.code === 'PGRST200' || error?.code === 'PGRST205') {
+  // Keep chat readable during the short rollout window before the new message
+  // action columns reach Supabase. Reply/edit metadata simply remains empty.
+  if (
+    error?.code === 'PGRST200' ||
+    error?.code === 'PGRST204' ||
+    error?.code === 'PGRST205' ||
+    error?.code === '42703'
+  ) {
+    ({ data, error } = await query(
+      'id, conversation_id, sender_id, body, client_id, created_at, message_reactions(participant_id, emoji)',
+    ));
+  }
+
+  // The same fallback keeps the thread usable before reactions are migrated.
+  if (
+    error?.code === 'PGRST200' ||
+    error?.code === 'PGRST204' ||
+    error?.code === 'PGRST205' ||
+    error?.code === '42703'
+  ) {
     ({ data, error } = await query(
       'id, conversation_id, sender_id, body, client_id, created_at',
     ));
@@ -165,6 +200,7 @@ export async function sendMessage(params: {
   conversationId: string;
   senderId: string;
   body: string;
+  replyToId?: string | null;
 }): Promise<ChatMessage> {
   const clientId = newClientId();
   const optimistic: ChatMessage = {
@@ -172,8 +208,10 @@ export async function sendMessage(params: {
     conversationId: params.conversationId,
     senderId: params.senderId,
     body: params.body,
+    replyToId: params.replyToId ?? null,
     clientId,
     createdAt: new Date().toISOString(),
+    editedAt: null,
     reactions: [],
     pending: true,
   };
@@ -183,6 +221,7 @@ export async function sendMessage(params: {
     sender_id: params.senderId,
     body: params.body,
     client_id: clientId,
+    ...(params.replyToId ? { reply_to_id: params.replyToId } : {}),
   });
 
   // A duplicate client_id means this exact message already landed.
@@ -197,10 +236,30 @@ export async function sendMessage(params: {
     conversationId: params.conversationId,
     senderId: params.senderId,
     body: params.body,
+    replyToId: params.replyToId ?? null,
     clientId,
   });
 
   return optimistic;
+}
+
+/** Changes one of the caller's own messages. The database trigger records the
+ * edit time and rejects attempts to change message ownership or threading. */
+export async function editMessageBody(
+  messageId: string,
+  body: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('messages')
+    .update({ body })
+    .eq('id', messageId);
+  if (error) throw error;
+}
+
+/** Removes one of the caller's own messages for everyone in the thread. */
+export async function unsendMessage(messageId: string): Promise<void> {
+  const { error } = await supabase.from('messages').delete().eq('id', messageId);
+  if (error) throw error;
 }
 
 /**
@@ -343,9 +402,21 @@ let channelSequence = 0;
  * read when conversationId is null (the inbox uses that to restack itself).
  * RLS applies to the stream, so this only ever delivers readable rows.
  */
+export type MessageChange =
+  | {
+      event: 'INSERT' | 'UPDATE';
+      message: ChatMessage;
+      messageId: string;
+    }
+  | {
+      event: 'DELETE';
+      message: null;
+      messageId: string;
+    };
+
 export function subscribeToMessages(
   conversationId: string | null,
-  onInsert: (message: ChatMessage) => void,
+  onChange: (change: MessageChange) => void,
 ): () => void {
   channelSequence += 1;
   const channel = supabase
@@ -353,14 +424,34 @@ export function subscribeToMessages(
     .on(
       'postgres_changes',
       {
-        event: 'INSERT',
+        event: '*',
         schema: 'public',
         table: 'messages',
         ...(conversationId
           ? { filter: `conversation_id=eq.${conversationId}` }
           : {}),
       },
-      (payload) => onInsert(toMessage(payload.new as MessageRow)),
+      (payload) => {
+        if (payload.eventType === 'DELETE') {
+          const oldRow = payload.old as Partial<MessageRow>;
+          if (!oldRow.id) return;
+          onChange({
+            event: 'DELETE',
+            message: null,
+            messageId: oldRow.id,
+          });
+          return;
+        }
+        if (payload.eventType !== 'INSERT' && payload.eventType !== 'UPDATE') {
+          return;
+        }
+        const message = toMessage(payload.new as MessageRow);
+        onChange({
+          event: payload.eventType,
+          message,
+          messageId: message.id,
+        });
+      },
     )
     .subscribe();
 

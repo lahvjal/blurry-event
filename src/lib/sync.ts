@@ -108,6 +108,7 @@ async function send(mutation: QueuedMutation): Promise<void> {
         sender_id: payload.senderId,
         body: payload.body,
         client_id: payload.clientId,
+        ...(payload.replyToId ? { reply_to_id: payload.replyToId } : {}),
       });
       // A duplicate client_id means a previous attempt actually landed.
       if (error && error.code !== '23505') throw error;

@@ -17,6 +17,7 @@ private key and that key has no business inside Postgres.
 | Trigger | Who gets it | Opens |
 |---|---|---|
 | New message | Everyone in the thread except the sender | That conversation |
+| New reaction | The author of the reacted-to message | That conversation |
 | New announcement | The whole roster except its author | Announcements |
 | Tee time or starting hole changed | That team's members | My Team |
 | Added to a team | The player added | My Team |
@@ -39,8 +40,9 @@ The unread count on the home screen icon, via the Badging API. Same platform
 gate as push — an installed PWA with notification permission — so anywhere push
 works, the badge works, and anywhere it doesn't the calls are simply absent.
 
-It counts **unread messages only**. Announcements and tee time changes still
-notify, but there's no read state for them in the schema to count against.
+It counts unread messages plus reactions other people add to your messages.
+Announcements and tee time changes still notify, but there's no read state for
+them in the schema to count against.
 
 Two halves, because no single piece of code sees both directions:
 

@@ -32,6 +32,7 @@ export type MutationPayload =
       conversationId: string;
       senderId: string;
       body: string;
+      replyToId?: string | null;
       clientId: string;
     }
   | {
