@@ -27,31 +27,74 @@ import { AvatarStack } from '@/components/ui';
 
 const TABLE_BORDER = '#191b1a';
 
+/**
+ * How a hole played, relative to par. Anything better than an eagle reads as
+ * one and anything worse than a double reads as a double — a golfer only needs
+ * to know it was very good or very bad, and five colours is already the most a
+ * card can carry before it stops being scannable.
+ */
+type ScoreTone = 'eagle' | 'birdie' | 'even' | 'bogey' | 'double';
+
+function toneFor(toPar: number): ScoreTone {
+  if (toPar <= -2) return 'eagle';
+  if (toPar === -1) return 'birdie';
+  if (toPar === 0) return 'even';
+  if (toPar === 1) return 'bogey';
+  return 'double';
+}
+
+/**
+ * `fill` is the marker behind the stroke count; `tag` is the ± label beside it,
+ * lightened so it stays legible as text on the dark card rather than reversed
+ * out of a block.
+ */
+const SCORE_TONES: Record<
+  ScoreTone,
+  { fill?: string; text: string; tag: string; round?: boolean }
+> = {
+  eagle: { fill: '#2f6fb8', text: '#ffffff', tag: '#7ab4ee', round: true },
+  birdie: { fill: '#34a468', text: '#131715', tag: '#5fc98d', round: true },
+  even: { text: '#ffffff', tag: 'rgba(255,255,255,0.3)' },
+  bogey: { fill: '#a8541c', text: '#ffffff', tag: '#e08a4e' },
+  double: { fill: '#521a2b', text: '#ffffff', tag: '#c2687d' },
+};
+
+function formatToParTag(toPar: number): string {
+  if (toPar === 0) return 'E';
+  return toPar > 0 ? `+${toPar}` : `${toPar}`;
+}
+
 function ScoreCell({ score, par }: { score: number | null; par: number }) {
   if (score === null) {
     return (
-      <View style={styles.scoreCell}>
-        <Text style={styles.scoreDash}>-</Text>
+      <View style={styles.scoreSlot}>
+        <View style={styles.scoreCell}>
+          <Text style={styles.scoreDash}>-</Text>
+        </View>
       </View>
     );
   }
-  if (score < par) {
-    return (
-      <View style={[styles.scoreCell, styles.scoreBirdie]}>
-        <Text style={styles.scoreBirdieText}>{score}</Text>
-      </View>
-    );
-  }
-  if (score > par) {
-    return (
-      <View style={[styles.scoreCell, styles.scoreBogey]}>
-        <Text style={styles.scoreBogeyText}>{score}</Text>
-      </View>
-    );
-  }
+
+  const toPar = score - par;
+  const tone = SCORE_TONES[toneFor(toPar)];
+
   return (
-    <View style={styles.scoreCell}>
-      <Text style={styles.scorePar}>{score}</Text>
+    <View style={styles.scoreSlot}>
+      <View
+        style={[
+          styles.scoreCell,
+          // Circles for under par, squares for over — the convention a paper
+          // card uses, kept so the shape reads even before the colour does.
+          tone.fill ? { backgroundColor: tone.fill } : null,
+          tone.fill && !tone.round ? styles.scoreCellSquare : null,
+        ]}>
+        <Text style={[styles.scoreValue, { color: tone.text }]}>{score}</Text>
+      </View>
+      {/* Absolute so the stroke count stays centred in its column, lining up
+          with the OUT / IN / TOTAL rows below it. */}
+      <Text style={[styles.toParTag, { color: tone.tag }]}>
+        {formatToParTag(toPar)}
+      </Text>
     </View>
   );
 }
@@ -396,6 +439,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignSelf: 'stretch',
   },
+  /** Fixed width, so the tag beside it can't nudge the count off centre. */
+  scoreSlot: {
+    width: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   scoreCell: {
     width: 24,
     height: 24,
@@ -403,32 +452,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  scoreCellSquare: {
+    borderRadius: 0,
+  },
   scoreDash: {
     fontFamily: fonts.bold,
     fontSize: 14,
     color: '#5a5d5b',
   },
-  scorePar: {
+  scoreValue: {
     fontFamily: fonts.bold,
     fontSize: 14,
-    color: '#ffffff',
   },
-  scoreBirdie: {
-    backgroundColor: '#34a468',
-  },
-  scoreBirdieText: {
+  toParTag: {
+    position: 'absolute',
+    left: 32,
     fontFamily: fonts.bold,
-    fontSize: 14,
-    color: '#131715',
-  },
-  scoreBogey: {
-    backgroundColor: '#521a2b',
-    borderRadius: 0,
-  },
-  scoreBogeyText: {
-    fontFamily: fonts.bold,
-    fontSize: 14,
-    color: '#ffffff',
+    fontSize: 10,
+    letterSpacing: 0.3,
   },
   banner: {
     height: 110,
