@@ -1,4 +1,3 @@
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -18,6 +17,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PageHeader } from '@/components/page-header';
+import { EventDateTimePicker } from '@/components/event-date-time-picker';
 import { ActionButton, Noise, SectionLabel } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
 import { useEvent } from '@/state/event';
@@ -241,7 +241,7 @@ export default function AdminEvent() {
     patch({ teeTimes: [...draft.teeTimes, next] });
   };
 
-  const onPickerChange = (_: unknown, selected?: Date) => {
+  const onPickerChange = (selected?: Date) => {
     if (Platform.OS === 'android') setPicker(null);
     if (!selected) return;
     const asTime = formatTimeOfDay(selected.getHours() * 60 + selected.getMinutes());
@@ -416,12 +416,10 @@ export default function AdminEvent() {
 
           {picker ? (
             <View style={styles.pickerHost}>
-              <DateTimePicker
+              <EventDateTimePicker
                 value={pickerValue}
                 mode={picker === 'date' ? 'date' : 'time'}
-                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
                 onChange={onPickerChange}
-                themeVariant="dark"
                 minuteInterval={5}
               />
               <Pressable style={styles.pickerDone} onPress={() => setPicker(null)}>
