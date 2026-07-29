@@ -19,6 +19,10 @@ import {
 } from '@/components/message-composer';
 import { ChatMessageBubble } from '@/components/chat-message-bubble';
 import {
+  FLOATING_SCRIM_RISE,
+  FloatingBackdrop,
+} from '@/components/floating-backdrop';
+import {
   FLOATING_GLASS_BLUR_INTENSITY,
   FLOATING_GLASS_TINT,
   LiquidGlassSurface,
@@ -181,50 +185,62 @@ export default function DirectMessage() {
     <View style={styles.root}>
       <Noise />
       {/* Header */}
-      <View style={[styles.headerWrap, { top: insets.top }]}>
-        <View style={styles.headerFrame}>
-          <LiquidGlassSurface
-            style={styles.headerPill}
-            tintColor={FLOATING_GLASS_TINT}
-            blurIntensity={FLOATING_GLASS_BLUR_INTENSITY}
-            interactive>
-            <View style={styles.headerLeft}>
-              <Pressable hitSlop={12} onPress={() => router.back()}>
+      <View style={styles.headerWrap}>
+        <FloatingBackdrop
+          edge="top"
+          height={insets.top + 54 + FLOATING_SCRIM_RISE}
+        />
+        <View style={[styles.headerContent, { paddingTop: insets.top }]}>
+          <View style={styles.headerFrame}>
+            <LiquidGlassSurface
+              style={styles.headerPill}
+              tintColor={FLOATING_GLASS_TINT}
+              blurIntensity={FLOATING_GLASS_BLUR_INTENSITY}
+              interactive>
+              <View style={styles.headerLeft}>
+                <Pressable hitSlop={12} onPress={() => router.back()}>
+                  <Image
+                    source={backArrow}
+                    style={{ width: 28, height: 12.2 }}
+                    contentFit="contain"
+                    tintColor="#ffffff"
+                  />
+                </Pressable>
+                {other ? (
+                  <ParticipantAvatar participant={other} size={40} />
+                ) : (
+                  <InitialsAvatar
+                    initials={otherInitials}
+                    size={40}
+                    color="#5a5f5c"
+                  />
+                )}
+                <View style={{ gap: 3 }}>
+                  <Text style={styles.headerName}>{otherName}</Text>
+                  <Text style={styles.headerStatus}>
+                    {other?.handicap === null || other?.handicap === undefined
+                      ? 'PLAYER'
+                      : `${other.handicap} HCP`}
+                  </Text>
+                </View>
+              </View>
+              <Pressable
+                hitSlop={12}
+                disabled={!conversationId}
+                onPress={openSettings}
+                style={
+                  !conversationId ? styles.headerActionDisabled : undefined
+                }>
                 <Image
-                  source={backArrow}
-                  style={{ width: 28, height: 12.2 }}
+                  source={moreDots}
+                  style={{ width: 28, height: 5 }}
                   contentFit="contain"
                   tintColor="#ffffff"
                 />
               </Pressable>
-              {other ? (
-                <ParticipantAvatar participant={other} size={40} />
-              ) : (
-                <InitialsAvatar initials={otherInitials} size={40} color="#5a5f5c" />
-              )}
-              <View style={{ gap: 3 }}>
-                <Text style={styles.headerName}>{otherName}</Text>
-                <Text style={styles.headerStatus}>
-                  {other?.handicap === null || other?.handicap === undefined
-                    ? 'PLAYER'
-                    : `${other.handicap} HCP`}
-                </Text>
-              </View>
-            </View>
-            <Pressable
-              hitSlop={12}
-              disabled={!conversationId}
-              onPress={openSettings}
-              style={!conversationId ? styles.headerActionDisabled : undefined}>
-              <Image
-                source={moreDots}
-                style={{ width: 28, height: 5 }}
-                contentFit="contain"
-                tintColor="#ffffff"
-              />
-            </Pressable>
-          </LiquidGlassSurface>
-          <FloatingGradientStroke borderRadius={999} />
+            </LiquidGlassSurface>
+            <FloatingGradientStroke borderRadius={999} />
+          </View>
         </View>
       </View>
 
@@ -340,6 +356,8 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 10,
+  },
+  headerContent: {
     paddingHorizontal: 20,
   },
   headerFrame: {

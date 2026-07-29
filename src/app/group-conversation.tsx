@@ -19,6 +19,10 @@ import {
 } from '@/components/message-composer';
 import { ChatMessageBubble } from '@/components/chat-message-bubble';
 import {
+  FLOATING_SCRIM_RISE,
+  FloatingBackdrop,
+} from '@/components/floating-backdrop';
+import {
   FLOATING_GLASS_BLUR_INTENSITY,
   FLOATING_GLASS_TINT,
   LiquidGlassSurface,
@@ -128,40 +132,46 @@ export default function GroupConversation() {
     <View style={styles.root}>
       <Noise />
       {/* Header */}
-      <View style={[styles.headerWrap, { top: insets.top }]}>
-        <View style={styles.headerFrame}>
-          <LiquidGlassSurface
-            style={styles.headerPill}
-            tintColor={FLOATING_GLASS_TINT}
-            blurIntensity={FLOATING_GLASS_BLUR_INTENSITY}
-            interactive>
-            <View style={styles.headerLeft}>
-              <Pressable hitSlop={12} onPress={() => router.back()}>
+      <View style={styles.headerWrap}>
+        <FloatingBackdrop
+          edge="top"
+          height={insets.top + 54 + FLOATING_SCRIM_RISE}
+        />
+        <View style={[styles.headerContent, { paddingTop: insets.top }]}>
+          <View style={styles.headerFrame}>
+            <LiquidGlassSurface
+              style={styles.headerPill}
+              tintColor={FLOATING_GLASS_TINT}
+              blurIntensity={FLOATING_GLASS_BLUR_INTENSITY}
+              interactive>
+              <View style={styles.headerLeft}>
+                <Pressable hitSlop={12} onPress={() => router.back()}>
+                  <Image
+                    source={backArrow}
+                    style={{ width: 28, height: 12.2 }}
+                    contentFit="contain"
+                    tintColor="#ffffff"
+                  />
+                </Pressable>
+                <InitialsAvatar initials={initialsOf(title)} size={40} />
+                <Pressable style={{ gap: 3 }} onPress={openSettings}>
+                  <Text style={styles.headerName}>{title}</Text>
+                  <Text style={styles.headerStatus}>
+                    {memberCount} {memberCount === 1 ? 'MEMBER' : 'MEMBERS'}
+                  </Text>
+                </Pressable>
+              </View>
+              <Pressable hitSlop={12} onPress={openSettings}>
                 <Image
-                  source={backArrow}
-                  style={{ width: 28, height: 12.2 }}
+                  source={moreDots}
+                  style={{ width: 28, height: 5 }}
                   contentFit="contain"
                   tintColor="#ffffff"
                 />
               </Pressable>
-              <InitialsAvatar initials={initialsOf(title)} size={40} />
-              <Pressable style={{ gap: 3 }} onPress={openSettings}>
-                <Text style={styles.headerName}>{title}</Text>
-                <Text style={styles.headerStatus}>
-                  {memberCount} {memberCount === 1 ? 'MEMBER' : 'MEMBERS'}
-                </Text>
-              </Pressable>
-            </View>
-            <Pressable hitSlop={12} onPress={openSettings}>
-              <Image
-                source={moreDots}
-                style={{ width: 28, height: 5 }}
-                contentFit="contain"
-                tintColor="#ffffff"
-              />
-            </Pressable>
-          </LiquidGlassSurface>
-          <FloatingGradientStroke borderRadius={999} />
+            </LiquidGlassSurface>
+            <FloatingGradientStroke borderRadius={999} />
+          </View>
         </View>
       </View>
 
@@ -280,6 +290,8 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 10,
+  },
+  headerContent: {
     paddingHorizontal: 20,
   },
   headerFrame: {

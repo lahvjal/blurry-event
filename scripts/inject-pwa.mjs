@@ -76,10 +76,10 @@ const HEAD = `
         -webkit-touch-callout: none;
       }
       /*
-       * Progressive blur behind bottom-floating controls (the nav and message
-       * composer). Each layer blurs the same backdrop harder than the last
-       * and is masked to begin lower, so the blur deepens toward the bottom
-       * edge instead of switching on at one line.
+       * Progressive blur behind floating controls. Each layer blurs the same
+       * backdrop harder than the last and is masked to begin nearer its edge,
+       * so the blur deepens gradually instead of switching on at one line.
+       * Top-floating headers use the exact masks mirrored vertically.
        */
       [data-nav-scrim] { pointer-events: none; }
       [data-nav-scrim="1"] {
@@ -99,6 +99,18 @@ const HEAD = `
         -webkit-backdrop-filter: blur(20px);
         mask-image: linear-gradient(to bottom, transparent 60%, #000 92%);
         -webkit-mask-image: linear-gradient(to bottom, transparent 60%, #000 92%);
+      }
+      [data-nav-scrim="1"][data-scrim-edge="top"] {
+        mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
+        -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
+      }
+      [data-nav-scrim="2"][data-scrim-edge="top"] {
+        mask-image: linear-gradient(to bottom, #000 32%, transparent 68%);
+        -webkit-mask-image: linear-gradient(to bottom, #000 32%, transparent 68%);
+      }
+      [data-nav-scrim="3"][data-scrim-edge="top"] {
+        mask-image: linear-gradient(to bottom, #000 8%, transparent 40%);
+        -webkit-mask-image: linear-gradient(to bottom, #000 8%, transparent 40%);
       }
     </style>
     <script>

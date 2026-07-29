@@ -5,6 +5,10 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
+  FLOATING_SCRIM_RISE,
+  FloatingBackdrop,
+} from '@/components/floating-backdrop';
+import {
   FLOATING_GLASS_BLUR_INTENSITY,
   FLOATING_GLASS_TINT,
   LiquidGlassSurface,
@@ -38,46 +42,56 @@ export function PageHeader({
 }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const scrimHeight = insets.top + PAGE_HEADER_HEIGHT + FLOATING_SCRIM_RISE;
 
   return (
     <View
       style={[
         styles.wrapper,
-        floating && { position: 'absolute', top: insets.top, left: 0, right: 0, zIndex: 10 },
+        floating && styles.wrapperFloating,
       ]}
       pointerEvents="box-none">
-      <View style={styles.pillFrame}>
-        <LiquidGlassSurface
-          style={styles.pill}
-          tintColor={FLOATING_GLASS_TINT}
-          blurIntensity={FLOATING_GLASS_BLUR_INTENSITY}
-          interactive>
-          <Pressable hitSlop={12} onPress={onBack ?? (() => router.back())}>
-            <Image
-              source={backArrow}
-              style={{ width: 28, height: 12.2 }}
-              contentFit="contain"
-              tintColor="#ffffff"
-            />
-          </Pressable>
-          <View style={styles.titleBlock}>
-            <Text style={styles.title}>{title}</Text>
-            {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
-          </View>
-          {showMore ? (
-            <Pressable hitSlop={12} onPress={onMore}>
+      {floating ? (
+        <FloatingBackdrop edge="top" height={scrimHeight} />
+      ) : null}
+      <View
+        style={[
+          styles.headerContent,
+          floating && { paddingTop: insets.top },
+        ]}>
+        <View style={styles.pillFrame}>
+          <LiquidGlassSurface
+            style={styles.pill}
+            tintColor={FLOATING_GLASS_TINT}
+            blurIntensity={FLOATING_GLASS_BLUR_INTENSITY}
+            interactive>
+            <Pressable hitSlop={12} onPress={onBack ?? (() => router.back())}>
               <Image
-                source={moreDots}
-                style={{ width: 28, height: 5 }}
+                source={backArrow}
+                style={{ width: 28, height: 12.2 }}
                 contentFit="contain"
                 tintColor="#ffffff"
               />
             </Pressable>
-          ) : (
-            <View style={styles.headerSpacer} />
-          )}
-        </LiquidGlassSurface>
-        <FloatingGradientStroke borderRadius={999} />
+            <View style={styles.titleBlock}>
+              <Text style={styles.title}>{title}</Text>
+              {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+            </View>
+            {showMore ? (
+              <Pressable hitSlop={12} onPress={onMore}>
+                <Image
+                  source={moreDots}
+                  style={{ width: 28, height: 5 }}
+                  contentFit="contain"
+                  tintColor="#ffffff"
+                />
+              </Pressable>
+            ) : (
+              <View style={styles.headerSpacer} />
+            )}
+          </LiquidGlassSurface>
+          <FloatingGradientStroke borderRadius={999} />
+        </View>
       </View>
     </View>
   );
@@ -87,7 +101,15 @@ export function PageHeader({
 export const PAGE_HEADER_HEIGHT = 54;
 
 const styles = StyleSheet.create({
-  wrapper: {
+  wrapper: {},
+  wrapperFloating: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+  },
+  headerContent: {
     paddingHorizontal: 20,
   },
   pillFrame: {
