@@ -44,19 +44,20 @@ function toneFor(toPar: number): ScoreTone {
 }
 
 /**
- * `fill` is the marker behind the stroke count; `tag` is the ± label beside it,
- * lightened so it stays legible as text on the dark card rather than reversed
- * out of a block.
+ * `fill` is the marker behind the stroke count and `text` the count reversed
+ * out of it. The ± label beside the marker carries no colour of its own — the
+ * marker already says how the hole went, and tinting the label too made the
+ * column read as five ragged colours instead of one legible run of figures.
  */
 const SCORE_TONES: Record<
   ScoreTone,
-  { fill?: string; text: string; tag: string; round?: boolean }
+  { fill?: string; text: string; round?: boolean }
 > = {
-  eagle: { fill: '#2f6fb8', text: '#ffffff', tag: '#7ab4ee', round: true },
-  birdie: { fill: '#34a468', text: '#131715', tag: '#5fc98d', round: true },
-  even: { text: '#ffffff', tag: 'rgba(255,255,255,0.3)' },
-  bogey: { fill: '#a8541c', text: '#ffffff', tag: '#e08a4e' },
-  double: { fill: '#521a2b', text: '#ffffff', tag: '#c2687d' },
+  eagle: { fill: '#2f6fb8', text: '#ffffff', round: true },
+  birdie: { fill: '#34a468', text: '#131715', round: true },
+  even: { text: '#ffffff' },
+  bogey: { fill: '#a8541c', text: '#ffffff' },
+  double: { fill: '#521a2b', text: '#ffffff' },
 };
 
 function formatToParTag(toPar: number): string {
@@ -92,9 +93,7 @@ function ScoreCell({ score, par }: { score: number | null; par: number }) {
       </View>
       {/* Absolute so the stroke count stays centred in its column, lining up
           with the OUT / IN / TOTAL rows below it. */}
-      <Text style={[styles.toParTag, { color: tone.tag }]}>
-        {formatToParTag(toPar)}
-      </Text>
+      <Text style={styles.toParTag}>{formatToParTag(toPar)}</Text>
     </View>
   );
 }
@@ -470,6 +469,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     fontSize: 10,
     letterSpacing: 0.3,
+    color: '#ffffff',
   },
   banner: {
     height: 110,
