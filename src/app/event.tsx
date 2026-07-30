@@ -525,7 +525,9 @@ export default function EventHome() {
               achievements={achievements}
               storageKey={`blurry.achievement-alerts.quiet.${event.id}.${me.id}`}
             />
-          ) : latestAnnouncement ? (
+          ) : null}
+
+          {latestAnnouncement ? (
             <Pressable
               style={styles.announcementCard}
               onPress={() => router.push('/announcements')}>
