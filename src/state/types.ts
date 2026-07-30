@@ -139,6 +139,8 @@ export type ChatMessageMediaDraft = {
   height: number;
   fileName: string | null;
   fileSize: number | null;
+  /** Stable web payload; camera blob URLs can become unreadable before send. */
+  webFile?: File | null;
 };
 
 export type ChatMessage = {

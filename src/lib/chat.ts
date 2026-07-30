@@ -2,6 +2,7 @@ import {
   ImageManipulator,
   SaveFormat,
 } from 'expo-image-manipulator';
+import { Platform } from 'react-native';
 
 import { isPermanentError, supabase } from '@/lib/supabase';
 import { enqueue } from '@/lib/sync';
@@ -334,10 +335,107 @@ type PreparedMessageMedia = {
   height: number | null;
 };
 
-async function readMediaBytes(uri: string): Promise<ArrayBuffer> {
+async function readMediaBytes(draft: ChatMessageMediaDraft): Promise<ArrayBuffer> {
+  if (draft.webFile) return draft.webFile.arrayBuffer();
+
+  return readMediaUri(draft.uri);
+}
+
+async function readMediaUri(uri: string): Promise<ArrayBuffer> {
   const response = await fetch(uri);
   if (!response.ok) throw new Error('Could not read that image.');
   return response.arrayBuffer();
+}
+
+function scaledPhotoSize(
+  width: number,
+  height: number,
+): { width: number; height: number } {
+  const safeWidth = Math.max(1, width);
+  const safeHeight = Math.max(1, height);
+  const largestEdge = Math.max(safeWidth, safeHeight);
+  if (largestEdge <= MAX_PHOTO_EDGE) {
+    return { width: safeWidth, height: safeHeight };
+  }
+  const scale = MAX_PHOTO_EDGE / largestEdge;
+  return {
+    width: Math.max(1, Math.round(safeWidth * scale)),
+    height: Math.max(1, Math.round(safeHeight * scale)),
+  };
+}
+
+function loadWebPhoto(uri: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = document.createElement('img');
+    image.onload = () => resolve(image);
+    image.onerror = () =>
+      reject(
+        new Error(
+          'That camera photo could not be decoded. Try taking it again.',
+        ),
+      );
+    image.src = uri;
+  });
+}
+
+function encodeWebPhoto(
+  canvas: HTMLCanvasElement,
+): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error('That camera photo could not be converted.'));
+      },
+      'image/jpeg',
+      PHOTO_COMPRESSION,
+    );
+  });
+}
+
+/**
+ * Camera captures in an iOS PWA arrive as a web File plus a temporary blob URL.
+ * Drawing that File directly into the final-sized canvas avoids depending on a
+ * stale picker URL and avoids Expo's full-resolution intermediate PNG canvas,
+ * which can exhaust Safari's memory for modern iPhone photos.
+ */
+async function prepareWebPhoto(
+  draft: ChatMessageMediaDraft,
+): Promise<PreparedMessageMedia> {
+  const createdUri = draft.webFile
+    ? URL.createObjectURL(draft.webFile)
+    : null;
+  try {
+    const image = await loadWebPhoto(createdUri ?? draft.uri);
+    const sourceWidth = image.naturalWidth || draft.width;
+    const sourceHeight = image.naturalHeight || draft.height;
+    if (!sourceWidth || !sourceHeight) {
+      throw new Error('That camera photo has no readable dimensions.');
+    }
+
+    const size = scaledPhotoSize(sourceWidth, sourceHeight);
+    const canvas = document.createElement('canvas');
+    canvas.width = size.width;
+    canvas.height = size.height;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('That camera photo could not be prepared.');
+    context.drawImage(image, 0, 0, size.width, size.height);
+
+    const blob = await encodeWebPhoto(canvas);
+    if (blob.size > MAX_MESSAGE_MEDIA_BYTES) {
+      throw new Error('That photo is still larger than 15 MB after compression.');
+    }
+
+    return {
+      bytes: await blob.arrayBuffer(),
+      mimeType: 'image/jpeg',
+      extension: 'jpg',
+      width: size.width,
+      height: size.height,
+    };
+  } finally {
+    if (createdUri) URL.revokeObjectURL(createdUri);
+  }
 }
 
 /**
@@ -352,9 +450,9 @@ async function prepareMessageMedia(
   draft: ChatMessageMediaDraft,
 ): Promise<PreparedMessageMedia> {
   const mimeType = mediaMimeType(draft);
-  const sourceBytes = await readMediaBytes(draft.uri);
 
   if (mimeType === 'image/gif') {
+    const sourceBytes = await readMediaBytes(draft);
     if (sourceBytes.byteLength > MAX_MESSAGE_MEDIA_BYTES) {
       throw new Error('Choose a GIF smaller than 15 MB.');
     }
@@ -367,6 +465,14 @@ async function prepareMessageMedia(
     };
   }
 
+  const knownSourceSize = draft.webFile?.size ?? draft.fileSize;
+  if (knownSourceSize && knownSourceSize > MAX_SOURCE_PHOTO_BYTES) {
+    throw new Error('Choose a photo smaller than 40 MB.');
+  }
+
+  if (Platform.OS === 'web') return prepareWebPhoto(draft);
+
+  const sourceBytes = await readMediaBytes(draft);
   if (sourceBytes.byteLength > MAX_SOURCE_PHOTO_BYTES) {
     throw new Error('Choose a photo smaller than 40 MB.');
   }
@@ -386,7 +492,7 @@ async function prepareMessageMedia(
     compress: PHOTO_COMPRESSION,
     format: SaveFormat.JPEG,
   });
-  const compressedBytes = await readMediaBytes(result.uri);
+  const compressedBytes = await readMediaUri(result.uri);
   if (compressedBytes.byteLength > MAX_MESSAGE_MEDIA_BYTES) {
     throw new Error('That photo is still larger than 15 MB after compression.');
   }

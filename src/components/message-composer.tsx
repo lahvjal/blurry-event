@@ -184,6 +184,7 @@ export function MessageComposer({
         height: asset.height,
         fileName: asset.fileName ?? null,
         fileSize: asset.fileSize ?? null,
+        webFile: asset.file ?? null,
       });
     } catch (caught) {
       Alert.alert(
