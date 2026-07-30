@@ -5,6 +5,7 @@ import {
   EventConfig,
   GameStyle,
   Participant,
+  ScoreUpdate,
   Scores,
   Team,
   TeamInvite,
@@ -47,6 +48,8 @@ export type EventBundle = {
   roundsByEntrant: Record<string, Scores>;
   /** Maps an entrant key to its rounds.id, needed for score writes. */
   roundIdByEntrant: Record<string, string>;
+  /** Current score rows ordered by their last entry/edit time. */
+  scoreUpdates: ScoreUpdate[];
   /** The signed-in user's participant row, if their account is linked. */
   meId: string | null;
 };
@@ -145,12 +148,31 @@ export async function fetchEventBundle(): Promise<EventBundle> {
 
   const roundsByEntrant: Record<string, Scores> = {};
   const roundIdByEntrant: Record<string, string> = {};
+  const entrantByRound = new Map<string, string>();
   (roundsRes.data ?? []).forEach((r: any) => {
     const entrant = r.team_id ?? r.participant_id;
     if (!entrant) return;
     roundsByEntrant[entrant] = scoresByRound.get(r.id) ?? emptyScores();
     roundIdByEntrant[entrant] = r.id;
+    entrantByRound.set(r.id, entrant);
   });
+  const scoreUpdates: ScoreUpdate[] = (scoresRes.data ?? [])
+    .map((score: any): ScoreUpdate | null => {
+      const entrantId = entrantByRound.get(score.round_id);
+      if (!entrantId) return null;
+      return {
+        entrantId,
+        hole: score.hole,
+        strokes: score.strokes,
+        updatedAt: score.client_updated_at,
+        enteredBy: score.entered_by ?? null,
+      };
+    })
+    .filter((score): score is ScoreUpdate => score !== null)
+    .sort(
+      (a, b) =>
+        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+    );
 
   const meId =
     (participantsRes.data ?? []).find((p: any) => p.claimed_by === userId)?.id ?? null;
@@ -197,6 +219,7 @@ export async function fetchEventBundle(): Promise<EventBundle> {
     }),
     roundsByEntrant,
     roundIdByEntrant,
+    scoreUpdates,
     meId,
   };
 }

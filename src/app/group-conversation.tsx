@@ -162,6 +162,13 @@ export default function GroupConversation() {
       params: { id: conversationId },
     });
   };
+  const openDetails = () => {
+    if (conversation?.teamId) {
+      router.push('/my-team');
+      return;
+    }
+    openSettings();
+  };
 
   return (
     <View style={styles.root}>
@@ -189,9 +196,10 @@ export default function GroupConversation() {
                   />
                 </Pressable>
                 <InitialsAvatar initials={initialsOf(title)} size={40} />
-                <Pressable style={{ gap: 3 }} onPress={openSettings}>
+                <Pressable style={{ gap: 3 }} onPress={openDetails}>
                   <Text style={styles.headerName}>{title}</Text>
                   <Text style={styles.headerStatus}>
+                    {conversation?.teamId ? 'TEAM CHAT · ' : ''}
                     {memberCount} {memberCount === 1 ? 'MEMBER' : 'MEMBERS'}
                   </Text>
                 </Pressable>

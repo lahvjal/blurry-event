@@ -59,6 +59,7 @@ export default function ConversationSettings() {
     ? members.find((member) => member.id !== me.id)
     : undefined;
   const isEventGroup = conversation?.kind === 'event_group';
+  const isTeamChat = Boolean(conversation?.teamId);
 
   useEffect(() => {
     if (!conversationId || !me.claimed) {
@@ -208,7 +209,7 @@ export default function ConversationSettings() {
           <View>
             <View style={styles.sectionHeading}>
               <Text style={styles.sectionLabel}>MEMBERS · {members.length}</Text>
-              {isEventGroup ? null : (
+              {isEventGroup || isTeamChat ? null : (
                 <Pressable
                   onPress={() =>
                     conversationId
@@ -232,7 +233,9 @@ export default function ConversationSettings() {
                     {member.id === me.id ? '  ·  YOU' : ''}
                   </Text>
                   <Text style={styles.memberRole}>
-                    {member.id === conversation.createdBy
+                    {isTeamChat
+                      ? 'TEAM MEMBER'
+                      : member.id === conversation.createdBy
                       ? 'CREATED THIS GROUP'
                       : 'MEMBER'}
                   </Text>
@@ -250,7 +253,15 @@ export default function ConversationSettings() {
 
         {leaveError ? <Text style={styles.error}>{leaveError}</Text> : null}
 
-        {!direct && conversation && !isEventGroup ? (
+        {isTeamChat ? (
+          <Pressable
+            style={styles.teamButton}
+            onPress={() => router.push('/my-team')}>
+            <Text style={styles.teamButtonText}>VIEW TEAM DETAILS</Text>
+          </Pressable>
+        ) : null}
+
+        {!direct && conversation && !isEventGroup && !isTeamChat ? (
           <Pressable
             style={styles.leaveButton}
             onPress={leave}
@@ -393,6 +404,17 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     fontSize: 12,
     color: '#ff9d9d',
+  },
+  teamButton: {
+    height: 64,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(93,146,115,0.16)',
+  },
+  teamButtonText: {
+    fontFamily: fonts.bold,
+    fontSize: 12,
+    color: colors.highlight,
   },
   leaveButton: {
     height: 64,

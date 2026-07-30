@@ -97,6 +97,8 @@ export type Conversation = {
   /** Null on direct threads, which are titled after the other person. */
   name: string | null;
   createdBy: string | null;
+  /** Present for the official group thread that follows one event team. */
+  teamId?: string | null;
   /** Participant ids, including yours. */
   memberIds: string[];
 };
@@ -277,6 +279,18 @@ export function formatTimeOfDay(minutesSinceMidnight: number): string {
 
 /** 18 entries; null means the hole hasn't been scored yet. */
 export type Scores = (number | null)[];
+
+/**
+ * The latest persisted value for one scored hole, including enough metadata to
+ * build the event-wide achievement ticker in update order.
+ */
+export type ScoreUpdate = {
+  entrantId: string;
+  hole: number;
+  strokes: number;
+  updatedAt: string;
+  enteredBy: string | null;
+};
 
 export type Round = {
   id: string;

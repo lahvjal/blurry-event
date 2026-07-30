@@ -17,7 +17,7 @@ const teeIcon = require('@/assets/figma/tee-icon.svg');
 export default function ScoreInput() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { event, currentHoleIndex, setScore } = useEvent();
+  const { event, myScores, currentHoleIndex, setScore } = useEvent();
   const currentHole = currentHoleIndex;
   const hole = event.holes[currentHole];
   const par = hole.par;
@@ -33,8 +33,11 @@ export default function ScoreInput() {
   const aboveNav = Math.max(20, insets.bottom + 12) + 72 + 10;
 
   const save = () => {
+    const finishesRound =
+      myScores[currentHole] === null &&
+      myScores.filter((score) => score === null).length === 1;
     setScore(currentHole, value);
-    if (currentHole === 17) {
+    if (finishesRound) {
       router.replace('/complete-round');
     } else {
       router.back();

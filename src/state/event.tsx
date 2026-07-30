@@ -42,6 +42,7 @@ import {
   LeaderboardRow,
   NewParticipantInput,
   Participant,
+  ScoreUpdate,
   Scores,
   Team,
   TeamInvite,
@@ -226,6 +227,8 @@ type EventState = {
   myScores: Scores;
   currentHoleIndex: number;
   leaderboard: LeaderboardRow[];
+  /** Latest score entries across the field, used for event achievements. */
+  scoreUpdates: ScoreUpdate[];
   /**
    * True once state reflects rows read from Supabase. False while showing the
    * built-in demo data, where the ids are made up and nothing is written back.
@@ -328,6 +331,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const [announcements, setAnnouncements] = useState<Announcement[]>(SEED_ANNOUNCEMENTS);
   const [invites, setInvites] = useState<TeamInvite[]>([]);
   const [rounds, setRounds] = useState<Record<string, Scores>>(SEED_ROUNDS);
+  const [scoreUpdates, setScoreUpdates] = useState<ScoreUpdate[]>([]);
   const [myId, setMyId] = useState<string | null>('p1');
   /** rounds.id per entrant key, needed to clear a card. */
   const [roundIds, setRoundIds] = useState<Record<string, string>>({});
@@ -342,6 +346,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     setInvites([]);
     setAnnouncements(SEED_ANNOUNCEMENTS);
     setRounds(SEED_ROUNDS);
+    setScoreUpdates([]);
     setRoundIds({});
     setMyId('p1');
     setIsLive(false);
@@ -354,6 +359,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     setInvites(bundle.invites);
     setAnnouncements(bundle.announcements);
     setRounds(bundle.roundsByEntrant);
+    setScoreUpdates(bundle.scoreUpdates ?? []);
     setRoundIds(bundle.roundIdByEntrant);
     setMyId(bundle.meId);
     // Cached data is still real data — writes must keep queueing while offline.
@@ -429,6 +435,44 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     });
     return () => subscription.remove();
   }, [loadFromServer]);
+
+  // The home screen's live standings and achievement ticker should move while
+  // it is open, not only after an app foreground. A short debounce folds a team
+  // submitting several nearby scores into one consistent bundle refresh.
+  useEffect(() => {
+    if (!isLive) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const refreshSoon = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        void loadFromServer().catch(() => {});
+      }, 250);
+    };
+    const channel = supabase
+      .channel(`event-home-live:${event.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'scores' },
+        refreshSoon,
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'announcements',
+          filter: `event_id=eq.${event.id}`,
+        },
+        refreshSoon,
+      )
+      .subscribe();
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      void supabase.removeChannel(channel);
+    };
+  }, [event.id, isLive, loadFromServer]);
 
   /**
    * Sends one write to Supabase behind an optimistic local update. If the server
@@ -518,9 +562,13 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const myScores = rounds[myEntrantId] ?? emptyScores();
 
   const currentHoleIndex = useMemo(() => {
-    const next = myScores.findIndex((s) => s === null);
-    return next === -1 ? 17 : next;
-  }, [myScores]);
+    const start = Math.max(0, Math.min(17, (myTeam?.startingHole ?? 1) - 1));
+    for (let offset = 0; offset < 18; offset += 1) {
+      const index = (start + offset) % 18;
+      if (myScores[index] === null) return index;
+    }
+    return (start + 17) % 18;
+  }, [myScores, myTeam?.startingHole]);
 
   const participantById = useCallback(
     (id: string) => participants.find((p) => p.id === id),
@@ -563,12 +611,26 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
   const setScore = useCallback(
     (holeIndex: number, strokes: number) => {
+      const updatedAt = new Date().toISOString();
       setRounds((prev) => {
         const existing = prev[myEntrantId] ?? emptyScores();
         const next = [...existing];
         next[holeIndex] = strokes;
         return { ...prev, [myEntrantId]: next };
       });
+      setScoreUpdates((current) => [
+        {
+          entrantId: myEntrantId,
+          hole: holeIndex + 1,
+          strokes,
+          updatedAt,
+          enteredBy: myId,
+        },
+        ...current.filter(
+          (update) =>
+            update.entrantId !== myEntrantId || update.hole !== holeIndex + 1,
+        ),
+      ]);
 
       if (!isLive || !myId) return;
       // Queued rather than written straight through: this is the one write that
@@ -581,7 +643,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         hole: holeIndex + 1,
         strokes,
         enteredBy: myId,
-        clientUpdatedAt: new Date().toISOString(),
+        clientUpdatedAt: updatedAt,
       });
     },
     [myEntrantId, isLive, myId, event.id, myRoundOwner],
@@ -589,6 +651,9 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
   const resetRound = useCallback(() => {
     setRounds((prev) => ({ ...prev, [myEntrantId]: emptyScores() }));
+    setScoreUpdates((current) =>
+      current.filter((update) => update.entrantId !== myEntrantId),
+    );
     const roundId = roundIds[myEntrantId];
     if (!roundId) return;
     void persist('the cleared card', () => apiResetRound(roundId));
@@ -1032,6 +1097,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     myScores,
     currentHoleIndex,
     leaderboard,
+    scoreUpdates,
     isLive,
     snapshotAt,
     participantById,

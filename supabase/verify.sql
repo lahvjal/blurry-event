@@ -136,6 +136,15 @@ select * from (values
        and pg_get_function_result(p.oid) like '%last_reaction_message_media_mime_type%'
    )),
 
+  ('0021  official team conversations',
+   exists (select 1 from col
+     where table_name='conversations' and column_name='team_id')
+   and exists (select 1 from fn where proname='open_team_conversation')),
+
+  ('0021  team chat membership sync trigger',
+   exists (select 1 from pg_trigger
+     where tgname='team_conversation_membership' and not tgisinternal)),
+
   ('RLS   enabled on every public table',
    not exists (select 1 from pg_tables
      where schemaname='public' and rowsecurity = false)),

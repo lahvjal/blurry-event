@@ -154,11 +154,25 @@ export async function fetchConversationSummaries(): Promise<ConversationSummary[
 
 /** The conversation itself and who is in it, for a thread header or settings. */
 export async function fetchConversation(id: string): Promise<Conversation | null> {
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('conversations')
-    .select('id, kind, name, created_by, conversation_members(participant_id)')
+    .select(
+      'id, kind, name, created_by, team_id, conversation_members(participant_id)',
+    )
     .eq('id', id)
     .maybeSingle();
+
+  // Keep ordinary chats readable while migration 0021 rolls out.
+  if (
+    error &&
+    ['42703', 'PGRST200', 'PGRST204', 'PGRST205'].includes(error.code ?? '')
+  ) {
+    ({ data, error } = await supabase
+      .from('conversations')
+      .select('id, kind, name, created_by, conversation_members(participant_id)')
+      .eq('id', id)
+      .maybeSingle());
+  }
 
   if (error) throw error;
   if (!data) return null;
@@ -168,6 +182,7 @@ export async function fetchConversation(id: string): Promise<Conversation | null
     kind: ConversationKind;
     name: string | null;
     created_by: string | null;
+    team_id?: string | null;
     conversation_members: { participant_id: string }[] | null;
   };
 
@@ -176,6 +191,7 @@ export async function fetchConversation(id: string): Promise<Conversation | null
     kind: row.kind,
     name: row.name,
     createdBy: row.created_by,
+    teamId: row.team_id ?? null,
     memberIds: (row.conversation_members ?? []).map((m) => m.participant_id),
   };
 }
@@ -542,6 +558,18 @@ export async function createGroupConversation(
   const { data, error } = await supabase.rpc('create_group_conversation', {
     group_name: name,
     member_ids: memberIds,
+  });
+  if (error) throw error;
+  return data as string;
+}
+
+/**
+ * Returns the official thread for a team, creating it on first use and
+ * reconciling its members with the current team assignment.
+ */
+export async function openTeamConversation(teamId: string): Promise<string> {
+  const { data, error } = await supabase.rpc('open_team_conversation', {
+    target_team: teamId,
   });
   if (error) throw error;
   return data as string;
