@@ -11,7 +11,7 @@
  * manages itself and can reason about staleness for.
  */
 
-const VERSION = 'v3';
+const VERSION = 'v4';
 const SHELL_CACHE = `blurry-shell-${VERSION}`;
 const ASSET_CACHE = `blurry-assets-${VERSION}`;
 

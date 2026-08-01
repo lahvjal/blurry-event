@@ -16,7 +16,7 @@ import { useEvent } from '@/state/event';
 export default function CreateGroup() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { participants, me } = useEvent();
+  const { event, participants, me } = useEvent();
   // With `add`, the same picker adds people to a group that already exists.
   const params = useLocalSearchParams<{ add?: string }>();
   const addingTo = params.add ?? null;
@@ -56,7 +56,7 @@ export default function CreateGroup() {
         router.back();
         return;
       }
-      const id = await createGroupConversation(name, selected);
+      const id = await createGroupConversation(event.id, name, selected);
       // Replace so Back returns to the inbox rather than this form.
       router.replace({ pathname: '/group-conversation', params: { id } });
     } catch (caught) {

@@ -15,6 +15,8 @@ import {
   LiquidGlassSurface,
 } from '@/components/liquid-glass';
 import { fonts } from '@/constants/theme';
+import { EventScreenName, eventPath } from '@/lib/routes';
+import { useEvent } from '@/state/event';
 import { useUnreadTotal } from '@/state/unread';
 
 /** Matches styles.bar. */
@@ -28,17 +30,18 @@ const icons = {
 } as const;
 
 const tabs = [
-  { key: 'event', route: '/event' },
-  { key: 'leaderboard', route: '/leaderboard' },
-  { key: 'messages', route: '/messages' },
-  { key: 'profile', route: '/profile' },
-] as const;
+  { key: 'event', screen: 'event' },
+  { key: 'leaderboard', screen: 'leaderboard' },
+  { key: 'messages', screen: 'messages' },
+  { key: 'profile', screen: 'profile' },
+] as const satisfies readonly { key: keyof typeof icons; screen: EventScreenName }[];
 
 export function FloatingNav() {
   const router = useRouter();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
-  const unread = useUnreadTotal();
+  const { event } = useEvent();
+  const unread = useUnreadTotal(event.id);
 
   const bottomInset = Math.max(20, insets.bottom + 12);
   // Measured from the bottom edge up to the fade above the bar's top edge.
@@ -68,12 +71,15 @@ export function FloatingNav() {
             interactive>
             <View style={styles.items}>
               {tabs.map((tab) => {
-                const active = pathname === tab.route;
+                const active =
+                  pathname === `/${tab.screen}` || pathname.endsWith(`/${tab.screen}`);
                 return (
                   <Pressable
                     key={tab.key}
                     style={styles.tab}
-                    onPress={() => router.navigate(tab.route)}>
+                    onPress={() =>
+                      router.navigate(eventPath(event.id, tab.screen) as never)
+                    }>
                     <View style={[styles.tabPill, active && styles.tabPillActive]}>
                       <View style={styles.iconWrap}>
                         <Image

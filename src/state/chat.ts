@@ -47,6 +47,7 @@ async function signedIn(): Promise<boolean> {
 
 
 export function useConversations() {
+  const { event } = useEvent();
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -58,18 +59,21 @@ export function useConversations() {
         setError(null);
         return;
       }
-      const summaries = await fetchConversationSummaries();
+      const summaries = await fetchConversationSummaries(event.id);
       setConversations(summaries);
       // Loading the inbox already computed the count, so hand it straight to
       // the shared store rather than making it go and ask again.
-      setUnreadTotal(summaries.reduce((total, c) => total + c.unreadCount, 0));
+      setUnreadTotal(
+        event.id,
+        summaries.reduce((total, c) => total + c.unreadCount, 0),
+      );
       setError(null);
     } catch (caught) {
       setError(errorText(caught));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [event.id]);
 
   // Refetch on focus so a thread started elsewhere — or one someone else added
   // you to — appears without a restart.
@@ -81,10 +85,13 @@ export function useConversations() {
   useRefreshOnPull(reload);
 
   // Any incoming message restacks the list and lights an unread badge.
-  useEffect(() => subscribeToMessages(null, () => void reload()), [reload]);
   useEffect(
-    () => subscribeToMessageReactions(() => void reload()),
-    [reload],
+    () => subscribeToMessages(event.id, null, () => void reload()),
+    [event.id, reload],
+  );
+  useEffect(
+    () => subscribeToMessageReactions(event.id, () => void reload()),
+    [event.id, reload],
   );
 
   return { conversations, loading, error, reload };
@@ -92,6 +99,7 @@ export function useConversations() {
 
 /** The conversation behind a thread header or the group settings screen. */
 export function useConversationDetail(conversationId: string | null) {
+  const { event } = useEvent();
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -103,14 +111,14 @@ export function useConversationDetail(conversationId: string | null) {
       return;
     }
     try {
-      setConversation(await fetchConversation(conversationId));
+      setConversation(await fetchConversation(event.id, conversationId));
       setError(null);
     } catch (caught) {
       setError(errorText(caught));
     } finally {
       setLoading(false);
     }
-  }, [conversationId]);
+  }, [conversationId, event.id]);
 
   useFocusEffect(
     useCallback(() => {
@@ -123,7 +131,7 @@ export function useConversationDetail(conversationId: string | null) {
 }
 
 export function useConversation(conversationId: string | null) {
-  const { me } = useEvent();
+  const { event, me } = useEvent();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -138,7 +146,7 @@ export function useConversation(conversationId: string | null) {
       return;
     }
     try {
-      const page = await fetchMessages(conversationId);
+      const page = await fetchMessages(event.id, conversationId);
       setMessages(page.messages);
       setHasOlder(page.hasOlder);
       setError(null);
@@ -147,7 +155,7 @@ export function useConversation(conversationId: string | null) {
     } finally {
       setLoading(false);
     }
-  }, [conversationId]);
+  }, [conversationId, event.id]);
 
   useEffect(() => {
     setLoading(true);
@@ -159,7 +167,7 @@ export function useConversation(conversationId: string | null) {
 
   useEffect(() => {
     if (!conversationId) return;
-    return subscribeToMessages(conversationId, (change) =>
+    return subscribeToMessages(event.id, conversationId, (change) =>
       setMessages((prev) => {
         if (change.event === 'DELETE') {
           return prev.filter((message) => message.id !== change.messageId);
@@ -175,16 +183,16 @@ export function useConversation(conversationId: string | null) {
         return mergeMessage(prev, change.message);
       }),
     );
-  }, [conversationId]);
+  }, [conversationId, event.id]);
 
   useEffect(() => {
     if (!conversationId) return;
-    return subscribeToMessageReactions((change) =>
+    return subscribeToMessageReactions(event.id, (change) =>
       setMessages((prev) =>
         mergeReaction(prev, change.messageId, change.reaction, change.event),
       ),
     );
-  }, [conversationId]);
+  }, [conversationId, event.id]);
 
   const reactionCount = messages.reduce(
     (total, message) => total + message.reactions.length,
@@ -197,7 +205,7 @@ export function useConversation(conversationId: string | null) {
     if (!conversationId || messages.length === 0 || !me.claimed) return;
     void markConversationRead(conversationId, me.id)
       // Reading here is often the whole reason the badges were showing.
-      .then(refreshUnread)
+      .then(() => refreshUnread(event.id))
       .catch(() => {
         // A stale badge isn't worth interrupting anyone over.
       });
@@ -207,6 +215,7 @@ export function useConversation(conversationId: string | null) {
     me.id,
     messages.length,
     reactionCount,
+    event.id,
   ]);
 
   const loadOlder = useCallback(async () => {
@@ -223,7 +232,7 @@ export function useConversation(conversationId: string | null) {
     loadingOlderRef.current = true;
     setLoadingOlder(true);
     try {
-      const page = await fetchMessages(conversationId, {
+      const page = await fetchMessages(event.id, conversationId, {
         createdAt: oldest.createdAt,
       });
       setMessages((current) => mergeMessagePages(page.messages, current));
@@ -235,7 +244,7 @@ export function useConversation(conversationId: string | null) {
       loadingOlderRef.current = false;
       setLoadingOlder(false);
     }
-  }, [conversationId, hasOlder, messages]);
+  }, [conversationId, event.id, hasOlder, messages]);
 
   const send = useCallback(
     async (
@@ -247,6 +256,7 @@ export function useConversation(conversationId: string | null) {
       if (!conversationId || (!text && !attachment)) return false;
       try {
         const sent = await sendMessage({
+          eventId: event.id,
           conversationId,
           senderId: me.id,
           body: text,
@@ -261,7 +271,7 @@ export function useConversation(conversationId: string | null) {
         throw caught;
       }
     },
-    [conversationId, me.id],
+    [conversationId, event.id, me.id],
   );
 
   const edit = useCallback(
@@ -288,14 +298,14 @@ export function useConversation(conversationId: string | null) {
       );
 
       try {
-        await editMessageBody(messageId, text);
+        await editMessageBody(event.id, messageId, text);
         setError(null);
       } catch (caught) {
         setError(errorText(caught));
         void reload();
       }
     },
-    [me.id, messages, reload],
+    [event.id, me.id, messages, reload],
   );
 
   const unsend = useCallback(
@@ -315,14 +325,14 @@ export function useConversation(conversationId: string | null) {
       );
 
       try {
-        await unsendMessage(messageId);
+        await unsendMessage(event.id, messageId);
         setError(null);
       } catch (caught) {
         setError(errorText(caught));
         void reload();
       }
     },
-    [me.id, messages, reload],
+    [event.id, me.id, messages, reload],
   );
 
   const react = useCallback(
@@ -359,6 +369,7 @@ export function useConversation(conversationId: string | null) {
 
       try {
         await toggleMessageReaction({
+          eventId: event.id,
           messageId,
           participantId: me.id,
           emoji: cleaned,
@@ -371,7 +382,7 @@ export function useConversation(conversationId: string | null) {
         void reload();
       }
     },
-    [me.id, messages, reload],
+    [event.id, me.id, messages, reload],
   );
 
   return {

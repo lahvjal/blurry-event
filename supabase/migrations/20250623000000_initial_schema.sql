@@ -1,0 +1,8 @@
+-- Production already records this migration version for the original Blurry
+-- schema. That schema was intentionally replaced by 0000_reset.sql and the
+-- numbered Invitational migrations, which were applied before this repository
+-- began tracking production migration history consistently.
+--
+-- Keep this marker as a no-op: replaying the historical SQL would recreate the
+-- retired schema and conflict with the current tables. Its version exists here
+-- solely so Supabase can reconcile the production migration ledger safely.

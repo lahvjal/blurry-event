@@ -27,7 +27,14 @@ import { GAME_STYLE_LABELS } from '@/state/types';
 export default function Profile() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { me, myTeam, event, updateMyProfile, participantById } = useEvent();
+  const {
+    accountAccess,
+    me,
+    myTeam,
+    event,
+    updateMyProfile,
+    participantById,
+  } = useEvent();
 
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(me.fullName);
@@ -107,7 +114,13 @@ export default function Profile() {
             <Text style={styles.name}>{me.fullName}</Text>
           )}
 
-          {me.isAdmin ? <Badge label="EVENT ADMIN" /> : <Badge label="PARTICIPANT" />}
+          {accountAccess?.profile?.isClubAdmin ? (
+            <Badge label="CLUB ADMIN" />
+          ) : me.isAdmin ? (
+            <Badge label="EVENT ADMIN" />
+          ) : (
+            <Badge label="PARTICIPANT" />
+          )}
         </View>
 
         {/* Handicap + event details */}
@@ -148,6 +161,12 @@ export default function Profile() {
             {editing ? 'SAVE CHANGES' : 'EDIT PROFILE'}
           </Text>
         </Pressable>
+
+        {accountAccess && accountAccess.events.length > 1 ? (
+          <Pressable style={styles.eventsButton} onPress={() => router.push('/events')}>
+            <Text style={styles.eventsButtonText}>SWITCH EVENT</Text>
+          </Pressable>
+        ) : null}
 
         {/* Teammates */}
         {teammates.length > 0 ? (
@@ -277,6 +296,18 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     fontSize: 12,
     color: colors.highlight,
+  },
+  eventsButton: {
+    minHeight: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  eventsButtonText: {
+    fontFamily: fonts.bold,
+    fontSize: 11,
+    color: '#ffffff',
   },
   mateRow: {
     flexDirection: 'row',

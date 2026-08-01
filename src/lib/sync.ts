@@ -38,7 +38,7 @@ export type SyncStatus = {
 
 type Listener = (status: SyncStatus) => void;
 
-const LAST_SYNCED_KEY = 'lastSyncedAt';
+const LAST_SYNCED_PREFIX = 'lastSyncedAt.v2';
 /** Give up retrying one mutation after this many attempts; keep it, flag it. */
 const MAX_ATTEMPTS = 8;
 /** Periodic sweep while the app is open, in case every other trigger misses. */
@@ -52,6 +52,7 @@ let syncing = false;
 let lastSyncedAt: string | null = null;
 let lastError: string | null = null;
 let started = false;
+let activeScope: { userId: string; eventId: string } | null = null;
 
 const listeners = new Set<Listener>();
 
@@ -72,7 +73,27 @@ function emit() {
 }
 
 async function refreshCount() {
-  pendingCount = await mutationStore.count();
+  if (!activeScope) {
+    pendingCount = 0;
+    return;
+  }
+  const queue = await mutationStore.outstanding();
+  pendingCount = queue.filter(mutationMatchesActiveScope).length;
+}
+
+function mutationMatchesActiveScope(mutation: QueuedMutation): boolean {
+  return Boolean(activeScope && mutationMatchesScope(mutation, activeScope));
+}
+
+function mutationMatchesScope(
+  mutation: QueuedMutation,
+  scope: { userId: string; eventId: string },
+): boolean {
+  return mutation.userId === scope.userId && mutation.eventId === scope.eventId;
+}
+
+function lastSyncedKey(scope: { userId: string; eventId: string }): string {
+  return `${LAST_SYNCED_PREFIX}:${encodeURIComponent(scope.userId)}:${encodeURIComponent(scope.eventId)}`;
 }
 
 /** Push one mutation to Supabase. Throws to keep it queued. */
@@ -91,6 +112,7 @@ async function send(mutation: QueuedMutation): Promise<void> {
 
       const { error } = await supabase.from('scores').upsert(
         {
+          event_id: payload.eventId,
           round_id: roundId,
           hole: payload.hole,
           strokes: payload.strokes,
@@ -104,6 +126,7 @@ async function send(mutation: QueuedMutation): Promise<void> {
     }
     case 'message': {
       const { error } = await supabase.from('messages').insert({
+        event_id: payload.eventId,
         conversation_id: payload.conversationId,
         sender_id: payload.senderId,
         body: payload.body,
@@ -147,8 +170,16 @@ async function send(mutation: QueuedMutation): Promise<void> {
  */
 export async function flush(): Promise<void> {
   if (syncing) return;
+  if (!activeScope) {
+    pendingCount = 0;
+    emit();
+    return;
+  }
+  const scope = activeScope;
 
-  const queue = await mutationStore.outstanding();
+  const queue = (await mutationStore.outstanding()).filter((mutation) =>
+    mutationMatchesScope(mutation, scope),
+  );
   if (queue.length === 0) {
     pendingCount = 0;
     emit();
@@ -165,6 +196,10 @@ export async function flush(): Promise<void> {
 
   try {
     for (const mutation of queue) {
+      if (
+        activeScope?.userId !== scope.userId ||
+        activeScope?.eventId !== scope.eventId
+      ) break;
       await mutationStore.put({
         ...mutation,
         syncStatus: 'syncing',
@@ -208,11 +243,17 @@ export async function flush(): Promise<void> {
     await refreshCount();
     if (pendingCount === 0 && !lastError) {
       lastSyncedAt = new Date().toISOString();
-      void cacheStore.set(LAST_SYNCED_KEY, lastSyncedAt);
+      void cacheStore.set(lastSyncedKey(scope), lastSyncedAt);
     }
   } finally {
     syncing = false;
     emit();
+    if (
+      activeScope &&
+      (activeScope.userId !== scope.userId || activeScope.eventId !== scope.eventId)
+    ) {
+      void flush();
+    }
   }
 }
 
@@ -223,7 +264,24 @@ export async function flush(): Promise<void> {
  * UI may report the score as saved.
  */
 export async function enqueue(payload: MutationPayload): Promise<void> {
-  const dedupeKey = dedupeKeyFor(payload);
+  if (!activeScope) {
+    throw new Error('No signed-in event is selected for offline writes.');
+  }
+  if (
+    (payload.kind === 'score' || payload.kind === 'message') &&
+    payload.eventId !== activeScope.eventId
+  ) {
+    throw new Error('Refusing to queue a write for a different event.');
+  }
+  if (payload.kind === 'profile' && payload.userId !== activeScope.userId) {
+    throw new Error('Refusing to queue a profile write for a different account.');
+  }
+  const dedupeKey = [
+    'scope',
+    encodeURIComponent(activeScope.userId),
+    encodeURIComponent(activeScope.eventId),
+    dedupeKeyFor(payload),
+  ].join(':');
   const now = new Date().toISOString();
 
   // Re-editing a hole updates the existing queued write rather than adding a
@@ -241,6 +299,8 @@ export async function enqueue(payload: MutationPayload): Promise<void> {
       }
     : {
         id: uuid(),
+        userId: activeScope.userId,
+        eventId: activeScope.eventId,
         dedupeKey,
         payload,
         syncStatus: 'pending',
@@ -274,7 +334,9 @@ export async function syncNow(): Promise<void> {
   lastError = null;
   serverReachable = true;
   // Failed writes are worth one more try when a human explicitly asks.
-  const queue = await mutationStore.outstanding();
+  const queue = (await mutationStore.outstanding()).filter(
+    mutationMatchesActiveScope,
+  );
   await Promise.all(
     queue
       .filter((m) => m.syncStatus === 'failed')
@@ -300,13 +362,6 @@ export function startSync(): () => void {
   const teardown: (() => void)[] = [];
 
   void requestPersistentStorage();
-  void cacheStore.get<string>(LAST_SYNCED_KEY).then((value) => {
-    if (value) {
-      lastSyncedAt = value;
-      emit();
-    }
-  });
-
   // 1. Network transitions.
   const netInfoUnsub = NetInfo.addEventListener((state) => {
     const nowOnline = Boolean(state.isConnected && state.isInternetReachable !== false);
@@ -368,4 +423,38 @@ export function startSync(): () => void {
     teardown.forEach((fn) => fn());
     started = false;
   };
+}
+
+/**
+ * Selects the only account/event queue that may be counted or drained. Legacy
+ * rows without these exact fields remain inert rather than replaying under a
+ * different login or event.
+ */
+export function setSyncScope(userId: string | null, eventId: string | null): void {
+  const next = userId && eventId ? { userId, eventId } : null;
+  if (
+    activeScope?.userId === next?.userId &&
+    activeScope?.eventId === next?.eventId
+  ) {
+    return;
+  }
+  activeScope = next;
+  pendingCount = 0;
+  lastSyncedAt = null;
+  lastError = null;
+  emit();
+
+  if (!next) return;
+  void cacheStore.get<string>(lastSyncedKey(next)).then((value) => {
+    if (
+      activeScope?.userId !== next.userId ||
+      activeScope?.eventId !== next.eventId
+    ) return;
+    lastSyncedAt = value;
+    emit();
+  });
+  void refreshCount().then(() => {
+    emit();
+    return flush();
+  });
 }

@@ -119,7 +119,12 @@ export function PullToRefreshProvider({
     () => new Set(excludedPathnames),
     [excludedPathnames],
   );
-  const enabled = Platform.OS === 'web' && !excluded.has(pathname);
+  const enabled =
+    Platform.OS === 'web' &&
+    ![...excluded].some(
+      (excludedPath) =>
+        pathname === excludedPath || pathname.endsWith(excludedPath),
+    );
 
   const register = useCallback<RegisterRefreshHandler>((handler) => {
     handlersRef.current.add(handler);

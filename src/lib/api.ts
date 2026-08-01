@@ -1,8 +1,10 @@
 import { makeInviteCode, syntheticEmail } from '@/lib/invites';
 import { supabase } from '@/lib/supabase';
 import {
+  AccountEventAccess,
   Announcement,
   EventConfig,
+  EventLifecycleStatus,
   GameStyle,
   Participant,
   ScoreUpdate,
@@ -54,29 +56,91 @@ export type EventBundle = {
   meId: string | null;
 };
 
-export async function fetchEventBundle(): Promise<EventBundle> {
+/**
+ * Loads the signed-in account separately from its event registrations. An
+ * account may have several event registrations; club admins can also see
+ * every event without needing a participant registration in each one.
+ */
+export async function fetchAccountEventAccess(
+  userId: string,
+): Promise<AccountEventAccess> {
+  const [profileRes, accessRes] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('id, display_name, avatar_url, is_club_admin')
+      .eq('id', userId)
+      .maybeSingle(),
+    supabase.rpc('accessible_events'),
+  ]);
+
+  const firstError = [profileRes.error, accessRes.error].find(Boolean);
+  if (firstError) throw firstError;
+
+  const profile = profileRes.data as any;
+
+  return {
+    accountId: userId,
+    profile: profile
+      ? {
+          userId: profile.id,
+          displayName: profile.display_name ?? null,
+          avatarUrl: profile.avatar_url ?? null,
+          isClubAdmin: Boolean(profile.is_club_admin),
+        }
+      : null,
+    events: (accessRes.data ?? []).map((event: any) => ({
+      id: event.id,
+      name: event.name,
+      courseName: event.course_name,
+      eventDate: event.event_date,
+      lifecycleStatus: event.lifecycle_status as EventLifecycleStatus,
+      registration: event.participant_id
+        ? {
+            participantId: event.participant_id,
+            eventId: event.id,
+            isAdmin: Boolean(event.event_is_admin),
+          }
+        : null,
+    })),
+  };
+}
+
+/**
+ * Compatibility resolver for the current single-event PWA. It deliberately
+ * refuses to guess once more than one event is accessible; My Events owns that
+ * choice.
+ */
+export function resolveSoleAccessibleEventId(access: AccountEventAccess): string {
+  if (access.events.length === 1) return access.events[0].id;
+  if (access.events.length === 0) {
+    throw new Error('No accessible event was found for this account.');
+  }
+  throw new Error('Multiple accessible events require event selection.');
+}
+
+export async function fetchEventBundle(eventId: string): Promise<EventBundle> {
   const [
     eventRes,
     holesRes,
     participantsRes,
     teamsRes,
-    membersRes,
-    invitesRes,
     roundsRes,
-    scoresRes,
     announcementsRes,
-    profilesRes,
   ] = await Promise.all([
-    supabase.from('events').select('*').limit(1).maybeSingle(),
-    supabase.from('holes').select('*').order('hole'),
-    supabase.from('participants').select('*').order('full_name'),
-    supabase.from('teams').select('*').order('tee_time'),
-    supabase.from('team_members').select('*'),
-    supabase.from('team_invites').select('*'),
-    supabase.from('rounds').select('*'),
-    supabase.from('scores').select('*'),
-    supabase.from('announcements').select('*').order('created_at', { ascending: false }),
-    supabase.from('profiles').select('*'),
+    supabase.from('events').select('*').eq('id', eventId).maybeSingle(),
+    supabase.from('holes').select('*').eq('event_id', eventId).order('hole'),
+    supabase
+      .from('participants')
+      .select('*')
+      .eq('event_id', eventId)
+      .order('full_name'),
+    supabase.from('teams').select('*').eq('event_id', eventId).order('tee_time'),
+    supabase.from('rounds').select('*').eq('event_id', eventId),
+    supabase
+      .from('announcements')
+      .select('*')
+      .eq('event_id', eventId)
+      .order('created_at', { ascending: false }),
   ]);
 
   const firstError = [
@@ -84,15 +148,44 @@ export async function fetchEventBundle(): Promise<EventBundle> {
     holesRes.error,
     participantsRes.error,
     teamsRes.error,
-    membersRes.error,
-    invitesRes.error,
     roundsRes.error,
-    scoresRes.error,
     announcementsRes.error,
-    profilesRes.error,
   ].find(Boolean);
   if (firstError) throw firstError;
-  if (!eventRes.data) throw new Error('No event found. Has the seed been run?');
+  if (!eventRes.data) {
+    throw new Error(`Event ${eventId} was not found or is inaccessible.`);
+  }
+
+  // Child tables without event_id are scoped through their already-filtered
+  // parent rows. Avoid an unfiltered query when an event has no teams/rounds.
+  const teamIds = (teamsRes.data ?? []).map((team: any) => team.id);
+  const roundIds = (roundsRes.data ?? []).map((round: any) => round.id);
+  const profileIds = (participantsRes.data ?? [])
+    .map((participant: any) => participant.claimed_by)
+    .filter((id: string | null): id is string => Boolean(id));
+
+  const [membersRes, invitesRes, scoresRes, profilesRes] = await Promise.all([
+    teamIds.length
+      ? supabase.from('team_members').select('*').in('team_id', teamIds)
+      : Promise.resolve({ data: [], error: null }),
+    teamIds.length
+      ? supabase.from('team_invites').select('*').in('team_id', teamIds)
+      : Promise.resolve({ data: [], error: null }),
+    roundIds.length
+      ? supabase.from('scores').select('*').in('round_id', roundIds)
+      : Promise.resolve({ data: [], error: null }),
+    profileIds.length
+      ? supabase.from('profiles').select('*').in('id', profileIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  const firstChildError = [
+    membersRes.error,
+    invitesRes.error,
+    scoresRes.error,
+    profilesRes.error,
+  ].find(Boolean);
+  if (firstChildError) throw firstChildError;
 
   const row = eventRes.data as any;
   const { data: auth } = await supabase.auth.getUser();
@@ -181,6 +274,7 @@ export async function fetchEventBundle(): Promise<EventBundle> {
     event: {
       id: row.id,
       name: row.name,
+      lifecycleStatus: (row.lifecycle_status ?? 'published') as EventLifecycleStatus,
       courseName: row.course_name,
       addressLine: row.address_line ?? '',
       city: row.city ?? '',
@@ -319,7 +413,8 @@ export async function apiUpdateHole(
 
 /**
  * Uploads an image to the public event-media bucket and returns its URL.
- * `folder` must be "course" (admin only) or "avatars/<user id>" per storage RLS.
+ * `folder` must be "course/<event id>" (event admin only) or
+ * "avatars/<user id>" per storage RLS.
  */
 export async function apiUploadImage(
   folder: string,

@@ -5,7 +5,8 @@ import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-nativ
 import { LoginShell, loginStyles as styles } from '@/components/login-shell';
 import { Chevron } from '@/components/ui';
 import { colors } from '@/constants/theme';
-import { lookupInvite, supabase } from '@/lib/supabase';
+import { eventPath } from '@/lib/routes';
+import { claimEventInvite, lookupInvite, supabase } from '@/lib/supabase';
 
 export default function InviteSignup() {
   const router = useRouter();
@@ -19,6 +20,13 @@ export default function InviteSignup() {
   const [verified, setVerified] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setSignedIn(Boolean(data.session));
+    });
+  }, []);
 
   useEffect(() => {
     if (typeof params.code === 'string' && params.code.trim()) {
@@ -94,11 +102,30 @@ export default function InviteSignup() {
         return;
       }
 
-      router.replace('/event');
+      router.replace('/events');
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Something went wrong creating your account.';
       setError(message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addEvent = async () => {
+    setError(null);
+    if (code.trim().length < 4) {
+      setError('Enter the invite code from your invitation.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const eventId = await claimEventInvite(code);
+      router.replace(eventPath(eventId, 'event') as never);
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : 'Could not add that event.',
+      );
     } finally {
       setBusy(false);
     }
@@ -119,26 +146,34 @@ export default function InviteSignup() {
           <Pressable
             style={styles.loginButton}
             disabled={busy}
-            onPress={verified ? createAccount : verifyCode}>
+            onPress={
+              signedIn ? addEvent : verified ? createAccount : verifyCode
+            }>
             {busy ? (
               <ActivityIndicator color="#ffffff" />
             ) : (
               <>
                 <Text style={styles.loginText}>
-                  {verified ? 'Create account' : 'Continue'}
+                  {signedIn
+                    ? 'Add event'
+                    : verified
+                      ? 'Create account'
+                      : 'Continue'}
                 </Text>
                 <Chevron />
               </>
             )}
           </Pressable>
 
-          <Pressable onPress={() => router.replace('/')}>
-            <Text style={styles.secondaryLink}>ALREADY HAVE AN ACCOUNT? SIGN IN</Text>
+          <Pressable onPress={() => router.replace(signedIn ? '/events' : '/')}>
+            <Text style={styles.secondaryLink}>
+              {signedIn ? 'BACK TO MY EVENTS' : 'ALREADY HAVE AN ACCOUNT? SIGN IN'}
+            </Text>
           </Pressable>
         </>
       }>
       <View style={styles.form}>
-        {!verified ? (
+        {signedIn || !verified ? (
           <>
             <Text style={styles.label}>INVITE CODE</Text>
             <TextInput
@@ -151,7 +186,7 @@ export default function InviteSignup() {
               autoCorrect={false}
               selectionColor={colors.highlight}
               returnKeyType="next"
-              onSubmitEditing={verifyCode}
+              onSubmitEditing={signedIn ? addEvent : verifyCode}
             />
           </>
         ) : (

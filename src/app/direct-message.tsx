@@ -82,7 +82,7 @@ function InitialsAvatar({
 export default function DirectMessage() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { me, participantById } = useEvent();
+  const { event, me, participantById } = useEvent();
   // Arrives either as an existing thread, or as the person to open one with.
   const params = useLocalSearchParams<{ id?: string; participant?: string }>();
 
@@ -101,7 +101,7 @@ export default function DirectMessage() {
     if (!params.participant) return;
 
     let active = true;
-    findDirectConversation(params.participant)
+    findDirectConversation(event.id, params.participant)
       .then((id) => {
         if (active && id) setConversationId(id);
       })
@@ -111,7 +111,7 @@ export default function DirectMessage() {
     return () => {
       active = false;
     };
-  }, [params.id, params.participant]);
+  }, [event.id, params.id, params.participant]);
 
   const { conversation } = useConversationDetail(conversationId);
   const {
@@ -153,10 +153,11 @@ export default function DirectMessage() {
     }
     if (!params.participant) return false;
     try {
-      const id = await openDirectConversation(params.participant);
+      const id = await openDirectConversation(event.id, params.participant);
       // Store the message before switching over, so the thread's first load
       // already includes it.
       await sendMessage({
+        eventId: event.id,
         conversationId: id,
         senderId: me.id,
         body: text.trim(),

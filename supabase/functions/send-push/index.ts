@@ -120,7 +120,7 @@ async function forMessage(id: string): Promise<Fanout> {
       body: direct
         ? messageBody
         : `${firstName(sender?.full_name)}: ${messageBody}`,
-      url: `/${direct ? 'direct-message' : 'group-conversation'}?id=${conversation.id}`,
+      url: `/events/${conversation.event_id}/${direct ? 'direct-message' : 'group-conversation'}?id=${conversation.id}`,
       tag: `conversation-${conversation.id}`,
     },
   };
@@ -192,7 +192,7 @@ async function forReaction(
       body: direct
         ? `${emoji} reacted to ${reactionTarget}`
         : `${firstName(reactorName)} reacted ${emoji} to ${reactionTarget}`,
-      url: `/${direct ? 'direct-message' : 'group-conversation'}?id=${conversation.id}`,
+      url: `/events/${conversation.event_id}/${direct ? 'direct-message' : 'group-conversation'}?id=${conversation.id}`,
       tag: `conversation-${conversation.id}`,
     },
   };
@@ -229,7 +229,7 @@ async function forAnnouncement(id: string): Promise<Fanout> {
     payload: {
       title: event?.name ?? 'Blurry Invitational',
       body: announcement.body,
-      url: '/announcements',
+      url: `/events/${announcement.event_id}/announcements`,
       tag: `announcement-${id}`,
     },
   };
@@ -238,7 +238,7 @@ async function forAnnouncement(id: string): Promise<Fanout> {
 async function forTeamUpdate(id: string): Promise<Fanout> {
   const { data: team } = await admin
     .from('teams')
-    .select('name, tee_time, starting_hole')
+    .select('name, tee_time, starting_hole, event_id')
     .eq('id', id)
     .maybeSingle();
   if (!team) return null;
@@ -262,7 +262,7 @@ async function forTeamUpdate(id: string): Promise<Fanout> {
     payload: {
       title: team.name,
       body: detail ? `Updated — ${detail}` : 'Your tee time was updated.',
-      url: '/my-team',
+      url: `/events/${team.event_id}/my-team`,
       tag: `team-${id}`,
     },
   };
@@ -274,7 +274,7 @@ async function forTeamAssignment(
 ): Promise<Fanout> {
   const { data: team } = await admin
     .from('teams')
-    .select('name, tee_time')
+    .select('name, tee_time, event_id')
     .eq('id', teamId)
     .maybeSingle();
   if (!team) return null;
@@ -293,7 +293,7 @@ async function forTeamAssignment(
       body: team.tee_time
         ? `${team.name} — tee time ${team.tee_time}`
         : team.name,
-      url: '/my-team',
+      url: `/events/${team.event_id}/my-team`,
       tag: `team-assignment-${teamId}`,
     },
   };

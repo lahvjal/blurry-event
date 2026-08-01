@@ -311,6 +311,7 @@ export default function EventHome() {
   const notificationUnread = useNotificationUnread(
     `${event.id}.${me.id}`,
     announcementIds,
+    event.id,
   );
   const latestAnnouncement = announcements[0];
 

@@ -22,7 +22,7 @@ export default function Login() {
     supabase.auth.getSession().then(({ data }) => {
       if (cancelled) return;
       if (data.session) {
-        router.replace('/event');
+        router.replace('/events');
         return;
       }
       setCheckingSession(false);
@@ -61,7 +61,7 @@ export default function Login() {
         return;
       }
 
-      router.replace('/event');
+      router.replace('/events');
     } catch {
       setError('Could not reach the server. Check your connection and try again.');
     } finally {
@@ -82,7 +82,7 @@ export default function Login() {
       footer={
         <>
           {__DEV__ ? (
-            <Pressable onPress={() => router.replace('/event')}>
+            <Pressable onPress={() => router.replace('/events')}>
               <Text style={styles.devSkip}>DEV · SKIP SIGN-IN</Text>
             </Pressable>
           ) : null}

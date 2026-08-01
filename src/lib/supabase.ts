@@ -47,6 +47,15 @@ export async function lookupInvite(code: string) {
   return data;
 }
 
+/** Adds one unclaimed event registration to the current signed-in account. */
+export async function claimEventInvite(code: string): Promise<string> {
+  const { data, error } = await supabase.rpc('claim_event_invite', {
+    code: code.trim(),
+  });
+  if (error) throw new Error(error.message);
+  return data as string;
+}
+
 /** Maps an email or username to the auth email used for sign-in. */
 export async function resolveLoginEmail(login: string): Promise<string | null> {
   const { data, error } = await supabase.rpc('resolve_login', { login: login.trim() });

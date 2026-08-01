@@ -29,6 +29,7 @@ export type MutationPayload =
     }
   | {
       kind: 'message';
+      eventId: string;
       conversationId: string;
       senderId: string;
       body: string;
@@ -51,6 +52,10 @@ export type MutationPayload =
 export type QueuedMutation = {
   /** Client-generated UUID, so a record created offline is already addressable. */
   id: string;
+  /** Exact authenticated account that created this write. */
+  userId: string;
+  /** Exact focused event; account-level writes still retain their source event. */
+  eventId: string;
   /**
    * Identifies the thing being written, not the write itself. Two edits to the
    * same hole share a dedupeKey so the later one replaces the earlier, instead

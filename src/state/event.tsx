@@ -7,6 +7,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { useGlobalSearchParams } from 'expo-router';
 import { Alert, AppState } from 'react-native';
 
 import {
@@ -28,13 +29,21 @@ import {
   apiUpdateTeam,
   apiUploadImage,
   EventBundle,
+  fetchAccountEventAccess,
   fetchEventBundle,
 } from '@/lib/api';
-import { loadSnapshot, saveSnapshot } from '@/lib/offline/snapshot';
+import {
+  loadAccountEventAccess,
+  loadEventSnapshot,
+  loadLastEventSnapshot,
+  saveAccountEventAccess,
+  saveEventSnapshot,
+} from '@/lib/offline/event-snapshot';
 import { supabase } from '@/lib/supabase';
-import { enqueue } from '@/lib/sync';
+import { enqueue, setSyncScope } from '@/lib/sync';
 import { isSyntheticEmail, makeInviteCode, syntheticEmail } from '@/lib/invites';
 import {
+  AccountEventAccess,
   Announcement,
   EventConfig,
   GameStyle,
@@ -68,6 +77,7 @@ const HOLES: Hole[] = PARS.map((par, i) => ({
 const SEED_EVENT: EventConfig = {
   id: 'blurry-invitational',
   name: 'Blurry Invitational',
+  lifecycleStatus: 'published',
   courseName: 'Arrowhead Golf Club',
   // Placeholder geography only — an admin sets the real address in the app.
   addressLine: '',
@@ -214,6 +224,10 @@ const SEED_ANNOUNCEMENTS: Announcement[] = [
 ];
 
 type EventState = {
+  accountAccess: AccountEventAccess | null;
+  activeEventId: string | null;
+  accessLoading: boolean;
+  eventLoading: boolean;
   event: EventConfig;
   participants: Participant[];
   teams: Team[];
@@ -325,6 +339,14 @@ function reasonFor(error: unknown): string {
 }
 
 export function EventProvider({ children }: { children: React.ReactNode }) {
+  const routeParams = useGlobalSearchParams<{ eventId?: string | string[] }>();
+  const requestedEventId = Array.isArray(routeParams.eventId)
+    ? routeParams.eventId[0]
+    : routeParams.eventId;
+  const [accountAccess, setAccountAccess] = useState<AccountEventAccess | null>(null);
+  const [activeEventId, setActiveEventId] = useState<string | null>(null);
+  const [accessLoading, setAccessLoading] = useState(true);
+  const [eventLoading, setEventLoading] = useState(true);
   const [event, setEvent] = useState<EventConfig>(SEED_EVENT);
   const [participants, setParticipants] = useState<Participant[]>(SEED_PARTICIPANTS);
   const [teams, setTeams] = useState<Team[]>(SEED_TEAMS);
@@ -340,6 +362,33 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const [snapshotAt, setSnapshotAt] = useState<string | null>(null);
 
   const applySeed = useCallback(() => {
+    setSyncScope(null, null);
+    setAccountAccess({
+      accountId: 'demo',
+      profile: {
+        userId: 'demo',
+        displayName: 'Vel Monroe',
+        avatarUrl: null,
+        isClubAdmin: false,
+      },
+      events: [
+        {
+          id: SEED_EVENT.id,
+          name: SEED_EVENT.name,
+          courseName: SEED_EVENT.courseName,
+          eventDate: SEED_EVENT.eventDate,
+          lifecycleStatus: SEED_EVENT.lifecycleStatus,
+          registration: {
+            participantId: 'p1',
+            eventId: SEED_EVENT.id,
+            isAdmin: true,
+          },
+        },
+      ],
+    });
+    setActiveEventId(SEED_EVENT.id);
+    setAccessLoading(false);
+    setEventLoading(false);
     setEvent(SEED_EVENT);
     setParticipants(SEED_PARTICIPANTS);
     setTeams(SEED_TEAMS);
@@ -350,10 +399,14 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     setRoundIds({});
     setMyId('p1');
     setIsLive(false);
+    setSnapshotAt(null);
   }, []);
 
   const applyBundle = useCallback((bundle: EventBundle) => {
-    setEvent(bundle.event);
+    setEvent({
+      ...bundle.event,
+      lifecycleStatus: bundle.event.lifecycleStatus ?? 'published',
+    });
     setParticipants(bundle.participants);
     setTeams(bundle.teams);
     setInvites(bundle.invites);
@@ -367,6 +420,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const loadFromServer = useCallback(async () => {
+    setAccessLoading(true);
     const { data: sessionData } = await supabase.auth.getSession();
     const session = sessionData.session;
     if (!session) {
@@ -375,28 +429,120 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     }
 
     const userId = session.user.id;
+    let access: AccountEventAccess | null = null;
 
     try {
-      const bundle = await fetchEventBundle();
-      applyBundle(bundle);
-      setSnapshotAt(null);
-      // Refresh the offline copy on every successful load, so the card a
-      // golfer starts the round with is the one the club published.
-      void saveSnapshot(bundle, userId);
+      access = await fetchAccountEventAccess(userId);
+      void saveAccountEventAccess(access).catch(() => {});
     } catch (error) {
-      // Unreachable server is the normal case out on the course. Fall back to
-      // the last good copy rather than to demo data — showing someone a fake
-      // roster mid-round is worse than showing them slightly stale truth.
-      const snapshot = await loadSnapshot(userId);
+      access = await loadAccountEventAccess(userId).catch(() => null);
+      if (access) {
+        // Continue below. Exact event snapshots still gate what can be opened.
+      } else {
+        // A pre-multi-event install may only have its last Invitational bundle.
+        const snapshot = await loadLastEventSnapshot(userId).catch(() => null);
+        if (
+          snapshot &&
+          (!requestedEventId || snapshot.bundle.event.id === requestedEventId)
+        ) {
+          const registration = snapshot.bundle.participants.find(
+            (participant) => participant.id === snapshot.bundle.meId,
+          );
+          access = {
+            accountId: userId,
+            profile: null,
+            events: [
+              {
+                id: snapshot.bundle.event.id,
+                name: snapshot.bundle.event.name,
+                courseName: snapshot.bundle.event.courseName,
+                eventDate: snapshot.bundle.event.eventDate,
+                lifecycleStatus: snapshot.bundle.event.lifecycleStatus,
+                registration: snapshot.bundle.meId
+                  ? {
+                      participantId: snapshot.bundle.meId,
+                      eventId: snapshot.bundle.event.id,
+                      isAdmin: Boolean(registration?.isAdmin),
+                    }
+                  : null,
+              },
+            ],
+          };
+          setAccountAccess(access);
+          setActiveEventId(snapshot.bundle.event.id);
+          setSyncScope(userId, snapshot.bundle.event.id);
+          setAccessLoading(false);
+          setEventLoading(false);
+          applyBundle(snapshot.bundle);
+          setSnapshotAt(snapshot.savedAt);
+          return;
+        }
+      }
+      if (!access) {
+        setSyncScope(null, null);
+        setAccessLoading(false);
+        setEventLoading(false);
+        setIsLive(false);
+        throw error;
+      }
+    }
+
+    setAccountAccess(access);
+    setAccessLoading(false);
+
+    let eventId: string | null = requestedEventId ?? null;
+    if (eventId && !access.events.some((candidate) => candidate.id === eventId)) {
+      setActiveEventId(null);
+      setSyncScope(null, null);
+      setEventLoading(false);
+      setIsLive(false);
+      throw new Error('That event is not accessible to this account.');
+    }
+    if (!eventId && access.events.length === 1) {
+      eventId = access.events[0].id;
+    }
+    if (!eventId && access.events.length > 1) {
+      // My Events owns the choice. Never reuse a previous event implicitly.
+      setActiveEventId(null);
+      setSyncScope(null, null);
+      setEventLoading(false);
+      setIsLive(false);
+      return;
+    }
+    if (!eventId) {
+      setActiveEventId(null);
+      setSyncScope(null, null);
+      setEventLoading(false);
+      setIsLive(false);
+      throw new Error('No accessible event was found for this account.');
+    }
+
+    setEventLoading(true);
+    try {
+      const bundle = await fetchEventBundle(eventId);
+      applyBundle(bundle);
+      setActiveEventId(eventId);
+      setSyncScope(userId, eventId);
+      setEventLoading(false);
+      setSnapshotAt(null);
+      void saveEventSnapshot(bundle, userId, eventId).catch(() => {});
+    } catch (error) {
+      const snapshot = await loadEventSnapshot(userId, eventId).catch(() => null);
       if (snapshot) {
         applyBundle(snapshot.bundle);
+        setActiveEventId(eventId);
+        setSyncScope(userId, eventId);
+        setEventLoading(false);
         setSnapshotAt(snapshot.savedAt);
         return;
       }
+      setActiveEventId(null);
+      setSyncScope(null, null);
+      setEventLoading(false);
       setIsLive(false);
       throw error;
     }
-  }, [applySeed, applyBundle]);
+  }, [applySeed, applyBundle, requestedEventId]);
 
   /**
    * Signed in but unable to read: the screens are about to show demo data and no
@@ -453,7 +599,12 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       .channel(`event-home-live:${event.id}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'scores' },
+        {
+          event: '*',
+          schema: 'public',
+          table: 'scores',
+          filter: `event_id=eq.${event.id}`,
+        },
         refreshSoon,
       )
       .on(
@@ -532,9 +683,26 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   );
 
   const me = useMemo(() => {
-    if (!myId) return UNLINKED_ME;
-    return participants.find((p) => p.id === myId) ?? UNLINKED_ME;
-  }, [participants, myId]);
+    const profile = accountAccess?.profile;
+    const clubAdmin = Boolean(profile?.isClubAdmin);
+    const participant = myId
+      ? participants.find((candidate) => candidate.id === myId)
+      : null;
+    if (participant) {
+      return { ...participant, isAdmin: participant.isAdmin || clubAdmin };
+    }
+    if (profile) {
+      const fullName = profile.displayName?.trim() || 'Club Admin';
+      return {
+        ...UNLINKED_ME,
+        fullName,
+        initials: initialsOf(fullName),
+        avatarUrl: profile.avatarUrl,
+        isAdmin: clubAdmin,
+      };
+    }
+    return UNLINKED_ME;
+  }, [accountAccess?.profile, participants, myId]);
 
   const myTeam = useMemo(
     () => (myId ? teams.find((t) => t.memberIds.includes(myId)) ?? null : null),
@@ -690,23 +858,48 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
   const updateMyProfile = useCallback(
     (patch: Partial<Pick<Participant, 'fullName' | 'handicap' | 'avatarUrl'>>) => {
-      if (!myId) return;
-      setParticipants((prev) =>
-        prev.map((p) =>
-          p.id === myId
+      if (myId) {
+        setParticipants((prev) =>
+          prev.map((p) =>
+            p.id === myId
+              ? {
+                  ...p,
+                  ...patch,
+                  initials: patch.fullName ? initialsOf(patch.fullName) : p.initials,
+                }
+              : p,
+          ),
+        );
+      }
+      if (patch.fullName !== undefined || patch.avatarUrl !== undefined) {
+        setAccountAccess((current) =>
+          current?.profile
             ? {
-                ...p,
-                ...patch,
-                initials: patch.fullName ? initialsOf(patch.fullName) : p.initials,
+                ...current,
+                profile: {
+                  ...current.profile,
+                  displayName:
+                    patch.fullName === undefined
+                      ? current.profile.displayName
+                      : patch.fullName,
+                  avatarUrl:
+                    patch.avatarUrl === undefined
+                      ? current.profile.avatarUrl
+                      : patch.avatarUrl,
+                },
               }
-            : p,
-        ),
-      );
+            : current,
+        );
+      }
 
       void persist('your profile', async () => {
-        // Name and handicap live on the participant row, which is what every
-        // other screen reads; the avatar lives on the profile.
-        if (patch.fullName !== undefined || patch.handicap !== undefined) {
+        // Roster name/handicap belong to this event registration. Account name
+        // and avatar belong to the profile and remain editable for a club admin
+        // who is not registered to play in this event.
+        if (
+          myId &&
+          (patch.fullName !== undefined || patch.handicap !== undefined)
+        ) {
           await apiUpdateParticipant(myId, {
             fullName: patch.fullName,
             handicap: patch.handicap,
@@ -728,9 +921,19 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
         await apiUpdateProfile(userId, { displayName: patch.fullName, avatarUrl });
 
-        if (typeof avatarUrl === 'string') {
+        if (typeof avatarUrl === 'string' && myId) {
           setParticipants((prev) =>
             prev.map((p) => (p.id === myId ? { ...p, avatarUrl } : p)),
+          );
+        }
+        if (typeof avatarUrl === 'string') {
+          setAccountAccess((current) =>
+            current?.profile
+              ? {
+                  ...current,
+                  profile: { ...current.profile, avatarUrl },
+                }
+              : current,
           );
         }
       });
@@ -755,7 +958,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         // public url is what gets saved.
         const uploaded =
           patch.courseMapUrl && !patch.courseMapUrl.startsWith('http')
-            ? await apiUploadImage('course', patch.courseMapUrl)
+            ? await apiUploadImage(`course/${event.id}`, patch.courseMapUrl)
             : null;
 
         savedPatch = {
@@ -1086,6 +1289,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   );
 
   const value: EventState = {
+    accountAccess,
+    activeEventId,
+    accessLoading,
+    eventLoading,
     event,
     participants,
     teams,

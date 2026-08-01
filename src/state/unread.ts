@@ -19,7 +19,8 @@ import { supabase } from '@/lib/supabase';
  */
 
 let total = 0;
-let started = false;
+let activeEventId = '';
+let stopRealtime: (() => void) | null = null;
 const listeners = new Set<() => void>();
 
 function emit() {
@@ -37,7 +38,8 @@ function subscribe(listener: () => void) {
  * Publishes a total the caller already has — the inbox computes one as a side
  * effect of loading, so it would be wasteful to go and ask again.
  */
-export function setUnreadTotal(next: number): void {
+export function setUnreadTotal(eventId: string, next: number): void {
+  if (eventId !== activeEventId) return;
   if (next === total) return;
   total = next;
   emit();
@@ -45,31 +47,50 @@ export function setUnreadTotal(next: number): void {
 }
 
 /** Asks the server for the current count. */
-export async function refreshUnread(): Promise<void> {
+export async function refreshUnread(eventId: string): Promise<void> {
+  if (eventId !== activeEventId) return;
   try {
     const { data } = await supabase.auth.getSession();
     if (!data.session) {
-      setUnreadTotal(0);
+      setUnreadTotal(eventId, 0);
       return;
     }
-    const summaries = await fetchConversationSummaries();
-    setUnreadTotal(summaries.reduce((sum, c) => sum + c.unreadCount, 0));
+    const summaries = await fetchConversationSummaries(eventId);
+    setUnreadTotal(
+      eventId,
+      summaries.reduce((sum, c) => sum + c.unreadCount, 0),
+    );
   } catch {
     // Hold the last known count. Flashing to zero on a dropped request would
     // read as "all caught up", which is worse than being slightly stale.
   }
 }
 
-export function useUnreadTotal(): number {
+function activateUnreadEvent(eventId: string): void {
+  if (activeEventId === eventId) return;
+  stopRealtime?.();
+  activeEventId = eventId;
+  total = 0;
+  emit();
+  void setBadge(0);
+
+  const stopMessages = subscribeToMessages(eventId, null, () =>
+    void refreshUnread(eventId),
+  );
+  const stopReactions = subscribeToMessageReactions(eventId, () =>
+    void refreshUnread(eventId),
+  );
+  stopRealtime = () => {
+    stopMessages();
+    stopReactions();
+  };
+  void refreshUnread(eventId);
+}
+
+export function useUnreadTotal(eventId: string): number {
   useEffect(() => {
-    // First mount anywhere starts the one subscription the app needs; the
-    // module-level flag keeps later mounts from opening more.
-    if (started) return;
-    started = true;
-    void refreshUnread();
-    subscribeToMessages(null, () => void refreshUnread());
-    subscribeToMessageReactions(() => void refreshUnread());
-  }, []);
+    activateUnreadEvent(eventId);
+  }, [eventId]);
 
   return useSyncExternalStore(
     subscribe,

@@ -5,6 +5,20 @@
 
 /** Set by an admin on the event; the scorecard adapts to it. */
 export type GameStyle = 'solo' | 'scramble_2' | 'scramble_4';
+export type EventLifecycleStatus =
+  | 'draft'
+  | 'published'
+  | 'live'
+  | 'completed'
+  | 'archived';
+
+export const EVENT_LIFECYCLE_LABELS: Record<EventLifecycleStatus, string> = {
+  draft: 'DRAFT',
+  published: 'PUBLISHED',
+  live: 'LIVE',
+  completed: 'COMPLETED',
+  archived: 'ARCHIVED',
+};
 
 export const GAME_STYLE_LABELS: Record<GameStyle, string> = {
   solo: 'SOLO',
@@ -28,6 +42,39 @@ export function teamSize(style: GameStyle): number {
 export function isTeamFormat(style: GameStyle): boolean {
   return style !== 'solo';
 }
+
+/** The signed-in account's club-level identity, separate from event registration. */
+export type AccountProfile = {
+  userId: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  isClubAdmin: boolean;
+};
+
+/** The account's registration and permissions for one event. */
+export type EventRegistrationAccess = {
+  participantId: string;
+  eventId: string;
+  isAdmin: boolean;
+};
+
+/** An event the signed-in account may enter. */
+export type AccessibleEvent = {
+  id: string;
+  name: string;
+  courseName: string;
+  eventDate: string;
+  lifecycleStatus: EventLifecycleStatus;
+  /** Club admins can access an event without being registered to play in it. */
+  registration: EventRegistrationAccess | null;
+};
+
+/** Account context used to choose an event before event data is loaded. */
+export type AccountEventAccess = {
+  accountId: string;
+  profile: AccountProfile | null;
+  events: AccessibleEvent[];
+};
 
 export type Participant = {
   id: string;
@@ -145,6 +192,7 @@ export type ChatMessageMediaDraft = {
 
 export type ChatMessage = {
   id: string;
+  eventId: string;
   conversationId: string;
   senderId: string;
   body: string;
@@ -168,6 +216,7 @@ export type ChatMessage = {
 export type EventConfig = {
   id: string;
   name: string;
+  lifecycleStatus: EventLifecycleStatus;
   courseName: string;
   /** Street address of the course. Blank until an admin fills it in. */
   addressLine: string;

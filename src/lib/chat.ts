@@ -51,6 +51,7 @@ type SummaryRow = {
 
 type MessageRow = {
   id: string;
+  event_id: string;
   conversation_id: string;
   sender_id: string;
   body: string;
@@ -101,6 +102,7 @@ export function newClientId(): string {
 function toMessage(row: MessageRow): ChatMessage {
   return {
     id: row.id,
+    eventId: row.event_id,
     conversationId: row.conversation_id,
     senderId: row.sender_id,
     body: row.body,
@@ -124,8 +126,12 @@ function toMessage(row: MessageRow): ChatMessage {
   };
 }
 
-export async function fetchConversationSummaries(): Promise<ConversationSummary[]> {
-  const { data, error } = await supabase.rpc('conversation_summaries');
+export async function fetchConversationSummaries(
+  eventId: string,
+): Promise<ConversationSummary[]> {
+  const { data, error } = await supabase.rpc('conversation_summaries', {
+    p_event_id: eventId,
+  });
   if (error) throw error;
 
   return ((data ?? []) as SummaryRow[]).map((row) => ({
@@ -154,12 +160,16 @@ export async function fetchConversationSummaries(): Promise<ConversationSummary[
 }
 
 /** The conversation itself and who is in it, for a thread header or settings. */
-export async function fetchConversation(id: string): Promise<Conversation | null> {
+export async function fetchConversation(
+  eventId: string,
+  id: string,
+): Promise<Conversation | null> {
   let { data, error } = await supabase
     .from('conversations')
     .select(
       'id, kind, name, created_by, team_id, conversation_members(participant_id)',
     )
+    .eq('event_id', eventId)
     .eq('id', id)
     .maybeSingle();
 
@@ -171,6 +181,7 @@ export async function fetchConversation(id: string): Promise<Conversation | null
     ({ data, error } = await supabase
       .from('conversations')
       .select('id, kind, name, created_by, conversation_members(participant_id)')
+      .eq('event_id', eventId)
       .eq('id', id)
       .maybeSingle());
   }
@@ -199,6 +210,7 @@ export async function fetchConversation(id: string): Promise<Conversation | null
 
 /** Newest page first from Postgres, returned oldest-first for the thread. */
 export async function fetchMessages(
+  eventId: string,
   conversationId: string,
   before?: MessageCursor,
 ): Promise<MessagePage> {
@@ -209,6 +221,7 @@ export async function fetchMessages(
     let request = supabase
       .from('messages')
       .select(selection)
+      .eq('event_id', eventId)
       .eq('conversation_id', conversationId)
       .order('created_at', { ascending: false });
     if (before) request = request.lt('created_at', before.createdAt);
@@ -216,10 +229,10 @@ export async function fetchMessages(
   };
 
   const selections = [
-    'id, conversation_id, sender_id, body, reply_to_id, client_id, created_at, edited_at, media_url, media_mime_type, media_width, media_height, message_reactions(participant_id, emoji)',
-    'id, conversation_id, sender_id, body, reply_to_id, client_id, created_at, edited_at, message_reactions(participant_id, emoji)',
-    'id, conversation_id, sender_id, body, client_id, created_at, message_reactions(participant_id, emoji)',
-    'id, conversation_id, sender_id, body, client_id, created_at',
+    'id, event_id, conversation_id, sender_id, body, reply_to_id, client_id, created_at, edited_at, media_url, media_mime_type, media_width, media_height, message_reactions(participant_id, emoji)',
+    'id, event_id, conversation_id, sender_id, body, reply_to_id, client_id, created_at, edited_at, message_reactions(participant_id, emoji)',
+    'id, event_id, conversation_id, sender_id, body, client_id, created_at, message_reactions(participant_id, emoji)',
+    'id, event_id, conversation_id, sender_id, body, client_id, created_at',
   ];
 
   let data: unknown[] | null = null;
@@ -255,6 +268,7 @@ export async function fetchMessages(
  * by the next load, and matched up by clientId.
  */
 export async function sendMessage(params: {
+  eventId: string;
   conversationId: string;
   senderId: string;
   body: string;
@@ -267,6 +281,7 @@ export async function sendMessage(params: {
     : null;
   const optimistic: ChatMessage = {
     id: `local-${clientId}`,
+    eventId: params.eventId,
     conversationId: params.conversationId,
     senderId: params.senderId,
     body: params.body,
@@ -280,6 +295,7 @@ export async function sendMessage(params: {
   };
 
   const { error } = await supabase.from('messages').insert({
+    event_id: params.eventId,
     conversation_id: params.conversationId,
     sender_id: params.senderId,
     body: params.body,
@@ -304,6 +320,7 @@ export async function sendMessage(params: {
 
   await enqueue({
     kind: 'message',
+    eventId: params.eventId,
     conversationId: params.conversationId,
     senderId: params.senderId,
     body: params.body,
@@ -539,19 +556,28 @@ async function uploadMessageMedia(
 /** Changes one of the caller's own messages. The database trigger records the
  * edit time and rejects attempts to change message ownership or threading. */
 export async function editMessageBody(
+  eventId: string,
   messageId: string,
   body: string,
 ): Promise<void> {
   const { error } = await supabase
     .from('messages')
     .update({ body })
+    .eq('event_id', eventId)
     .eq('id', messageId);
   if (error) throw error;
 }
 
 /** Removes one of the caller's own messages for everyone in the thread. */
-export async function unsendMessage(messageId: string): Promise<void> {
-  const { error } = await supabase.from('messages').delete().eq('id', messageId);
+export async function unsendMessage(
+  eventId: string,
+  messageId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('messages')
+    .delete()
+    .eq('event_id', eventId)
+    .eq('id', messageId);
   if (error) throw error;
 }
 
@@ -561,6 +587,7 @@ export async function unsendMessage(messageId: string): Promise<void> {
  * else with the thread open.
  */
 export async function toggleMessageReaction(params: {
+  eventId: string;
   messageId: string;
   participantId: string;
   emoji: string;
@@ -570,6 +597,7 @@ export async function toggleMessageReaction(params: {
     const { error } = await supabase
       .from('message_reactions')
       .delete()
+      .eq('event_id', params.eventId)
       .eq('message_id', params.messageId)
       .eq('participant_id', params.participantId)
       .eq('emoji', params.emoji);
@@ -578,6 +606,7 @@ export async function toggleMessageReaction(params: {
   }
 
   const { error } = await supabase.from('message_reactions').insert({
+    event_id: params.eventId,
     message_id: params.messageId,
     participant_id: params.participantId,
     emoji: params.emoji,
@@ -637,9 +666,11 @@ export async function setConversationNotifications(
 
 /** The existing 1:1 thread with someone, or null if you've never spoken. */
 export async function findDirectConversation(
+  eventId: string,
   otherParticipantId: string,
 ): Promise<string | null> {
   const { data, error } = await supabase.rpc('find_direct_conversation', {
+    p_event_id: eventId,
     other_participant: otherParticipantId,
   });
   if (error) throw error;
@@ -648,9 +679,11 @@ export async function findDirectConversation(
 
 /** Returns the id of the 1:1 thread with someone, creating it if it's new. */
 export async function openDirectConversation(
+  eventId: string,
   otherParticipantId: string,
 ): Promise<string> {
   const { data, error } = await supabase.rpc('open_direct_conversation', {
+    p_event_id: eventId,
     other_participant: otherParticipantId,
   });
   if (error) throw error;
@@ -658,10 +691,12 @@ export async function openDirectConversation(
 }
 
 export async function createGroupConversation(
+  eventId: string,
   name: string,
   memberIds: string[],
 ): Promise<string> {
   const { data, error } = await supabase.rpc('create_group_conversation', {
+    p_event_id: eventId,
     group_name: name,
     member_ids: memberIds,
   });
@@ -699,8 +734,10 @@ export async function leaveConversation(conversationId: string): Promise<void> {
   if (error) throw error;
 }
 
-/** Channel topics have to be unique per client, and screens overlap in a stack. */
-let channelSequence = 0;
+/** Channel topics stay unique across stacked screens and development hot reloads. */
+function realtimeChannelToken(): string {
+  return newClientId();
+}
 
 /**
  * Live inserts for one conversation, or for every conversation the caller can
@@ -720,26 +757,29 @@ export type MessageChange =
     };
 
 export function subscribeToMessages(
+  eventId: string,
   conversationId: string | null,
   onChange: (change: MessageChange) => void,
 ): () => void {
-  channelSequence += 1;
   const channel = supabase
-    .channel(`messages:${conversationId ?? 'inbox'}:${channelSequence}`)
+    .channel(
+      `messages:${eventId}:${conversationId ?? 'inbox'}:${realtimeChannelToken()}`,
+    )
     .on(
       'postgres_changes',
       {
         event: '*',
         schema: 'public',
         table: 'messages',
-        ...(conversationId
-          ? { filter: `conversation_id=eq.${conversationId}` }
-          : {}),
+        filter: `event_id=eq.${eventId}`,
       },
       (payload) => {
         if (payload.eventType === 'DELETE') {
           const oldRow = payload.old as Partial<MessageRow>;
-          if (!oldRow.id) return;
+          if (
+            !oldRow.id ||
+            (conversationId && oldRow.conversation_id !== conversationId)
+          ) return;
           onChange({
             event: 'DELETE',
             message: null,
@@ -751,6 +791,7 @@ export function subscribeToMessages(
           return;
         }
         const message = toMessage(payload.new as MessageRow);
+        if (conversationId && message.conversationId !== conversationId) return;
         onChange({
           event: payload.eventType,
           message,
@@ -774,17 +815,18 @@ export type MessageReactionChange = {
 /** Live reaction changes for any readable message; the open thread ignores
  * rows whose message id is not currently on screen. */
 export function subscribeToMessageReactions(
+  eventId: string,
   onChange: (change: MessageReactionChange) => void,
 ): () => void {
-  channelSequence += 1;
   const channel = supabase
-    .channel(`message-reactions:${channelSequence}`)
+    .channel(`message-reactions:${eventId}:${realtimeChannelToken()}`)
     .on(
       'postgres_changes',
       {
         event: '*',
         schema: 'public',
         table: 'message_reactions',
+        filter: `event_id=eq.${eventId}`,
       },
       (payload) => {
         if (payload.eventType !== 'INSERT' && payload.eventType !== 'DELETE') {
