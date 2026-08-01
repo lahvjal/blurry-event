@@ -21,6 +21,7 @@ import {
   HOME_HERO_TOP_OFFSET,
   HomeHeader,
 } from '@/components/home-header';
+import { HomeEventSelector } from '@/components/home-event-selector';
 import { ParticipantAvatar } from '@/components/participant-avatar';
 import {
   Badge,
@@ -427,6 +428,8 @@ export default function EventHome() {
               <Chevron color={colors.highlight} />
             </Pressable>
           ) : null}
+
+          <HomeEventSelector />
 
           <GradientPanel
             colors={['#1d2922', '#161e1a']}
