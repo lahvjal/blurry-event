@@ -318,8 +318,22 @@ export function setupPwa(): void {
 
   if (!('serviceWorker' in navigator)) return;
 
+  // When a production update replaces an existing worker, reload exactly
+  // once so an already-open iOS Safari tab cannot keep running a stale bundle
+  // after the new worker has taken control. Do not reload on first install.
+  const hadController = Boolean(navigator.serviceWorker.controller);
+  let reloadingForUpdate = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloadingForUpdate) return;
+    reloadingForUpdate = true;
+    window.location.reload();
+  });
+
   const register = () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
+    navigator.serviceWorker
+      .register('/sw.js', { updateViaCache: 'none' })
+      .then((registration) => registration.update())
+      .catch(() => {});
   };
 
   if (document.readyState === 'complete') register();

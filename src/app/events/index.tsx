@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Noise } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
+import EventHome from '@/app/event';
 import { eventPath } from '@/lib/routes';
 import { useEvent } from '@/state/event';
 import { EVENT_LIFECYCLE_LABELS } from '@/state/types';
@@ -20,15 +21,15 @@ import { EVENT_LIFECYCLE_LABELS } from '@/state/types';
 export default function MyEvents() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { accountAccess, accessLoading } = useEvent();
+  const {
+    accountAccess,
+    accessLoading,
+    activeEventId,
+    eventLoading,
+  } = useEvent();
   const events = accountAccess?.events ?? [];
   const soleEventId = events.length === 1 ? events[0].id : null;
-  const redirectTarget =
-    accountAccess?.accountId === 'demo'
-      ? '/'
-      : soleEventId
-        ? eventPath(soleEventId, 'event')
-        : null;
+  const redirectTarget = accountAccess?.accountId === 'demo' ? '/' : null;
   const redirectingTo = React.useRef<string | null>(null);
 
   React.useEffect(() => {
@@ -43,13 +44,22 @@ export default function MyEvents() {
     router.replace(redirectTarget as never);
   }, [accessLoading, redirectTarget, router]);
 
-  if (accessLoading || redirectTarget) {
+  if (
+    accessLoading ||
+    redirectTarget ||
+    (soleEventId && (eventLoading || activeEventId !== soleEventId))
+  ) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator color={colors.highlight} />
       </View>
     );
   }
+
+  // Preserve the original single-event experience without performing a
+  // second route transition immediately after login. Event-aware navigation
+  // from this screen still uses activeEventId and opens scoped routes.
+  if (soleEventId) return <EventHome />;
 
   return (
     <View style={styles.root}>
