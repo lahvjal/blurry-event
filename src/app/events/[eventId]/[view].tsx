@@ -57,14 +57,22 @@ const SCREENS: Record<EventScreenName, React.ComponentType> = {
   scorecard: Scorecard,
 };
 
-export default function ScopedEventScreen() {
-  const params = useLocalSearchParams<{ eventId?: string; screen?: string }>();
+export default function ScopedEventView() {
+  // `screen` is reserved by Expo Router/React Navigation. The dynamic segment
+  // is named `view` so its value cannot be interpreted as a nested navigation
+  // instruction; the public URL remains /events/:eventId/:view.
+  const params = useLocalSearchParams<{
+    eventId?: string | string[];
+    view?: string | string[];
+  }>();
   const { accountAccess, accessLoading, activeEventId, eventLoading } = useEvent();
-  const eventId = params.eventId;
-  const screen = params.screen;
+  const eventId = Array.isArray(params.eventId)
+    ? params.eventId[0]
+    : params.eventId;
+  const view = Array.isArray(params.view) ? params.view[0] : params.view;
 
   if (!eventId) return <Redirect href="/events" />;
-  if (!screen || !isEventScreenName(screen)) {
+  if (!view || !isEventScreenName(view)) {
     return <Redirect href={eventPath(eventId, 'event') as never} />;
   }
   if (!accessLoading && !accountAccess) {
@@ -86,7 +94,7 @@ export default function ScopedEventScreen() {
     );
   }
 
-  const Screen = SCREENS[screen];
+  const Screen = SCREENS[view];
   return <Screen />;
 }
 

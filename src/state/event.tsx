@@ -343,6 +343,9 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const requestedEventId = Array.isArray(routeParams.eventId)
     ? routeParams.eventId[0]
     : routeParams.eventId;
+  const requestedEventIdRef = useRef(requestedEventId);
+  requestedEventIdRef.current = requestedEventId;
+  const attemptedRouteEventIdRef = useRef<string | null>(null);
   const [accountAccess, setAccountAccess] = useState<AccountEventAccess | null>(null);
   const [activeEventId, setActiveEventId] = useState<string | null>(null);
   const [accessLoading, setAccessLoading] = useState(true);
@@ -419,7 +422,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     setIsLive(true);
   }, []);
 
-  const loadFromServer = useCallback(async () => {
+  const loadFromServer = useCallback(async (targetEventId?: string) => {
     setAccessLoading(true);
     const { data: sessionData } = await supabase.auth.getSession();
     const session = sessionData.session;
@@ -429,6 +432,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     }
 
     const userId = session.user.id;
+    const routeEventId = targetEventId ?? requestedEventIdRef.current;
     let access: AccountEventAccess | null = null;
 
     try {
@@ -443,7 +447,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         const snapshot = await loadLastEventSnapshot(userId).catch(() => null);
         if (
           snapshot &&
-          (!requestedEventId || snapshot.bundle.event.id === requestedEventId)
+          (!routeEventId || snapshot.bundle.event.id === routeEventId)
         ) {
           const registration = snapshot.bundle.participants.find(
             (participant) => participant.id === snapshot.bundle.meId,
@@ -490,7 +494,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     setAccountAccess(access);
     setAccessLoading(false);
 
-    let eventId: string | null = requestedEventId ?? null;
+    let eventId: string | null = routeEventId ?? null;
     if (eventId && !access.events.some((candidate) => candidate.id === eventId)) {
       setActiveEventId(null);
       setSyncScope(null, null);
@@ -542,15 +546,15 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       setIsLive(false);
       throw error;
     }
-  }, [applySeed, applyBundle, requestedEventId]);
+  }, [applySeed, applyBundle]);
 
   /**
    * Signed in but unable to read: the screens are about to show demo data and no
    * edit will be saved, so that gets said out loud rather than discovered later.
    */
-  const loadAndReport = useCallback(async () => {
+  const loadAndReport = useCallback(async (eventId?: string) => {
     try {
-      await loadFromServer();
+      await loadFromServer(eventId);
     } catch (error) {
       Alert.alert(
         "Couldn't load the event",
@@ -572,6 +576,25 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
     return () => authListener.subscription.unsubscribe();
   }, [loadAndReport, applySeed]);
+
+  // Screen-to-screen navigation inside one event must not recreate the auth
+  // subscription or reload the event bundle. Only a genuinely different
+  // route event starts one explicit event switch.
+  useEffect(() => {
+    if (!requestedEventId) {
+      attemptedRouteEventIdRef.current = null;
+      return;
+    }
+    if (
+      accessLoading ||
+      requestedEventId === activeEventId ||
+      attemptedRouteEventIdRef.current === requestedEventId
+    ) {
+      return;
+    }
+    attemptedRouteEventIdRef.current = requestedEventId;
+    void loadAndReport(requestedEventId);
+  }, [accessLoading, activeEventId, loadAndReport, requestedEventId]);
 
   // Someone else's edits — a new pairing, a fresh announcement — land on this
   // device the next time it comes back to the foreground.

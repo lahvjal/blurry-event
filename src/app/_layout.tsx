@@ -50,7 +50,7 @@ function AppNavigator() {
     >;
     const preserved = Object.fromEntries(
       Object.entries(currentParams).filter(
-        ([key]) => key !== 'eventId' && key !== 'screen',
+        ([key]) => key !== 'eventId' && key !== 'view' && key !== 'screen',
       ),
     );
     router.replace({
