@@ -358,6 +358,21 @@ export async function apiSetGameStyle(eventId: string, style: GameStyle) {
   if (error) throw error;
 }
 
+export async function apiCreateClubEvent(input: {
+  name: string;
+  courseName: string;
+  eventDate: string;
+}): Promise<string> {
+  const { data, error } = await supabase.rpc('create_club_event', {
+    p_name: input.name,
+    p_course_name: input.courseName,
+    p_event_date: input.eventDate,
+  });
+  if (error) throw error;
+  if (!data) throw new Error('The event was created without an event ID.');
+  return data as string;
+}
+
 export async function apiUpdateEvent(
   eventId: string,
   patch: {
@@ -373,6 +388,7 @@ export async function apiUpdateEvent(
     teeTimes?: string[];
     courseMapUrl?: string | null;
     teeColor?: string;
+    lifecycleStatus?: EventLifecycleStatus;
   },
 ) {
   const payload = assigned({
@@ -388,6 +404,7 @@ export async function apiUpdateEvent(
     tee_times: patch.teeTimes,
     course_map_url: patch.courseMapUrl,
     tee_color: patch.teeColor,
+    lifecycle_status: patch.lifecycleStatus,
   });
   if (!payload) return;
 

@@ -290,8 +290,14 @@ export default function EventHome() {
   const complete = holesPlayed === 18;
   const dayCount = daysUntil(event.eventDate);
   const isEventDay = localIsoDate() === event.eventDate;
+  const eventEnded =
+    event.lifecycleStatus === 'completed' ||
+    event.lifecycleStatus === 'archived' ||
+    (event.lifecycleStatus === 'published' && dayCount < 0);
   const canStart =
-    isEventDay && (!isTeamFormat(event.gameStyle) || Boolean(myTeam));
+    !eventEnded &&
+    isEventDay &&
+    (!isTeamFormat(event.gameStyle) || Boolean(myTeam));
   const myRow = leaderboard.find((row) => row.isMine);
   const position = competitionPosition(myRow, leaderboard);
   const leader = leaderboard.find((row) => row.toPar !== null);
@@ -373,7 +379,11 @@ export default function EventHome() {
     if (roundStarted || canStart) router.push('/scorecard');
   };
 
-  const statusLabel = complete
+  const statusLabel = eventEnded
+    ? 'EVENT ENDED'
+    : event.lifecycleStatus === 'draft'
+      ? 'EVENT DRAFT'
+      : complete
     ? 'ROUND COMPLETE'
     : roundStarted
       ? 'ROUND IN PROGRESS'
@@ -432,8 +442,8 @@ export default function EventHome() {
           <HomeEventSelector />
 
           <GradientPanel
-            colors={['#1d2922', '#161e1a']}
-            style={styles.eventCard}>
+            colors={eventEnded ? ['#202421', '#151816'] : ['#1d2922', '#161e1a']}
+            style={[styles.eventCard, eventEnded && styles.eventCardEnded]}>
             <View style={styles.eventTop}>
               <View style={styles.eventTitleBlock}>
                 <Text numberOfLines={1} style={styles.eventTitle}>
@@ -453,7 +463,8 @@ export default function EventHome() {
             <View style={styles.statusWrap}>
               <Badge
                 label={statusLabel}
-                color={roundStarted ? colors.highlight : colors.link}
+                color={eventEnded ? colors.textMuted : roundStarted ? colors.highlight : colors.link}
+                background={eventEnded ? '#282d2a' : colors.bgElevated}
                 style={styles.statusBadge}
               />
             </View>
@@ -754,6 +765,10 @@ const styles = StyleSheet.create({
   },
   eventCard: {
     width: '100%',
+  },
+  eventCardEnded: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   eventTop: {
     minHeight: 58,

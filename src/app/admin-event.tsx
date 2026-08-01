@@ -22,7 +22,9 @@ import { ActionButton, Noise, SectionLabel } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
 import { useEvent } from '@/state/event';
 import {
+  EVENT_LIFECYCLE_LABELS,
   EventConfig,
+  EventLifecycleStatus,
   formatTimeOfDay,
   fullAddress,
   generateTeeTimes,
@@ -39,6 +41,7 @@ import {
  */
 type EventDraft = Pick<
   EventConfig,
+  | 'lifecycleStatus'
   | 'name'
   | 'courseName'
   | 'addressLine'
@@ -55,6 +58,7 @@ type EventDraft = Pick<
 
 function draftFrom(event: EventConfig): EventDraft {
   return {
+    lifecycleStatus: event.lifecycleStatus,
     name: event.name,
     courseName: event.courseName,
     addressLine: event.addressLine,
@@ -132,6 +136,17 @@ function confirmAction({
 }
 
 type Picker = 'date' | 'checkIn' | 'start' | 'firstTee' | null;
+
+const LIFECYCLE_OPTIONS: {
+  value: EventLifecycleStatus;
+  description: string;
+}[] = [
+  { value: 'draft', description: 'Private setup before participants are invited.' },
+  { value: 'published', description: 'Visible and ready for participants.' },
+  { value: 'live', description: 'The event is actively being played.' },
+  { value: 'completed', description: 'Shows the Event Ended state and keeps results.' },
+  { value: 'archived', description: 'Ended and retained for club history.' },
+];
 
 export default function AdminEvent() {
   const router = useRouter();
@@ -342,6 +357,34 @@ export default function AdminEvent() {
         }}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled">
+        <View style={{ gap: 10 }}>
+          <SectionLabel color={colors.link} size={10}>
+            lifecycle
+          </SectionLabel>
+          <Text style={styles.hint}>
+            Completed and Archived events show EVENT ENDED on their Home card.
+          </Text>
+          {LIFECYCLE_OPTIONS.map((option) => {
+            const active = draft.lifecycleStatus === option.value;
+            return (
+              <Pressable
+                key={option.value}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: active }}
+                style={[styles.lifecycleOption, active && styles.lifecycleOptionActive]}
+                onPress={() => patch({ lifecycleStatus: option.value })}>
+                <View style={styles.lifecycleCopy}>
+                  <Text style={[styles.lifecycleName, active && styles.lifecycleNameActive]}>
+                    {EVENT_LIFECYCLE_LABELS[option.value]}
+                  </Text>
+                  <Text style={styles.lifecycleDescription}>{option.description}</Text>
+                </View>
+                <View style={[styles.lifecycleRadio, active && styles.lifecycleRadioActive]} />
+              </Pressable>
+            );
+          })}
+        </View>
+
         {/* Identity */}
         <View style={{ gap: 10 }}>
           <SectionLabel color={colors.link} size={10}>
@@ -681,6 +724,45 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     fontSize: 9,
     color: 'rgba(255,255,255,0.45)',
+  },
+  lifecycleOption: {
+    minHeight: 62,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    backgroundColor: 'rgba(15,17,16,0.5)',
+  },
+  lifecycleOptionActive: {
+    borderColor: 'rgba(123,255,178,0.4)',
+    backgroundColor: 'rgba(123,255,178,0.07)',
+  },
+  lifecycleCopy: { flex: 1, gap: 5 },
+  lifecycleName: {
+    fontFamily: fonts.bold,
+    fontSize: 11,
+    color: '#ffffff',
+  },
+  lifecycleNameActive: { color: colors.highlight },
+  lifecycleDescription: {
+    fontFamily: fonts.regular,
+    fontSize: 10,
+    lineHeight: 14,
+    color: 'rgba(255,255,255,0.42)',
+  },
+  lifecycleRadio: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.25)',
+  },
+  lifecycleRadioActive: {
+    borderColor: colors.highlight,
+    backgroundColor: colors.highlight,
   },
   teeColorRow: {
     flexDirection: 'row',

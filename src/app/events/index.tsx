@@ -88,7 +88,10 @@ export default function MyEvents() {
               <View style={styles.cardTop}>
                 <Text style={styles.eventName}>{event.name}</Text>
                 <Text style={styles.status}>
-                  {EVENT_LIFECYCLE_LABELS[event.lifecycleStatus]}
+                  {event.lifecycleStatus === 'completed' ||
+                  event.lifecycleStatus === 'archived'
+                    ? 'EVENT ENDED'
+                    : EVENT_LIFECYCLE_LABELS[event.lifecycleStatus]}
                 </Text>
               </View>
               <Text style={styles.course}>{event.courseName}</Text>

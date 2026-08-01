@@ -23,6 +23,7 @@ export default function Admin() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const {
+    accountAccess,
     event,
     me,
     teams,
@@ -69,6 +70,25 @@ export default function Admin() {
           gap: 24,
         }}
         showsVerticalScrollIndicator={false}>
+        {accountAccess?.profile?.isClubAdmin ? (
+          <View style={{ gap: 10 }}>
+            <SectionLabel color={colors.link} size={10}>
+              club admin
+            </SectionLabel>
+            <Pressable
+              style={styles.rosterLink}
+              onPress={() => router.push('/admin-events')}>
+              <View style={{ flex: 1, gap: 5 }}>
+                <Text style={styles.rosterLinkTitle}>MANAGE EVENTS</Text>
+                <Text style={styles.rosterLinkSub}>
+                  Create Drafts and open any club event
+                </Text>
+              </View>
+              <Text style={styles.rosterLinkArrow}>›</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
         {/* Event details */}
         <View style={{ gap: 10 }}>
           <SectionLabel color={colors.link} size={10}>

@@ -281,6 +281,7 @@ type EventState = {
         | 'teeTimes'
         | 'courseMapUrl'
         | 'teeColor'
+        | 'lifecycleStatus'
       >
     >,
   ) => Promise<boolean>;
@@ -991,7 +992,31 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         await apiUpdateEvent(event.id, savedPatch);
       });
 
-      if (saved) setEvent((prev) => ({ ...prev, ...savedPatch }));
+      if (saved) {
+        setEvent((prev) => ({ ...prev, ...savedPatch }));
+        setAccountAccess((current) =>
+          current
+            ? {
+                ...current,
+                events: current.events.map((candidate) =>
+                  candidate.id === event.id
+                    ? {
+                        ...candidate,
+                        name: savedPatch.name ?? candidate.name,
+                        courseName:
+                          savedPatch.courseName ?? candidate.courseName,
+                        eventDate:
+                          savedPatch.eventDate ?? candidate.eventDate,
+                        lifecycleStatus:
+                          savedPatch.lifecycleStatus ??
+                          candidate.lifecycleStatus,
+                      }
+                    : candidate,
+                ),
+              }
+            : current,
+        );
+      }
       return saved;
     },
     [event.id, persist],
