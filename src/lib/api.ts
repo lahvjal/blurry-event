@@ -5,6 +5,7 @@ import {
   Announcement,
   EventConfig,
   EventLifecycleStatus,
+  ExistingAccountCandidate,
   GameStyle,
   Participant,
   ScoreUpdate,
@@ -103,19 +104,6 @@ export async function fetchAccountEventAccess(
         : null,
     })),
   };
-}
-
-/**
- * Compatibility resolver for the current single-event PWA. It deliberately
- * refuses to guess once more than one event is accessible; My Events owns that
- * choice.
- */
-export function resolveSoleAccessibleEventId(access: AccountEventAccess): string {
-  if (access.events.length === 1) return access.events[0].id;
-  if (access.events.length === 0) {
-    throw new Error('No accessible event was found for this account.');
-  }
-  throw new Error('Multiple accessible events require event selection.');
 }
 
 export async function fetchEventBundle(eventId: string): Promise<EventBundle> {
@@ -569,6 +557,56 @@ export async function apiResetRound(roundId: string) {
 }
 
 // --- Roster writes ----------------------------------------------------------
+
+/**
+ * A narrow admin-only directory. The RPC intentionally omits auth email so an
+ * event admin can choose a known member without receiving an account directory.
+ */
+export async function apiAvailableEventAccounts(
+  eventId: string,
+): Promise<ExistingAccountCandidate[]> {
+  const { data, error } = await supabase.rpc('available_event_accounts', {
+    p_event_id: eventId,
+  });
+  if (error) throw error;
+
+  return (data ?? []).map((account: any) => ({
+    accountId: account.account_id,
+    displayName: account.display_name,
+    username: account.username ?? null,
+    avatarUrl: account.avatar_url ?? null,
+    handicap: account.handicap === null ? null : Number(account.handicap),
+  }));
+}
+
+export async function apiAddExistingAccountToEvent(
+  eventId: string,
+  accountId: string,
+): Promise<Participant> {
+  const { data, error } = await supabase.rpc('add_existing_account_to_event', {
+    p_event_id: eventId,
+    p_account_id: accountId,
+  });
+  if (error) throw error;
+
+  const participant = data?.[0] as any;
+  if (!participant) {
+    throw new Error('The account could not be added to this event.');
+  }
+
+  return {
+    id: participant.id,
+    fullName: participant.full_name,
+    initials: initialsOf(participant.full_name),
+    handicap: participant.handicap === null ? null : Number(participant.handicap),
+    avatarUrl: participant.avatar_url ?? null,
+    isAdmin: Boolean(participant.is_admin),
+    inviteCode: participant.invite_code,
+    authEmail: participant.auth_email,
+    claimed: participant.claimed_by !== null,
+    inviteSentAt: participant.invite_sent_at ?? null,
+  };
+}
 
 export async function apiAddParticipants(
   eventId: string,

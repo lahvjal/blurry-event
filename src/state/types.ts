@@ -102,6 +102,16 @@ export type NewParticipantInput = {
   isAdmin: boolean;
 };
 
+/** An existing account an event admin may register for the active event. */
+export type ExistingAccountCandidate = {
+  accountId: string;
+  displayName: string;
+  username: string | null;
+  avatarUrl: string | null;
+  /** Most recent event handicap, used as the new registration's starting value. */
+  handicap: number | null;
+};
+
 export type Team = {
   id: string;
   name: string;

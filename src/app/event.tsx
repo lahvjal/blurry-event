@@ -32,7 +32,10 @@ import {
   SectionLabel,
 } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
+import { clearBadge } from '@/lib/badge';
 import { openTeamConversation } from '@/lib/chat';
+import { clearPushForSignOut } from '@/lib/push';
+import { supabase } from '@/lib/supabase';
 import { useEvent } from '@/state/event';
 import { useNotificationUnread } from '@/state/notification-center';
 import {
@@ -267,7 +270,121 @@ function AchievementTicker({
   );
 }
 
+function HomeNotice({
+  message,
+  onDismiss,
+}: {
+  message: string;
+  onDismiss: () => void;
+}) {
+  return (
+    <View accessibilityRole="alert" style={styles.homeNotice}>
+      <Text style={styles.homeNoticeText}>{message}</Text>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Dismiss event notice"
+        hitSlop={8}
+        onPress={onDismiss}>
+        <Text style={styles.homeNoticeDismiss}>DISMISS</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function HomeWithoutFocusedEvent({ unavailable = false }: { unavailable?: boolean }) {
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const {
+    accountAccess,
+    homeNotice,
+    eventLoadError,
+    dismissHomeNotice,
+    refresh,
+  } = useEvent();
+  const firstName =
+    accountAccess?.profile?.displayName?.trim().split(/\s+/)[0] ?? 'there';
+
+  const signOut = async () => {
+    await clearPushForSignOut();
+    await clearBadge();
+    await supabase.auth.signOut();
+    router.replace('/');
+  };
+
+  return (
+    <View style={styles.root}>
+      <LinearGradient colors={['#203329', '#1b2a22']} style={StyleSheet.absoluteFill} />
+      <Noise />
+      <ScrollView
+        contentContainerStyle={[
+          styles.emptyHomeContent,
+          { paddingTop: insets.top + 84, paddingBottom: insets.bottom + 40 },
+        ]}>
+        <Text style={styles.greeting}>
+          {greeting()}, {firstName}.
+        </Text>
+        <Text style={styles.emptyHomeEyebrow}>BLURRY GOLF HOME</Text>
+        <Text style={styles.emptyHomeTitle}>
+          {unavailable ? 'Your event is unavailable.' : 'No events yet.'}
+        </Text>
+        <Text style={styles.emptyHomeBody}>
+          {unavailable
+            ? eventLoadError ??
+              'We could not load an event or a safe offline copy for this account.'
+            : 'Redeem the invite code from an event organizer to add your first event.'}
+        </Text>
+
+        {homeNotice ? (
+          <HomeNotice message={homeNotice} onDismiss={dismissHomeNotice} />
+        ) : null}
+
+        {unavailable ? (
+          <Pressable style={styles.emptyHomePrimary} onPress={() => void refresh()}>
+            <Text style={styles.emptyHomePrimaryText}>TRY AGAIN</Text>
+          </Pressable>
+        ) : (
+          <Pressable
+            style={styles.emptyHomePrimary}
+            onPress={() => router.push('/invite')}>
+            <Text style={styles.emptyHomePrimaryText}>REDEEM AN EVENT INVITE</Text>
+          </Pressable>
+        )}
+        <Pressable style={styles.emptyHomeSecondary} onPress={() => void signOut()}>
+          <Text style={styles.emptyHomeSecondaryText}>SIGN OUT</Text>
+        </Pressable>
+      </ScrollView>
+    </View>
+  );
+}
+
 export default function EventHome() {
+  const {
+    accountAccess,
+    accessLoading,
+    activeEventId,
+    eventLoading,
+    eventLoadError,
+  } = useEvent();
+
+  if (accessLoading || eventLoading) {
+    return (
+      <View style={styles.homeLoading}>
+        <Text style={styles.homeLoadingText}>OPENING HOME</Text>
+      </View>
+    );
+  }
+  if (!activeEventId) {
+    const hasAccessibleEvents = Boolean(accountAccess?.events.length);
+    return (
+      <HomeWithoutFocusedEvent
+        unavailable={hasAccessibleEvents || Boolean(eventLoadError)}
+      />
+    );
+  }
+  return <FocusedEventHome />;
+}
+
+function FocusedEventHome() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const {
@@ -281,6 +398,8 @@ export default function EventHome() {
     scoreUpdates,
     participantById,
     isLive,
+    homeNotice,
+    dismissHomeNotice,
   } = useEvent();
   const [headerStuck, setHeaderStuck] = React.useState(false);
   const [openingTeamChat, setOpeningTeamChat] = React.useState(false);
@@ -429,6 +548,10 @@ export default function EventHome() {
             </Text>
             <Text style={styles.subGreeting}>LET’S PLAY SOME GOLF.</Text>
           </View>
+
+          {homeNotice ? (
+            <HomeNotice message={homeNotice} onDismiss={dismissHomeNotice} />
+          ) : null}
 
           {me.isAdmin ? (
             <Pressable
@@ -728,6 +851,90 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: colors.bg,
+  },
+  homeLoading: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.bg,
+  },
+  homeLoadingText: {
+    fontFamily: fonts.bold,
+    fontSize: 10,
+    letterSpacing: 1.2,
+    color: colors.textMuted,
+  },
+  emptyHomeContent: {
+    flexGrow: 1,
+    paddingHorizontal: 24,
+    gap: 16,
+  },
+  emptyHomeEyebrow: {
+    marginTop: 20,
+    fontFamily: fonts.bold,
+    fontSize: 10,
+    letterSpacing: 1.5,
+    color: colors.highlight,
+  },
+  emptyHomeTitle: {
+    fontFamily: fonts.serif,
+    fontSize: 42,
+    lineHeight: 48,
+    color: '#ffffff',
+  },
+  emptyHomeBody: {
+    maxWidth: 480,
+    fontFamily: fonts.regular,
+    fontSize: 15,
+    lineHeight: 22,
+    color: colors.textMuted,
+  },
+  emptyHomePrimary: {
+    minHeight: 56,
+    marginTop: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(123,255,178,0.14)',
+  },
+  emptyHomePrimaryText: {
+    fontFamily: fonts.bold,
+    fontSize: 11,
+    color: colors.highlight,
+  },
+  emptyHomeSecondary: {
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  emptyHomeSecondaryText: {
+    fontFamily: fonts.bold,
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.55)',
+  },
+  homeNotice: {
+    minHeight: 48,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(238,190,104,0.35)',
+    backgroundColor: 'rgba(76,57,24,0.45)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  homeNoticeText: {
+    flex: 1,
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    lineHeight: 16,
+    color: '#f2d49d',
+  },
+  homeNoticeDismiss: {
+    fontFamily: fonts.bold,
+    fontSize: 9,
+    color: '#f2d49d',
   },
   primary: {
     gap: 10,

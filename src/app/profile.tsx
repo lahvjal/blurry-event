@@ -162,12 +162,6 @@ export default function Profile() {
           </Text>
         </Pressable>
 
-        {accountAccess && accountAccess.events.length > 1 ? (
-          <Pressable style={styles.eventsButton} onPress={() => router.push('/events')}>
-            <Text style={styles.eventsButtonText}>SWITCH EVENT</Text>
-          </Pressable>
-        ) : null}
-
         {/* Teammates */}
         {teammates.length > 0 ? (
           <View style={{ gap: 10 }}>
@@ -296,18 +290,6 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     fontSize: 12,
     color: colors.highlight,
-  },
-  eventsButton: {
-    minHeight: 50,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  eventsButtonText: {
-    fontFamily: fonts.bold,
-    fontSize: 11,
-    color: '#ffffff',
   },
   mateRow: {
     flexDirection: 'row',

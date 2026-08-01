@@ -102,7 +102,7 @@ export default function InviteSignup() {
         return;
       }
 
-      router.replace('/events');
+      router.replace('/event');
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Something went wrong creating your account.';
@@ -165,9 +165,9 @@ export default function InviteSignup() {
             )}
           </Pressable>
 
-          <Pressable onPress={() => router.replace(signedIn ? '/events' : '/')}>
+          <Pressable onPress={() => router.replace(signedIn ? '/event' : '/')}>
             <Text style={styles.secondaryLink}>
-              {signedIn ? 'BACK TO MY EVENTS' : 'ALREADY HAVE AN ACCOUNT? SIGN IN'}
+              {signedIn ? 'BACK TO HOME' : 'ALREADY HAVE AN ACCOUNT? SIGN IN'}
             </Text>
           </Pressable>
         </>

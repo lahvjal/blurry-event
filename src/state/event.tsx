@@ -11,6 +11,7 @@ import { useGlobalSearchParams } from 'expo-router';
 import { Alert, AppState } from 'react-native';
 
 import {
+  apiAddExistingAccountToEvent,
   apiAddParticipants,
   apiApplyTeamAssignments,
   apiAssignToTeam,
@@ -28,10 +29,12 @@ import {
   apiUpdateProfile,
   apiUpdateTeam,
   apiUploadImage,
+  apiAvailableEventAccounts,
   EventBundle,
   fetchAccountEventAccess,
   fetchEventBundle,
 } from '@/lib/api';
+import { selectDefaultEventFocus } from '@/lib/event-focus';
 import {
   loadAccountEventAccess,
   loadEventSnapshot,
@@ -46,6 +49,7 @@ import {
   AccountEventAccess,
   Announcement,
   EventConfig,
+  ExistingAccountCandidate,
   GameStyle,
   Hole,
   LeaderboardRow,
@@ -250,11 +254,19 @@ type EventState = {
   isLive: boolean;
   /** ISO time the shown data was cached, or null when it came straight from the server. */
   snapshotAt: string | null;
+  /** One-shot Home banner explaining a stale or unauthorized event fallback. */
+  homeNotice: string | null;
+  /** Present when no focused bundle or safe snapshot could be loaded. */
+  eventLoadError: string | null;
 
   participantById: (id: string) => Participant | undefined;
   teamOf: (participantId: string) => Team | undefined;
   /** Re-reads everything from Supabase. Runs on sign-in and on app foreground. */
   refresh: () => Promise<void>;
+  /** Ignores route/current focus and returns the event Home actually opened. */
+  focusDefaultHome: () => Promise<string | null>;
+  dismissHomeNotice: () => void;
+  reportUnavailableEventLink: (hasAccessibleEvents: boolean) => void;
 
   // Player actions
   setScore: (holeIndex: number, strokes: number) => void;
@@ -308,6 +320,10 @@ type EventState = {
   addParticipants: (
     rows: NewParticipantInput[],
   ) => Promise<{ added: number; duplicates: string[] }>;
+  /** Safe account directory scoped to accounts not yet registered here. */
+  availableExistingAccounts: () => Promise<ExistingAccountCandidate[]>;
+  /** Creates a claimed event registration; existing accounts need no invite. */
+  addExistingAccount: (accountId: string) => Promise<Participant>;
   updateParticipant: (
     id: string,
     patch: Partial<Pick<Participant, 'fullName' | 'handicap' | 'isAdmin' | 'authEmail'>>,
@@ -364,6 +380,23 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const [isLive, setIsLive] = useState(false);
   /** Set when the screens are rendering a cached snapshot rather than a live read. */
   const [snapshotAt, setSnapshotAt] = useState<string | null>(null);
+  const [homeNotice, setHomeNotice] = useState<string | null>(null);
+  const [eventLoadError, setEventLoadError] = useState<string | null>(null);
+
+  const clearFocusedEvent = useCallback(() => {
+    setActiveEventId(null);
+    setParticipants([]);
+    setTeams([]);
+    setInvites([]);
+    setAnnouncements([]);
+    setRounds({});
+    setScoreUpdates([]);
+    setRoundIds({});
+    setMyId(null);
+    setIsLive(false);
+    setSnapshotAt(null);
+    setEventLoading(false);
+  }, []);
 
   const applySeed = useCallback(() => {
     setSyncScope(null, null);
@@ -404,6 +437,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     setMyId('p1');
     setIsLive(false);
     setSnapshotAt(null);
+    setHomeNotice(null);
+    setEventLoadError(null);
   }, []);
 
   const applyBundle = useCallback((bundle: EventBundle) => {
@@ -423,17 +458,21 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     setIsLive(true);
   }, []);
 
-  const loadFromServer = useCallback(async (targetEventId?: string) => {
+  const loadFromServer = useCallback(async (targetEventId?: string | null) => {
     setAccessLoading(true);
+    setEventLoadError(null);
     const { data: sessionData } = await supabase.auth.getSession();
     const session = sessionData.session;
     if (!session) {
       applySeed();
-      return;
+      return SEED_EVENT.id;
     }
 
     const userId = session.user.id;
-    const routeEventId = targetEventId ?? requestedEventIdRef.current;
+    const routeEventId =
+      targetEventId === null
+        ? undefined
+        : targetEventId ?? requestedEventIdRef.current;
     let access: AccountEventAccess | null = null;
 
     try {
@@ -480,14 +519,15 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           setEventLoading(false);
           applyBundle(snapshot.bundle);
           setSnapshotAt(snapshot.savedAt);
-          return;
+          return snapshot.bundle.event.id;
         }
       }
       if (!access) {
         setSyncScope(null, null);
+        setAccountAccess(null);
         setAccessLoading(false);
-        setEventLoading(false);
-        setIsLive(false);
+        clearFocusedEvent();
+        setEventLoadError(reasonFor(error));
         throw error;
       }
     }
@@ -495,31 +535,29 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     setAccountAccess(access);
     setAccessLoading(false);
 
-    let eventId: string | null = routeEventId ?? null;
-    if (eventId && !access.events.some((candidate) => candidate.id === eventId)) {
-      setActiveEventId(null);
-      setSyncScope(null, null);
-      setEventLoading(false);
-      setIsLive(false);
-      throw new Error('That event is not accessible to this account.');
+    const requestedEvent = routeEventId
+      ? access.events.find((candidate) => candidate.id === routeEventId) ?? null
+      : null;
+    const invalidEventLink = Boolean(routeEventId && !requestedEvent);
+    if (invalidEventLink) {
+      attemptedRouteEventIdRef.current = routeEventId ?? null;
+      setHomeNotice(
+        access.events.length > 0
+          ? 'That event link is no longer available to this account. Showing your default event.'
+          : 'That event link is no longer available to this account. Redeem an invite to add an event.',
+      );
+    } else if (requestedEvent) {
+      setHomeNotice(null);
     }
-    if (!eventId && access.events.length === 1) {
-      eventId = access.events[0].id;
-    }
-    if (!eventId && access.events.length > 1) {
-      // My Events owns the choice. Never reuse a previous event implicitly.
-      setActiveEventId(null);
-      setSyncScope(null, null);
-      setEventLoading(false);
-      setIsLive(false);
-      return;
-    }
+
+    const defaultFocus = selectDefaultEventFocus(access.events);
+    const eventId = requestedEvent?.id ?? defaultFocus.event?.id ?? null;
+    const usingDefaultFocus = requestedEvent === null;
+
     if (!eventId) {
-      setActiveEventId(null);
       setSyncScope(null, null);
-      setEventLoading(false);
-      setIsLive(false);
-      throw new Error('No accessible event was found for this account.');
+      clearFocusedEvent();
+      return null;
     }
 
     setEventLoading(true);
@@ -531,38 +569,67 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       setEventLoading(false);
       setSnapshotAt(null);
       void saveEventSnapshot(bundle, userId, eventId).catch(() => {});
+      return eventId;
     } catch (error) {
-      const snapshot = await loadEventSnapshot(userId, eventId).catch(() => null);
+      let snapshot = await loadEventSnapshot(userId, eventId).catch(() => null);
+      if (!snapshot && usingDefaultFocus) {
+        const lastSnapshot = await loadLastEventSnapshot(userId).catch(() => null);
+        if (
+          lastSnapshot &&
+          access.events.some(
+            (candidate) => candidate.id === lastSnapshot.bundle.event.id,
+          )
+        ) {
+          snapshot = lastSnapshot;
+          setHomeNotice((current) =>
+            current ??
+            'The default event could not be refreshed. Showing the last event saved on this device.',
+          );
+        }
+      }
       if (snapshot) {
         applyBundle(snapshot.bundle);
-        setActiveEventId(eventId);
-        setSyncScope(userId, eventId);
+        setActiveEventId(snapshot.bundle.event.id);
+        setSyncScope(userId, snapshot.bundle.event.id);
         setEventLoading(false);
         setSnapshotAt(snapshot.savedAt);
-        return;
+        return snapshot.bundle.event.id;
       }
-      setActiveEventId(null);
       setSyncScope(null, null);
-      setEventLoading(false);
-      setIsLive(false);
+      clearFocusedEvent();
+      setEventLoadError(reasonFor(error));
       throw error;
     }
-  }, [applySeed, applyBundle]);
+  }, [applySeed, applyBundle, clearFocusedEvent]);
 
-  /**
-   * Signed in but unable to read: the screens are about to show demo data and no
-   * edit will be saved, so that gets said out loud rather than discovered later.
-   */
-  const loadAndReport = useCallback(async (eventId?: string) => {
+  const loadAndReport = useCallback(async (eventId?: string | null) => {
     try {
-      await loadFromServer(eventId);
+      return await loadFromServer(eventId);
     } catch (error) {
       Alert.alert(
         "Couldn't load the event",
-        `${reasonFor(error)}\n\nUntil this loads, changes you make won't be saved.`,
+        `${reasonFor(error)}\n\nTry again from Home when your connection is available.`,
       );
+      return null;
     }
   }, [loadFromServer]);
+
+  const focusDefaultHome = useCallback(
+    () => loadAndReport(null),
+    [loadAndReport],
+  );
+  const refreshFocusedEvent = useCallback(async () => {
+    await loadFromServer();
+  }, [loadFromServer]);
+  const dismissHomeNotice = useCallback(() => setHomeNotice(null), []);
+  const reportUnavailableEventLink = useCallback((hasAccessibleEvents: boolean) => {
+    setHomeNotice((current) =>
+      current ??
+      (hasAccessibleEvents
+        ? 'That event link is no longer available to this account. Showing your default event.'
+        : 'That event link is no longer available to this account. Redeem an invite to add an event.'),
+    );
+  }, []);
 
   useEffect(() => {
     void loadAndReport();
@@ -1239,6 +1306,56 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     [participants, event.id, isLive],
   );
 
+  const availableExistingAccounts = useCallback<
+    EventState['availableExistingAccounts']
+  >(async () => {
+    if (!isLive) return [];
+    return apiAvailableEventAccounts(event.id);
+  }, [event.id, isLive]);
+
+  const addExistingAccount = useCallback<EventState['addExistingAccount']>(
+    async (accountId) => {
+      if (!isLive) {
+        throw new Error('Sign in before adding an existing account.');
+      }
+
+      const created = await apiAddExistingAccountToEvent(event.id, accountId);
+      setParticipants((current) =>
+        current.some((participant) => participant.id === created.id)
+          ? current
+          : [...current, created],
+      );
+
+      // A club admin can enter an event without playing in it and then choose
+      // their own account. Reflect that new registration without a full reload.
+      if (accountAccess?.accountId === accountId) {
+        setMyId(created.id);
+        setAccountAccess((current) =>
+          current
+            ? {
+                ...current,
+                events: current.events.map((candidate) =>
+                  candidate.id === event.id
+                    ? {
+                        ...candidate,
+                        registration: {
+                          participantId: created.id,
+                          eventId: event.id,
+                          isAdmin: created.isAdmin,
+                        },
+                      }
+                    : candidate,
+                ),
+              }
+            : current,
+        );
+      }
+
+      return created;
+    },
+    [accountAccess?.accountId, event.id, isLive],
+  );
+
   const updateParticipant = useCallback(
     (
       id: string,
@@ -1355,9 +1472,14 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     scoreUpdates,
     isLive,
     snapshotAt,
+    homeNotice,
+    eventLoadError,
     participantById,
     teamOf,
-    refresh: loadFromServer,
+    refresh: refreshFocusedEvent,
+    focusDefaultHome,
+    dismissHomeNotice,
+    reportUnavailableEventLink,
     setScore,
     resetRound,
     inviteToTeam,
@@ -1372,6 +1494,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     deleteTeam,
     autoBalanceTeams,
     addParticipants,
+    availableExistingAccounts,
+    addExistingAccount,
     updateParticipant,
     removeParticipant,
     regenerateInviteCode,

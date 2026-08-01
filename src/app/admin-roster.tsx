@@ -26,9 +26,24 @@ import { CSV_TEMPLATE, CsvImportResult, parseRoster } from '@/lib/csv';
 import { sendInviteEmails } from '@/lib/invite-email';
 import { inviteMessage, invitesAsCsv, isSyntheticEmail } from '@/lib/invites';
 import { useEvent } from '@/state/event';
-import { NewParticipantInput, Participant } from '@/state/types';
+import {
+  ExistingAccountCandidate,
+  NewParticipantInput,
+  Participant,
+} from '@/state/types';
 
 type Filter = 'all' | 'pending' | 'claimed';
+type AddMode = 'new' | 'existing';
+
+function initialsOf(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
+}
 
 function RemoveParticipantModal({
   participant,
@@ -96,6 +111,8 @@ export default function AdminRoster() {
     participants,
     teamOf,
     addParticipants,
+    availableExistingAccounts,
+    addExistingAccount,
     updateParticipant,
     removeParticipant,
     regenerateInviteCode,
@@ -107,10 +124,18 @@ export default function AdminRoster() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [preview, setPreview] = useState<CsvImportResult | null>(null);
   const [adding, setAdding] = useState(false);
+  const [addMode, setAddMode] = useState<AddMode>('new');
   const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newHandicap, setNewHandicap] = useState('');
   const [addError, setAddError] = useState<string | null>(null);
+  const [accountQuery, setAccountQuery] = useState('');
+  const [existingAccounts, setExistingAccounts] = useState<
+    ExistingAccountCandidate[] | null
+  >(null);
+  const [accountsLoading, setAccountsLoading] = useState(false);
+  const [accountsError, setAccountsError] = useState<string | null>(null);
+  const [addingAccountId, setAddingAccountId] = useState<string | null>(null);
   const [removeTarget, setRemoveTarget] = useState<Participant | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
@@ -187,6 +212,16 @@ export default function AdminRoster() {
       })
       .sort((a, b) => a.fullName.localeCompare(b.fullName));
   }, [participants, query, filter]);
+
+  const visibleAccounts = useMemo(() => {
+    const q = accountQuery.trim().toLowerCase();
+    return (existingAccounts ?? []).filter(
+      (account) =>
+        !q ||
+        account.displayName.toLowerCase().includes(q) ||
+        account.username?.toLowerCase().includes(q),
+    );
+  }, [accountQuery, existingAccounts]);
 
   if (!me.isAdmin) {
     return (
@@ -286,6 +321,51 @@ export default function AdminRoster() {
     setNewEmail('');
     setNewHandicap('');
     setAdding(false);
+  };
+
+  const loadExistingAccounts = async () => {
+    setAccountsError(null);
+    setAccountsLoading(true);
+    try {
+      setExistingAccounts(await availableExistingAccounts());
+    } catch (error) {
+      setAccountsError(
+        error instanceof Error
+          ? error.message
+          : 'Existing accounts could not be loaded. Try again.',
+      );
+    } finally {
+      setAccountsLoading(false);
+    }
+  };
+
+  const openExistingAccounts = () => {
+    setAddMode('existing');
+    setAddError(null);
+    setAccountsError(null);
+    if (existingAccounts === null && !accountsLoading) {
+      void loadExistingAccounts();
+    }
+  };
+
+  const addKnownAccount = async (account: ExistingAccountCandidate) => {
+    setAddingAccountId(account.accountId);
+    setAccountsError(null);
+    try {
+      await addExistingAccount(account.accountId);
+      setExistingAccounts((current) =>
+        current?.filter((candidate) => candidate.accountId !== account.accountId) ?? null,
+      );
+      setAccountQuery('');
+    } catch (error) {
+      setAccountsError(
+        error instanceof Error
+          ? error.message
+          : `${account.displayName} could not be added. Try again.`,
+      );
+    } finally {
+      setAddingAccountId(null);
+    }
   };
 
   const copyInvite = async (participant: Participant) => {
@@ -492,8 +572,12 @@ export default function AdminRoster() {
             <Pressable
               style={styles.secondaryButton}
               onPress={() => {
-                setAdding((v) => !v);
+                setAdding((current) => {
+                  if (!current) setAddMode('new');
+                  return !current;
+                });
                 setAddError(null);
+                setAccountsError(null);
               }}>
               <Text style={styles.secondaryButtonText}>
                 {adding ? 'CLOSE' : 'ADD PLAYER'}
@@ -502,53 +586,161 @@ export default function AdminRoster() {
           </View>
         )}
 
-        {/* Manual add */}
+        {/* New player / existing account */}
         {adding && !preview ? (
           <View style={styles.addCard}>
             <SectionLabel color={colors.link} size={10}>
-              add a participant
+              add a player
             </SectionLabel>
-            <TextInput
-              value={newName}
-              onChangeText={(value) => {
-                setNewName(value);
-                setAddError(null);
-              }}
-              style={styles.input}
-              placeholder="Full name"
-              placeholderTextColor="rgba(255,255,255,0.3)"
-              selectionColor={colors.highlight}
-            />
-            <TextInput
-              value={newEmail}
-              onChangeText={(value) => {
-                setNewEmail(value);
-                setAddError(null);
-              }}
-              style={styles.input}
-              placeholder="Email (required)"
-              placeholderTextColor="rgba(255,255,255,0.3)"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              autoComplete="email"
-              accessibilityLabel="Email, required"
-              selectionColor={colors.highlight}
-            />
-            <TextInput
-              value={newHandicap}
-              onChangeText={(value) => {
-                setNewHandicap(value);
-                setAddError(null);
-              }}
-              style={styles.input}
-              placeholder="Handicap (optional)"
-              placeholderTextColor="rgba(255,255,255,0.3)"
-              keyboardType="decimal-pad"
-              selectionColor={colors.highlight}
-            />
-            {addError ? <Text style={styles.addError}>{addError}</Text> : null}
-            <ActionButton label="ADD TO ROSTER" height={54} onPress={addManually} />
+            <View style={styles.addModeTabs}>
+              <Pressable
+                style={[
+                  styles.addModeTab,
+                  addMode === 'new' && styles.addModeTabActive,
+                ]}
+                onPress={() => {
+                  setAddMode('new');
+                  setAccountsError(null);
+                }}>
+                <Text
+                  style={[
+                    styles.addModeText,
+                    addMode === 'new' && styles.addModeTextActive,
+                  ]}>
+                  NEW PLAYER
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.addModeTab,
+                  addMode === 'existing' && styles.addModeTabActive,
+                ]}
+                onPress={openExistingAccounts}>
+                <Text
+                  style={[
+                    styles.addModeText,
+                    addMode === 'existing' && styles.addModeTextActive,
+                  ]}>
+                  EXISTING ACCOUNT
+                </Text>
+              </Pressable>
+            </View>
+
+            {addMode === 'new' ? (
+              <>
+                <Text style={styles.addHelp}>
+                  Add someone new, then send their invite from the roster.
+                </Text>
+                <TextInput
+                  value={newName}
+                  onChangeText={(value) => {
+                    setNewName(value);
+                    setAddError(null);
+                  }}
+                  style={styles.input}
+                  placeholder="Full name"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  selectionColor={colors.highlight}
+                />
+                <TextInput
+                  value={newEmail}
+                  onChangeText={(value) => {
+                    setNewEmail(value);
+                    setAddError(null);
+                  }}
+                  style={styles.input}
+                  placeholder="Email (required)"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="email"
+                  accessibilityLabel="Email, required"
+                  selectionColor={colors.highlight}
+                />
+                <TextInput
+                  value={newHandicap}
+                  onChangeText={(value) => {
+                    setNewHandicap(value);
+                    setAddError(null);
+                  }}
+                  style={styles.input}
+                  placeholder="Handicap (optional)"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  keyboardType="decimal-pad"
+                  selectionColor={colors.highlight}
+                />
+                {addError ? <Text style={styles.addError}>{addError}</Text> : null}
+                <ActionButton label="ADD TO ROSTER" height={54} onPress={addManually} />
+              </>
+            ) : (
+              <>
+                <Text style={styles.addHelp}>
+                  Choose a signed-up Blurry member. They’ll get this event immediately—no new invite or account needed.
+                </Text>
+                <SearchField
+                  value={accountQuery}
+                  onChangeText={setAccountQuery}
+                  placeholder="Search existing accounts"
+                />
+                {accountsLoading ? (
+                  <Text style={styles.accountEmpty}>Loading accounts…</Text>
+                ) : null}
+                {accountsError ? (
+                  <View style={styles.accountErrorRow}>
+                    <Text style={[styles.addError, { flex: 1 }]}>{accountsError}</Text>
+                    <Pressable
+                      disabled={accountsLoading}
+                      onPress={() => {
+                        setExistingAccounts(null);
+                        void loadExistingAccounts();
+                      }}>
+                      <Text style={styles.retryText}>RETRY</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+                {!accountsLoading && !accountsError && visibleAccounts.length === 0 ? (
+                  <Text style={styles.accountEmpty}>
+                    {accountQuery.trim()
+                      ? 'No existing accounts match that search.'
+                      : 'Every existing account is already on this event.'}
+                  </Text>
+                ) : null}
+                {visibleAccounts.map((account) => {
+                  const busy = addingAccountId === account.accountId;
+                  return (
+                    <View key={account.accountId} style={styles.accountRow}>
+                      <View style={styles.accountAvatar}>
+                        <Text style={styles.accountAvatarText}>
+                          {initialsOf(account.displayName)}
+                        </Text>
+                      </View>
+                      <View style={styles.accountIdentity}>
+                        <Text style={styles.accountName}>{account.displayName}</Text>
+                        <Text style={styles.accountMeta}>
+                          {[
+                            account.username ? `@${account.username}` : 'Existing account',
+                            account.handicap === null ? null : `${account.handicap} HCP`,
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </Text>
+                      </View>
+                      <Pressable
+                        style={[styles.accountAdd, busy && styles.buttonBusy]}
+                        disabled={addingAccountId !== null}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Add ${account.displayName} to this event`}
+                        onPress={() => void addKnownAccount(account)}>
+                        <Text style={styles.accountAddText}>
+                          {busy ? 'ADDING…' : 'ADD'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  );
+                })}
+              </>
+            )}
           </View>
         ) : null}
 
@@ -884,11 +1076,109 @@ const styles = StyleSheet.create({
     gap: 10,
     backgroundColor: 'rgba(15,17,16,0.5)',
   },
+  addModeTabs: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  addModeTab: {
+    flex: 1,
+    minHeight: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  addModeTabActive: {
+    backgroundColor: 'rgba(123,255,178,0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(123,255,178,0.34)',
+  },
+  addModeText: {
+    fontFamily: fonts.bold,
+    fontSize: 9,
+    color: 'rgba(255,255,255,0.5)',
+  },
+  addModeTextActive: {
+    color: colors.highlight,
+  },
+  addHelp: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    lineHeight: 16,
+    color: 'rgba(255,255,255,0.48)',
+  },
   addError: {
     fontFamily: fonts.regular,
     fontSize: 11,
     lineHeight: 16,
     color: '#ffb4b4',
+  },
+  accountErrorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 6,
+  },
+  retryText: {
+    fontFamily: fonts.bold,
+    fontSize: 10,
+    color: colors.link,
+  },
+  accountEmpty: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    lineHeight: 18,
+    color: 'rgba(255,255,255,0.45)',
+    paddingVertical: 12,
+    textAlign: 'center',
+  },
+  accountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    minHeight: 62,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.07)',
+  },
+  accountAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(123,255,178,0.12)',
+  },
+  accountAvatarText: {
+    fontFamily: fonts.bold,
+    fontSize: 11,
+    color: colors.highlight,
+  },
+  accountIdentity: {
+    flex: 1,
+    gap: 4,
+  },
+  accountName: {
+    fontFamily: fonts.bold,
+    fontSize: 13,
+    color: '#ffffff',
+  },
+  accountMeta: {
+    fontFamily: fonts.regular,
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.4)',
+  },
+  accountAdd: {
+    minWidth: 64,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(123,255,178,0.14)',
+  },
+  accountAddText: {
+    fontFamily: fonts.bold,
+    fontSize: 9,
+    color: colors.highlight,
   },
   input: {
     backgroundColor: 'rgba(0,0,0,0.35)',

@@ -1,4 +1,4 @@
-import { Redirect, useLocalSearchParams } from 'expo-router';
+import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
@@ -65,27 +65,58 @@ export default function ScopedEventView() {
     eventId?: string | string[];
     view?: string | string[];
   }>();
-  const { accountAccess, accessLoading, activeEventId, eventLoading } = useEvent();
+  const router = useRouter();
+  const {
+    accountAccess,
+    accessLoading,
+    activeEventId,
+    eventLoading,
+    focusDefaultHome,
+    reportUnavailableEventLink,
+  } = useEvent();
   const eventId = Array.isArray(params.eventId)
     ? params.eventId[0]
     : params.eventId;
   const view = Array.isArray(params.view) ? params.view[0] : params.view;
+  const fallbackStartedRef = React.useRef(false);
+  const unavailable = Boolean(
+    !accessLoading &&
+      eventId &&
+      accountAccess &&
+      !accountAccess.events.some((event) => event.id === eventId),
+  );
 
-  if (!eventId) return <Redirect href="/events" />;
+  React.useEffect(() => {
+    fallbackStartedRef.current = false;
+  }, [eventId]);
+
+  React.useEffect(() => {
+    if (!unavailable || fallbackStartedRef.current) return;
+    fallbackStartedRef.current = true;
+    reportUnavailableEventLink(Boolean(accountAccess?.events.length));
+    void focusDefaultHome().then((focusedEventId) => {
+      router.replace(
+        focusedEventId
+          ? (eventPath(focusedEventId, 'event') as never)
+          : '/event',
+      );
+    });
+  }, [
+    accountAccess?.events.length,
+    focusDefaultHome,
+    reportUnavailableEventLink,
+    router,
+    unavailable,
+  ]);
+
+  if (!eventId) return <Redirect href="/event" />;
   if (!view || !isEventScreenName(view)) {
     return <Redirect href={eventPath(eventId, 'event') as never} />;
   }
   if (!accessLoading && !accountAccess) {
-    return <Redirect href="/events" />;
+    return <Redirect href="/event" />;
   }
-  if (
-    !accessLoading &&
-    accountAccess &&
-    !accountAccess.events.some((event) => event.id === eventId)
-  ) {
-    return <Redirect href="/events" />;
-  }
-  if (accessLoading || eventLoading || activeEventId !== eventId) {
+  if (unavailable || accessLoading || eventLoading || activeEventId !== eventId) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator color={colors.highlight} />

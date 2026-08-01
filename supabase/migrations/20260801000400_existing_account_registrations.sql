@@ -1,0 +1,178 @@
+-- Let event admins add an existing Blurry account to another event without
+-- exposing auth.users or creating a second account. Participants remain the
+-- event registration; profiles remain the account identity.
+
+create or replace function available_event_accounts(p_event_id uuid)
+returns table (
+  account_id   uuid,
+  display_name text,
+  username     text,
+  avatar_url   text,
+  handicap     numeric
+)
+language plpgsql
+stable
+security definer
+set search_path = public, auth
+as $$
+begin
+  if auth.uid() is null or not is_event_admin(p_event_id) then
+    raise exception 'Only an event admin can browse existing accounts'
+      using errcode = '42501';
+  end if;
+
+  return query
+    select
+      profile.id,
+      coalesce(
+        nullif(btrim(profile.display_name), ''),
+        latest_registration.full_name
+      ),
+      profile.username,
+      profile.avatar_url,
+      latest_registration.handicap
+    from profiles profile
+    join lateral (
+      select registration.full_name, registration.handicap
+      from participants registration
+      where registration.claimed_by = profile.id
+      order by registration.created_at desc, registration.id
+      limit 1
+    ) latest_registration on true
+    where not exists (
+      select 1
+      from participants target_registration
+      where target_registration.event_id = p_event_id
+        and target_registration.claimed_by = profile.id
+    )
+    order by
+      lower(coalesce(nullif(btrim(profile.display_name), ''), latest_registration.full_name)),
+      profile.id;
+end;
+$$;
+
+create or replace function add_existing_account_to_event(
+  p_event_id uuid,
+  p_account_id uuid
+)
+returns table (
+  id             uuid,
+  full_name      text,
+  handicap       numeric,
+  avatar_url     text,
+  is_admin       boolean,
+  invite_code    text,
+  auth_email     text,
+  claimed_by     uuid,
+  invite_sent_at timestamptz
+)
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+  account_email text;
+  account_name text;
+  account_avatar text;
+  source_registration participants;
+  matching_registration participants;
+  created_registration participants;
+begin
+  if auth.uid() is null or not is_event_admin(p_event_id) then
+    raise exception 'Only an event admin can add an existing account'
+      using errcode = '42501';
+  end if;
+
+  if exists (
+    select 1
+    from participants registration
+    where registration.event_id = p_event_id
+      and registration.claimed_by = p_account_id
+  ) then
+    raise exception 'That account is already on this event roster'
+      using errcode = '23505';
+  end if;
+
+  select registration.*
+  into source_registration
+  from participants registration
+  where registration.claimed_by = p_account_id
+  order by registration.created_at desc, registration.id
+  limit 1;
+
+  if source_registration.id is null then
+    raise exception 'That account is not linked to a Blurry player'
+      using errcode = '23503';
+  end if;
+
+  select
+    coalesce(nullif(lower(btrim(account.email)), ''), lower(source_registration.auth_email)),
+    coalesce(nullif(btrim(profile.display_name), ''), source_registration.full_name),
+    profile.avatar_url
+  into account_email, account_name, account_avatar
+  from profiles profile
+  join auth.users account on account.id = profile.id
+  where profile.id = p_account_id;
+
+  if account_email is null or account_name is null then
+    raise exception 'That account is missing its player profile'
+      using errcode = '23503';
+  end if;
+
+  -- A manual/CSV roster row may already carry this account's sign-in email.
+  -- Link that row in place so its admin flag, invite code, and roster edits are
+  -- preserved instead of creating a duplicate participant.
+  select registration.*
+  into matching_registration
+  from participants registration
+  where registration.event_id = p_event_id
+    and lower(registration.auth_email) = account_email
+  limit 1;
+
+  if matching_registration.id is not null then
+    if matching_registration.claimed_by is not null then
+      raise exception 'That sign-in belongs to another player on this event'
+        using errcode = '23505';
+    end if;
+
+    update participants registration
+    set claimed_by = p_account_id
+    where registration.id = matching_registration.id
+    returning registration.* into created_registration;
+  else
+    insert into participants (
+      event_id,
+      full_name,
+      auth_email,
+      handicap,
+      is_admin,
+      claimed_by
+    ) values (
+      p_event_id,
+      account_name,
+      account_email,
+      source_registration.handicap,
+      false,
+      p_account_id
+    )
+    returning participants.* into created_registration;
+  end if;
+
+  return query
+    select
+      created_registration.id,
+      created_registration.full_name,
+      created_registration.handicap,
+      account_avatar,
+      created_registration.is_admin,
+      created_registration.invite_code,
+      created_registration.auth_email,
+      created_registration.claimed_by,
+      created_registration.invite_sent_at;
+end;
+$$;
+
+revoke all on function available_event_accounts(uuid) from public, anon;
+revoke all on function add_existing_account_to_event(uuid, uuid) from public, anon;
+grant execute on function available_event_accounts(uuid) to authenticated;
+grant execute on function add_existing_account_to_event(uuid, uuid) to authenticated;

@@ -41,7 +41,9 @@ function AppNavigator() {
     const screen = legacyEventScreen(pathname);
     if (!screen || accessLoading) return;
     if (!activeEventId) {
-      router.replace('/events');
+      // /event is also the signed-in zero-event Home. Other legacy screens
+      // cannot render safely until an event has been focused.
+      if (screen !== 'event') router.replace('/event');
       return;
     }
     const currentParams = JSON.parse(paramsKey) as Record<
