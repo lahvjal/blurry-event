@@ -19,8 +19,8 @@ import { PushToggleRow } from '@/components/push-controls';
 import { Badge, InfoRow, Noise, SectionLabel } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
 import { clearBadge } from '@/lib/badge';
+import { signOutAndClearOfflineAccess } from '@/lib/auth';
 import { clearPushForSignOut } from '@/lib/push';
-import { supabase } from '@/lib/supabase';
 import { useEvent } from '@/state/event';
 import { GAME_STYLE_LABELS } from '@/state/types';
 
@@ -205,7 +205,7 @@ export default function Profile() {
             // their unread count sitting on the icon.
             await clearPushForSignOut();
             await clearBadge();
-            await supabase.auth.signOut();
+            await signOutAndClearOfflineAccess();
             router.replace('/');
           }}>
           <Text style={styles.signOutText}>SIGN OUT</Text>

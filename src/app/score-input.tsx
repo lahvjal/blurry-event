@@ -1,8 +1,8 @@
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FloatingNav } from '@/components/floating-nav';
@@ -16,12 +16,20 @@ const teeIcon = require('@/assets/figma/tee-icon.svg');
 
 export default function ScoreInput() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ hole?: string | string[] }>();
   const insets = useSafeAreaInsets();
   const { event, myScores, currentHoleIndex, setScore } = useEvent();
-  const currentHole = currentHoleIndex;
+  const rawHole = Array.isArray(params.hole) ? params.hole[0] : params.hole;
+  const requestedHole = rawHole ? Number(rawHole) - 1 : Number.NaN;
+  const currentHole =
+    Number.isInteger(requestedHole) && requestedHole >= 0 && requestedHole < 18
+      ? requestedHole
+      : currentHoleIndex;
   const hole = event.holes[currentHole];
   const par = hole.par;
-  const [value, setValue] = useState(par);
+  const [value, setValue] = useState(myScores[currentHole] ?? par);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const toPar = value - par;
   const toParLabel = toPar === 0 ? 'E' : toPar > 0 ? `+${toPar}` : `${toPar}`;
@@ -32,15 +40,27 @@ export default function ScoreInput() {
   const CTA_HEIGHT = 102;
   const aboveNav = Math.max(20, insets.bottom + 12) + 72 + 10;
 
-  const save = () => {
+  const save = async () => {
+    if (saving) return;
     const finishesRound =
       myScores[currentHole] === null &&
       myScores.filter((score) => score === null).length === 1;
-    setScore(currentHole, value);
-    if (finishesRound) {
-      router.replace('/complete-round');
-    } else {
-      router.back();
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await setScore(currentHole, value);
+      if (finishesRound) {
+        router.replace('/complete-round');
+      } else {
+        router.back();
+      }
+    } catch (error) {
+      const message =
+        (error as { message?: string }).message ??
+        'This score could not be saved on your device. Try again.';
+      setSaveError(message);
+      Alert.alert("Score wasn't saved", message);
+      setSaving(false);
     }
   };
 
@@ -103,7 +123,7 @@ export default function ScoreInput() {
             anywhere; the label and to-par float over it and stay out of the
             way of the gesture. */}
         <View style={styles.picker}>
-          <ScoreDial initial={par} onChange={setValue} />
+          <ScoreDial initial={myScores[currentHole] ?? par} onChange={setValue} />
           <View style={styles.sideLabelBox} pointerEvents="none">
             <Text style={styles.sideLabel}>score</Text>
           </View>
@@ -120,9 +140,31 @@ export default function ScoreInput() {
           toward the bottom edge, and the one button that commits a score has
           no business being blurred — painting it later keeps it crisp. It sits
           clear of the bar, so nothing is covered. */}
-      <Pressable onPress={save} style={[styles.ctaFixed, { bottom: aboveNav }]}>
+      {saveError ? (
+        <Text
+          style={[
+            styles.saveError,
+            { bottom: aboveNav + CTA_HEIGHT + 8 },
+          ]}>
+          {saveError}
+        </Text>
+      ) : null}
+      <Pressable
+        disabled={saving}
+        onPress={() => void save()}
+        style={[
+          styles.ctaFixed,
+          { bottom: aboveNav },
+          saving && styles.ctaDisabled,
+        ]}>
         <GradientPanel colors={colors.gradCta} style={styles.cta}>
-          <Text style={styles.ctaText}>save score</Text>
+          <Text style={styles.ctaText}>
+            {saving
+              ? 'saving on device…'
+              : myScores[currentHole] === null
+                ? 'save score'
+                : 'save correction'}
+          </Text>
           <Chevron />
         </GradientPanel>
       </Pressable>
@@ -229,6 +271,9 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
   },
+  ctaDisabled: {
+    opacity: 0.7,
+  },
   cta: {
     height: 102,
     flexDirection: 'row',
@@ -241,5 +286,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#ffffff',
     textTransform: 'uppercase',
+  },
+  saveError: {
+    position: 'absolute',
+    left: 24,
+    right: 24,
+    zIndex: 3,
+    color: '#ffcf8b',
+    fontFamily: fonts.bold,
+    fontSize: 11,
+    textAlign: 'center',
   },
 });

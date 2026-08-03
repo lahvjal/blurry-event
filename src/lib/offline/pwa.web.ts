@@ -1,3 +1,15 @@
+import {
+  INITIAL_PWA_PREPARE_PROGRESS,
+  PwaPrepareListener,
+  PwaPrepareProgress,
+} from '@/lib/offline/pwa-contract';
+
+export type {
+  PwaPrepareListener,
+  PwaPreparePhase,
+  PwaPrepareProgress,
+} from '@/lib/offline/pwa-contract';
+
 /**
  * Browser-side PWA wiring.
  *
@@ -10,6 +22,130 @@
 
 const VIEWPORT_CONTENT =
   'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=overlays-content';
+
+type StandaloneNavigator = Navigator & { standalone?: boolean };
+
+/**
+ * Chromium and modern Safari expose display-mode; iOS Home Screen apps have
+ * historically exposed navigator.standalone instead. Both are required so an
+ * authenticated browser tab can be held at installation guidance while the
+ * installed app is allowed into event operations.
+ */
+export function isStandalonePwa(): boolean {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+    return false;
+  }
+  return (
+    window.matchMedia('(display-mode: standalone)').matches ||
+    (navigator as StandaloneNavigator).standalone === true
+  );
+}
+
+export function subscribePwaDisplayMode(listener: () => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+  const media = window.matchMedia('(display-mode: standalone)');
+  const notify = () => listener();
+  media.addEventListener?.('change', notify);
+  window.addEventListener('pageshow', notify);
+  return () => {
+    media.removeEventListener?.('change', notify);
+    window.removeEventListener('pageshow', notify);
+  };
+}
+
+let latestPrepareProgress: PwaPrepareProgress = {
+  ...INITIAL_PWA_PREPARE_PROGRESS,
+};
+const prepareListeners = new Set<PwaPrepareListener>();
+let workerMessageBridgeInstalled = false;
+let preparePromise: Promise<PwaPrepareProgress> | null = null;
+
+type WorkerPrepareMessage = {
+  type?: string;
+  completed?: number;
+  total?: number;
+  completedBytes?: number;
+  totalBytes?: number;
+  fingerprint?: string;
+  url?: string | null;
+  error?: string;
+  expectedFingerprint?: string;
+};
+
+function emitPrepareProgress(progress: PwaPrepareProgress) {
+  latestPrepareProgress = progress;
+  prepareListeners.forEach((listener) => listener(progress));
+}
+
+function progressFromWorker(message: WorkerPrepareMessage): PwaPrepareProgress | null {
+  const common = {
+    completed: message.completed ?? latestPrepareProgress.completed,
+    total: message.total ?? latestPrepareProgress.total,
+    completedBytes:
+      message.completedBytes ?? latestPrepareProgress.completedBytes,
+    totalBytes: message.totalBytes ?? latestPrepareProgress.totalBytes,
+    fingerprint: message.fingerprint ?? latestPrepareProgress.fingerprint,
+    url: message.url ?? null,
+  };
+
+  if (message.type === 'BLURRY_PREPARE_PROGRESS') {
+    return { ...common, phase: 'downloading', error: null };
+  }
+  if (message.type === 'BLURRY_PREPARE_COMPLETE') {
+    return { ...common, phase: 'ready', error: null };
+  }
+  if (message.type === 'BLURRY_PREPARE_ERROR') {
+    return {
+      ...common,
+      phase: 'error',
+      error: message.error ?? 'The offline app download did not finish.',
+    };
+  }
+  if (message.type === 'BLURRY_PREPARE_VERSION_MISMATCH') {
+    return {
+      ...common,
+      phase: 'error',
+      error:
+        message.error ??
+        'The installed app is still activating its latest offline files.',
+    };
+  }
+  return null;
+}
+
+function expectedBuildFingerprint(): string | null {
+  if (typeof document === 'undefined') return null;
+  return (
+    document
+      .querySelector('meta[name="blurry-build-id"]')
+      ?.getAttribute('content') ?? null
+  );
+}
+
+function ensureWorkerMessageBridge() {
+  if (
+    workerMessageBridgeInstalled ||
+    typeof navigator === 'undefined' ||
+    !('serviceWorker' in navigator)
+  ) {
+    return;
+  }
+  workerMessageBridgeInstalled = true;
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    const progress = progressFromWorker(event.data as WorkerPrepareMessage);
+    if (progress) emitPrepareProgress(progress);
+  });
+}
+
+/** Receive exact file and byte counts from the service worker cache pass. */
+export function subscribePwaPrepareProgress(
+  listener: PwaPrepareListener,
+): () => void {
+  ensureWorkerMessageBridge();
+  prepareListeners.add(listener);
+  listener(latestPrepareProgress);
+  return () => prepareListeners.delete(listener);
+}
 
 /**
  * `viewport-fit=cover` is what makes `env(safe-area-inset-*)` resolve to
@@ -315,8 +451,16 @@ export function setupPwa(): void {
   ensureManifestLink();
   ensureThemeColor();
   ensureBaseStyle();
+  ensureWorkerMessageBridge();
 
-  if (!('serviceWorker' in navigator)) return;
+  if (!('serviceWorker' in navigator)) {
+    emitPrepareProgress({
+      ...INITIAL_PWA_PREPARE_PROGRESS,
+      phase: 'error',
+      error: 'This browser does not support offline app storage.',
+    });
+    return;
+  }
 
   // When a production update replaces an existing worker, reload exactly
   // once so an already-open iOS Safari tab cannot keep running a stale bundle
@@ -330,12 +474,142 @@ export function setupPwa(): void {
   });
 
   const register = () => {
+    if (latestPrepareProgress.phase === 'idle') {
+      emitPrepareProgress({
+        ...latestPrepareProgress,
+        phase: 'registering',
+        error: null,
+      });
+    }
     navigator.serviceWorker
       .register('/sw.js', { updateViaCache: 'none' })
       .then((registration) => registration.update())
-      .catch(() => {});
+      .catch((caught: unknown) => {
+        emitPrepareProgress({
+          ...latestPrepareProgress,
+          phase: 'error',
+          error:
+            caught instanceof Error
+              ? caught.message
+              : 'The offline worker could not be started.',
+        });
+      });
   };
 
   if (document.readyState === 'complete') register();
   else window.addEventListener('load', register, { once: true });
+}
+
+/**
+ * Ask the active worker to verify/download its exact generated asset manifest.
+ * A single in-flight promise is shared by callers so root setup and a visible
+ * progress screen cannot start competing cache passes.
+ */
+export function preparePwaShell(): Promise<PwaPrepareProgress> {
+  if (preparePromise) return preparePromise;
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
+    const error = new Error('This browser does not support offline app storage.');
+    emitPrepareProgress({
+      ...INITIAL_PWA_PREPARE_PROGRESS,
+      phase: 'error',
+      error: error.message,
+    });
+    return Promise.reject(error);
+  }
+
+  const expectedFingerprint = expectedBuildFingerprint();
+  if (
+    latestPrepareProgress.phase === 'ready' &&
+    (!expectedFingerprint ||
+      latestPrepareProgress.fingerprint === expectedFingerprint)
+  ) {
+    return Promise.resolve(latestPrepareProgress);
+  }
+  if (latestPrepareProgress.phase === 'error') {
+    emitPrepareProgress({
+      ...latestPrepareProgress,
+      phase: 'registering',
+      error: null,
+    });
+  }
+
+  setupPwa();
+  preparePromise = new Promise<PwaPrepareProgress>((resolve, reject) => {
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    let unsubscribe = () => {};
+    let settled = false;
+    const handleProgress = (progress: PwaPrepareProgress) => {
+      if (settled) return;
+      if (
+        expectedFingerprint &&
+        progress.fingerprint &&
+        progress.fingerprint !== expectedFingerprint
+      ) {
+        return;
+      }
+      if (
+        progress.phase === 'ready' &&
+        (!expectedFingerprint || progress.fingerprint === expectedFingerprint)
+      ) {
+        settled = true;
+        if (timeout) clearTimeout(timeout);
+        unsubscribe();
+        resolve(progress);
+      } else if (progress.phase === 'error') {
+        settled = true;
+        if (timeout) clearTimeout(timeout);
+        unsubscribe();
+        reject(new Error(progress.error ?? 'The offline app download failed.'));
+      }
+    };
+
+    timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      unsubscribe();
+      const progress: PwaPrepareProgress = {
+        ...latestPrepareProgress,
+        phase: 'error',
+        error: 'The offline app download timed out. Keep the app open and try again.',
+      };
+      emitPrepareProgress(progress);
+      reject(new Error(progress.error ?? 'The offline app download timed out.'));
+    }, 120_000);
+
+    unsubscribe = subscribePwaPrepareProgress(handleProgress);
+    if (settled) unsubscribe();
+
+    navigator.serviceWorker.ready
+      .then((registration) => {
+        if (settled) return;
+        const worker = navigator.serviceWorker.controller ?? registration.active;
+        if (!worker) {
+          throw new Error('The offline worker is not active yet.');
+        }
+        worker.postMessage({
+          type: 'BLURRY_PREPARE_CACHE',
+          expectedFingerprint,
+        });
+      })
+      .catch((caught: unknown) => {
+        if (settled) return;
+        settled = true;
+        if (timeout) clearTimeout(timeout);
+        unsubscribe();
+        const error =
+          caught instanceof Error
+            ? caught
+            : new Error('The offline worker could not be reached.');
+        emitPrepareProgress({
+          ...latestPrepareProgress,
+          phase: 'error',
+          error: error.message,
+        });
+        reject(error);
+      });
+  }).finally(() => {
+    preparePromise = null;
+  });
+
+  return preparePromise;
 }

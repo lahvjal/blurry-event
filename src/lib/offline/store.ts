@@ -5,6 +5,7 @@ import {
   MutationStore,
   QueuedMutation,
 } from '@/lib/offline/types';
+import { isExactRevision } from '@/lib/offline/score-revisions';
 
 /**
  * Native backing. Metro resolves store.web.ts on web, so this file is the
@@ -22,6 +23,7 @@ const CACHE_PREFIX = 'blurry.offline.cache.';
 const OUTSTANDING: QueuedMutation['syncStatus'][] = ['pending', 'syncing', 'failed'];
 
 let cached: QueuedMutation[] | null = null;
+let writeChain: Promise<void> = Promise.resolve();
 
 async function readAll(): Promise<QueuedMutation[]> {
   if (cached) return cached;
@@ -35,11 +37,23 @@ async function readAll(): Promise<QueuedMutation[]> {
 }
 
 async function writeAll(rows: QueuedMutation[]): Promise<void> {
-  cached = rows;
   await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(rows));
+  cached = rows;
+}
+
+function serializeWrite<T>(operation: () => Promise<T>): Promise<T> {
+  const result = writeChain.then(operation, operation);
+  writeChain = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
 }
 
 export const mutationStore: MutationStore = {
+  async all() {
+    return [...(await readAll())];
+  },
   async outstanding() {
     const rows = await readAll();
     return rows
@@ -49,27 +63,31 @@ export const mutationStore: MutationStore = {
   async get(id) {
     return (await readAll()).find((r) => r.id === id);
   },
-  async findByDedupeKey(key) {
-    return (await readAll()).find(
-      (r) => r.dedupeKey === key && OUTSTANDING.includes(r.syncStatus),
-    );
-  },
   async put(mutation) {
-    const rows = await readAll();
-    const index = rows.findIndex((r) => r.id === mutation.id);
-    const next = [...rows];
-    if (index === -1) next.push(mutation);
-    else next[index] = mutation;
-    await writeAll(next);
+    await serializeWrite(async () => {
+      const rows = await readAll();
+      const index = rows.findIndex((r) => r.id === mutation.id);
+      const next = [...rows];
+      if (index === -1) next.push(mutation);
+      else next[index] = mutation;
+      await writeAll(next);
+    });
   },
-  async remove(id) {
-    await writeAll((await readAll()).filter((r) => r.id !== id));
+  async remove(id, generation) {
+    return serializeWrite(async () => {
+      const rows = await readAll();
+      const index = rows.findIndex((row) => row.id === id);
+      if (index === -1) return false;
+      if (!isExactRevision(rows[index], id, generation)) return false;
+      await writeAll(rows.filter((_, rowIndex) => rowIndex !== index));
+      return true;
+    });
   },
   async count() {
     return (await mutationStore.outstanding()).length;
   },
   async clear() {
-    await writeAll([]);
+    await serializeWrite(() => writeAll([]));
   },
 };
 

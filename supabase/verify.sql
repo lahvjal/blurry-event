@@ -225,6 +225,31 @@ select * from (values
      'anon', 'public.open_direct_conversation(uuid, uuid)', 'execute'
    )),
 
+  ('offline scores carry idempotent revision metadata',
+   exists (select 1 from col where table_name='scores'
+     and column_name='client_version')
+   and exists (select 1 from col where table_name='scores'
+     and column_name='last_mutation_id')
+   and exists (
+     select 1 from pg_indexes
+     where schemaname='public' and tablename='scores'
+       and indexname='scores_last_mutation_id_uniq'
+   )),
+
+  ('offline score RPC is exact-event and authenticated only',
+   exists (
+     select 1
+     from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+     where n.nspname='public' and p.proname='submit_offline_score'
+       and pg_get_function_identity_arguments(p.oid) =
+         'p_event_id uuid, p_team_id uuid, p_participant_id uuid, p_hole integer, p_strokes integer, p_entered_by uuid, p_client_updated_at timestamp with time zone, p_client_version bigint, p_mutation_id uuid'
+   )
+   and not has_function_privilege(
+     'anon',
+     'public.submit_offline_score(uuid,uuid,uuid,integer,integer,uuid,timestamptz,bigint,uuid)',
+     'execute'
+   )),
+
   ('RLS   enabled on every public table',
    not exists (select 1 from pg_tables
      where schemaname='public' and rowsecurity = false)),

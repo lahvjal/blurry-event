@@ -12,8 +12,14 @@ export function useSyncStatus(): SyncStatus {
 }
 
 function describe(status: SyncStatus): string {
-  const { connection, pending } = status;
-  const waiting = `${pending} ${pending === 1 ? 'score' : 'scores'} waiting to sync`;
+  const { connection, failed, pending } = status;
+  const waiting = `${pending} ${pending === 1 ? 'change' : 'changes'} waiting to sync`;
+
+  if (failed > 0) {
+    return pending > 0
+      ? `${failed} ${failed === 1 ? 'change needs' : 'changes need'} attention · ${waiting}`
+      : `${failed} saved ${failed === 1 ? 'change needs' : 'changes need'} attention`;
+  }
 
   switch (connection) {
     case 'syncing':
@@ -42,7 +48,8 @@ export function SyncStatusLine({ compact = false }: { compact?: boolean }) {
   if (connection === 'online' && pending === 0) return null;
 
   const attention = connection === 'error';
-  const canRetry = pending > 0 && connection !== 'syncing';
+  const canRetry =
+    (pending > 0 || status.failed > 0) && connection !== 'syncing';
 
   return (
     <View style={[styles.row, compact && styles.rowCompact]}>
@@ -75,8 +82,15 @@ export function SyncStatusLine({ compact = false }: { compact?: boolean }) {
  * the honest guarantee while there's no signal.
  */
 export function SavedLocallyNote() {
-  const { connection, pending } = useSyncStatus();
-  if (pending === 0) return null;
+  const { connection, focusedFailed, focusedPending } = useSyncStatus();
+  if (focusedPending === 0) return null;
+  if (focusedFailed > 0) {
+    return (
+      <Text style={styles.note}>
+        Saved on this device — tap Sync Now when your connection is usable.
+      </Text>
+    );
+  }
   const offline = connection === 'offline' || connection === 'error';
   return (
     <Text style={styles.note}>

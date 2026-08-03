@@ -26,6 +26,8 @@ export type MutationPayload =
       enteredBy: string | null;
       /** When the device recorded it — the tiebreaker for last-write-wins. */
       clientUpdatedAt: string;
+      /** Monotonic on this JS runtime; breaks same-timestamp edit ties. */
+      clientVersion: number;
     }
   | {
       kind: 'message';
@@ -58,10 +60,16 @@ export type QueuedMutation = {
   eventId: string;
   /**
    * Identifies the thing being written, not the write itself. Two edits to the
-   * same hole share a dedupeKey so the later one replaces the earlier, instead
-   * of both being sent and the older one landing last.
+   * same hole share a key but remain immutable revisions. That lets the server
+   * order them while an old in-flight acknowledgement targets only its row.
    */
   dedupeKey: string;
+  /**
+   * Immutable revision for this logical write. Score corrections create a new
+   * row instead of replacing an in-flight row, so acknowledging an old send
+   * can never delete a newer edit.
+   */
+  generation: number;
   payload: MutationPayload;
   syncStatus: SyncState;
   attemptCount: number;
@@ -71,12 +79,14 @@ export type QueuedMutation = {
 };
 
 export interface MutationStore {
+  /** All rows, including short-lived server-confirmed score overlays. */
+  all(): Promise<QueuedMutation[]>;
   /** Everything not yet confirmed by the server, oldest first. */
   outstanding(): Promise<QueuedMutation[]>;
   get(id: string): Promise<QueuedMutation | undefined>;
-  findByDedupeKey(key: string): Promise<QueuedMutation | undefined>;
   put(mutation: QueuedMutation): Promise<void>;
-  remove(id: string): Promise<void>;
+  /** Delete only when both the id and immutable generation still match. */
+  remove(id: string, generation?: number): Promise<boolean>;
   count(): Promise<number>;
   clear(): Promise<void>;
 }

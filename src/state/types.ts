@@ -351,6 +351,9 @@ export type ScoreUpdate = {
   strokes: number;
   updatedAt: string;
   enteredBy: string | null;
+  /** Offline mutation metadata, absent on scores written before the rollout. */
+  clientVersion?: number;
+  mutationId?: string | null;
 };
 
 export type Round = {

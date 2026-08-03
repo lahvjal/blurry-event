@@ -5,6 +5,7 @@ import {
   MutationStore,
   QueuedMutation,
 } from '@/lib/offline/types';
+import { isExactRevision } from '@/lib/offline/score-revisions';
 
 /**
  * IndexedDB backing for the PWA.
@@ -28,6 +29,13 @@ class BlurryOfflineDb extends Dexie {
       mutations: 'id, dedupeKey, syncStatus, createdAt',
       cache: 'key',
     });
+    this.version(2).stores({
+      // Compound scope index makes account-wide event draining and score
+      // replay independent of whichever event happens to be on screen.
+      mutations:
+        'id, dedupeKey, [dedupeKey+generation], [userId+eventId], syncStatus, createdAt',
+      cache: 'key',
+    });
   }
 }
 
@@ -37,6 +45,9 @@ const db = new BlurryOfflineDb();
 const OUTSTANDING: QueuedMutation['syncStatus'][] = ['pending', 'syncing', 'failed'];
 
 export const mutationStore: MutationStore = {
+  async all() {
+    return db.mutations.toArray();
+  },
   async outstanding() {
     const rows = await db.mutations
       .where('syncStatus')
@@ -47,15 +58,17 @@ export const mutationStore: MutationStore = {
   async get(id) {
     return db.mutations.get(id);
   },
-  async findByDedupeKey(key) {
-    const rows = await db.mutations.where('dedupeKey').equals(key).toArray();
-    return rows.find((r) => OUTSTANDING.includes(r.syncStatus));
-  },
   async put(mutation) {
     await db.mutations.put(mutation);
   },
-  async remove(id) {
-    await db.mutations.delete(id);
+  async remove(id, generation) {
+    return db.transaction('rw', db.mutations, async () => {
+      const current = await db.mutations.get(id);
+      if (!current) return false;
+      if (!isExactRevision(current, id, generation)) return false;
+      await db.mutations.delete(id);
+      return true;
+    });
   },
   async count() {
     return db.mutations.where('syncStatus').anyOf(OUTSTANDING).count();

@@ -247,6 +247,11 @@ export async function fetchEventBundle(eventId: string): Promise<EventBundle> {
         strokes: score.strokes,
         updatedAt: score.client_updated_at,
         enteredBy: score.entered_by ?? null,
+        clientVersion:
+          score.client_version === null || score.client_version === undefined
+            ? undefined
+            : Number(score.client_version),
+        mutationId: score.last_mutation_id ?? null,
       };
     })
     .filter((score): score is ScoreUpdate => score !== null)

@@ -4,6 +4,7 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FloatingNav } from '@/components/floating-nav';
+import { SavedLocallyNote, SyncStatusLine } from '@/components/sync-status';
 import { Noise } from '@/components/ui';
 import { fonts } from '@/constants/theme';
 import { useEvent } from '@/state/event';
@@ -47,7 +48,11 @@ export default function CompleteRound() {
           <View style={styles.metaRow}>
             <Text style={styles.metaText}>18 holes</Text>
             <View style={styles.dot} />
-            <Text style={styles.metaText}>sleepy ridge gc</Text>
+            <Text style={styles.metaText}>{event.courseName}</Text>
+          </View>
+          <View style={styles.syncStatus}>
+            <SyncStatusLine compact />
+            <SavedLocallyNote />
           </View>
         </View>
       </View>
@@ -165,5 +170,8 @@ const styles = StyleSheet.create({
     height: 2,
     borderRadius: 1,
     backgroundColor: 'rgba(255,255,255,0.5)',
+  },
+  syncStatus: {
+    minWidth: 280,
   },
 });

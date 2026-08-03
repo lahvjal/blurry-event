@@ -8,8 +8,15 @@
  *
  * Run automatically by `npm run build:web`.
  */
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { createHash } from 'node:crypto';
+import { join, relative, sep } from 'node:path';
 
 const dist = join(process.cwd(), 'dist');
 const indexPath = join(dist, 'index.html');
@@ -21,6 +28,7 @@ if (!existsSync(indexPath)) {
 
 const HEAD = `
     <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=overlays-content" />
+    <meta name="blurry-build-id" content="0000000000000000" />
     <meta name="description" content="Scorecard, leaderboard and messaging for the Blurry Invitational. Works without a signal." />
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#131715" />
@@ -191,23 +199,90 @@ const HEAD = `
 
 let html = readFileSync(indexPath, 'utf8');
 
-if (html.includes('manifest.webmanifest')) {
-  console.log('inject-pwa: already injected, skipping.');
-  process.exit(0);
+if (!html.includes('manifest.webmanifest')) {
+  // Expo's template ships a default viewport; ours adds viewport-fit=cover for
+  // the notch, so the original is dropped rather than duplicated.
+  html = html.replace(
+    /\n\s*<meta name="viewport"[^>]*\/>/,
+    '',
+  );
+
+  html = html.replace('<title>', `${HEAD}    <title>`);
+  html = html.replace(
+    /<title>[^<]*<\/title>/,
+    '<title>Blurry Invitational</title>',
+  );
+
+  writeFileSync(indexPath, html);
+  console.log('inject-pwa: PWA metadata written to dist/index.html');
 }
 
-// Expo's template ships a default viewport; ours adds viewport-fit=cover for
-// the notch, so the original is dropped rather than duplicated.
-html = html.replace(
-  /\n\s*<meta name="viewport"[^>]*\/>/,
-  '',
+const swPath = join(dist, 'sw.js');
+if (!existsSync(swPath)) {
+  console.error('inject-pwa: dist/sw.js not found — public/sw.js was not exported.');
+  process.exit(1);
+}
+
+function allFiles(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    return entry.isDirectory() ? allFiles(path) : [path];
+  });
+}
+
+const exportedFiles = allFiles(dist)
+  .filter((path) => path !== swPath && !path.endsWith('.map'))
+  .sort((left, right) => left.localeCompare(right));
+const hash = createHash('sha256');
+const swTemplate = readFileSync(swPath, 'utf8');
+hash.update(swTemplate);
+
+const entries = exportedFiles.map((path) => {
+  const relativePath = relative(dist, path).split(sep).join('/');
+  const contents = readFileSync(path);
+  hash.update(relativePath);
+  hash.update(contents);
+  return {
+    url: `/${relativePath}`,
+    size: statSync(path).size,
+  };
+});
+
+// Cache the SPA shell under both addresses. The root alias contributes no
+// duplicate byte count because it resolves to the exact index response.
+if (!entries.some((entry) => entry.url === '/index.html')) {
+  console.error('inject-pwa: generated cache manifest has no /index.html.');
+  process.exit(1);
+}
+entries.unshift({ url: '/', size: 0 });
+
+const fingerprint = hash.digest('hex').slice(0, 16);
+const manifest = { fingerprint, entries };
+
+// The page and worker use the same build fingerprint so preparation cannot
+// accept a completion broadcast from a previous service-worker version. The
+// placeholder and digest are both 16 bytes, keeping the precache size exact.
+const builtHtml = readFileSync(indexPath, 'utf8');
+if (!builtHtml.includes('content="0000000000000000"')) {
+  console.error('inject-pwa: build fingerprint placeholder is missing.');
+  process.exit(1);
+}
+writeFileSync(
+  indexPath,
+  builtHtml.replace('content="0000000000000000"', `content="${fingerprint}"`),
 );
 
-html = html.replace('<title>', `${HEAD}    <title>`);
-html = html.replace(
-  /<title>[^<]*<\/title>/,
-  '<title>Blurry Invitational</title>',
-);
+const marker = '/*__BLURRY_PRECACHE_MANIFEST__*/ null';
+if (!swTemplate.includes(marker)) {
+  if (/const INJECTED_PRECACHE = \{"fingerprint":"[a-f0-9]+"/.test(swTemplate)) {
+    console.log('inject-pwa: offline shell manifest is already embedded.');
+    process.exit(0);
+  }
+  console.error('inject-pwa: service worker precache marker is missing.');
+  process.exit(1);
+}
 
-writeFileSync(indexPath, html);
-console.log('inject-pwa: PWA metadata written to dist/index.html');
+writeFileSync(swPath, swTemplate.replace(marker, JSON.stringify(manifest)));
+console.log(
+  `inject-pwa: ${entries.length} offline shell URLs embedded (${fingerprint}).`,
+);

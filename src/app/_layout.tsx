@@ -8,18 +8,27 @@ import {
 import { useFonts } from 'expo-font';
 import { Stack, useGlobalSearchParams, usePathname, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
 import { PullToRefreshProvider } from '@/components/pull-to-refresh';
+import { PwaAccessGate } from '@/components/pwa-access-gate';
 import { colors } from '@/constants/theme';
-import { setupPwa } from '@/lib/offline/pwa';
+import {
+  isStandalonePwa,
+  setupPwa,
+  subscribePwaDisplayMode,
+} from '@/lib/offline/pwa';
 import { syncPush } from '@/lib/push';
 import { eventPath, legacyEventScreen } from '@/lib/routes';
 import { startSync } from '@/lib/sync';
 import { EventProvider, useEvent } from '@/state/event';
+import {
+  OfflinePreparationGate,
+  OfflinePreparationProvider,
+} from '@/state/offline-preparation';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -87,6 +96,43 @@ function AppNavigator() {
   );
 }
 
+function OperationalApp({ enabled }: { enabled: boolean }) {
+  // Browser tabs are intentionally limited to authentication and installation
+  // guidance. Queue draining and push registration start only inside an
+  // installed PWA (or a native build, where isStandalonePwa() is always true).
+  useEffect(() => {
+    if (!enabled) return;
+    return startSync();
+  }, [enabled]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    void syncPush();
+  }, [enabled]);
+
+  return (
+    <EventProvider>
+      <StatusBar style="light" />
+      <AppNavigator />
+    </EventProvider>
+  );
+}
+
+function AuthenticationApp() {
+  return (
+    <>
+      <StatusBar style="light" />
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: colors.bg },
+          animation: 'fade',
+        }}
+      />
+    </>
+  );
+}
+
 export default function RootLayout() {
   const [loaded] = useFonts({
     InstrumentSerif_400Regular,
@@ -95,6 +141,7 @@ export default function RootLayout() {
     Inter_600SemiBold,
     Inter_700Bold,
   });
+  const [standalone, setStandalone] = useState(() => isStandalonePwa());
 
   useEffect(() => {
     if (loaded) {
@@ -102,15 +149,14 @@ export default function RootLayout() {
     }
   }, [loaded]);
 
-  // Drains anything typed while the phone had no signal, and keeps watching
-  // connectivity for the rest of the session.
-  useEffect(() => startSync(), []);
   useEffect(() => setupPwa(), []);
-  // Push endpoints rotate without warning and a stale one fails silently, so
-  // an already-granted device re-asserts its current endpoint on every launch.
-  useEffect(() => {
-    void syncPush();
-  }, []);
+  useEffect(
+    () =>
+      subscribePwaDisplayMode(() => {
+        setStandalone(isStandalonePwa());
+      }),
+    [],
+  );
 
   if (!loaded) {
     return null;
@@ -118,10 +164,19 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
-      <EventProvider>
-        <StatusBar style="light" />
-        <AppNavigator />
-      </EventProvider>
+      {standalone ? (
+        <OfflinePreparationProvider enabled>
+          <PwaAccessGate>
+            <OfflinePreparationGate>
+              <OperationalApp enabled />
+            </OfflinePreparationGate>
+          </PwaAccessGate>
+        </OfflinePreparationProvider>
+      ) : (
+        <PwaAccessGate>
+          <AuthenticationApp />
+        </PwaAccessGate>
+      )}
     </SafeAreaProvider>
   );
 }

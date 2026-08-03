@@ -1,12 +1,22 @@
 import type { EventBundle } from '@/lib/api';
 import { cacheStore } from '@/lib/offline/store';
 import type { EventSnapshot as LegacyEventSnapshot } from '@/lib/offline/snapshot';
+import type { OfflinePreparationManifest } from '@/lib/offline/preparation-manifest';
 import type { AccountEventAccess } from '@/state/types';
+
+export type {
+  OfflinePreparationManifest,
+  OfflinePreparationManifestStatus,
+  OfflinePreparedEvent,
+} from '@/lib/offline/preparation-manifest';
 
 const LEGACY_SNAPSHOT_KEY = 'eventSnapshot.v1';
 const EVENT_SNAPSHOT_PREFIX = 'eventSnapshot.v2';
 const LAST_EVENT_PREFIX = 'eventSnapshot.v2.last';
 const ACCOUNT_ACCESS_PREFIX = 'eventAccess.v1';
+const OFFLINE_PREPARATION_PREFIX = 'offlinePreparation.v1';
+const OFFLINE_PREPARATION_STAGING_PREFIX = 'offlinePreparation.staging.v1';
+const PREPARED_ACCOUNT_KEY = 'offlinePreparation.lastReadyAccount.v1';
 
 export type EventSnapshot = {
   savedAt: string;
@@ -25,6 +35,14 @@ function lastEventKey(userId: string): string {
 
 function accountAccessKey(userId: string): string {
   return `${ACCOUNT_ACCESS_PREFIX}:${encodeURIComponent(userId)}`;
+}
+
+function offlinePreparationKey(userId: string): string {
+  return `${OFFLINE_PREPARATION_PREFIX}:${encodeURIComponent(userId)}`;
+}
+
+function offlinePreparationStagingKey(userId: string): string {
+  return `${OFFLINE_PREPARATION_STAGING_PREFIX}:${encodeURIComponent(userId)}`;
 }
 
 function matchesScope(
@@ -158,4 +176,76 @@ export async function loadAccountEventAccess(
       lifecycleStatus: event.lifecycleStatus ?? 'published',
     })),
   };
+}
+
+export async function saveOfflinePreparationManifest(
+  manifest: OfflinePreparationManifest,
+): Promise<void> {
+  await cacheStore.set(offlinePreparationKey(manifest.accountId), manifest);
+}
+
+/**
+ * In-progress work is deliberately separate from the last ready receipt. A
+ * refresh may be interrupted at any point without invalidating files and data
+ * that were already verified for event-day use.
+ */
+export async function saveOfflinePreparationProgressManifest(
+  manifest: OfflinePreparationManifest,
+): Promise<void> {
+  await cacheStore.set(offlinePreparationStagingKey(manifest.accountId), manifest);
+}
+
+export async function loadOfflinePreparationProgressManifest(
+  userId: string,
+): Promise<OfflinePreparationManifest | null> {
+  const manifest = await cacheStore.get<OfflinePreparationManifest>(
+    offlinePreparationStagingKey(userId),
+  );
+  return manifest?.schemaVersion === 1 && manifest.accountId === userId
+    ? manifest
+    : null;
+}
+
+export async function clearOfflinePreparationProgressManifest(
+  userId: string,
+): Promise<void> {
+  await cacheStore.remove(offlinePreparationStagingKey(userId));
+}
+
+export async function loadOfflinePreparationManifest(
+  userId: string,
+): Promise<OfflinePreparationManifest | null> {
+  const manifest = await cacheStore.get<OfflinePreparationManifest>(
+    offlinePreparationKey(userId),
+  );
+  if (
+    !manifest ||
+    manifest.schemaVersion !== 1 ||
+    manifest.accountId !== userId ||
+    !Array.isArray(manifest.selectedEventIds) ||
+    !Array.isArray(manifest.completedEventIds)
+  ) {
+    return null;
+  }
+  return manifest;
+}
+
+export async function clearOfflinePreparationManifest(
+  userId: string,
+): Promise<void> {
+  await cacheStore.remove(offlinePreparationKey(userId));
+}
+
+/** Exact owner allowed to reopen a verified install when auth cannot refresh. */
+export async function savePreparedOfflineAccountId(userId: string): Promise<void> {
+  await cacheStore.set(PREPARED_ACCOUNT_KEY, userId);
+}
+
+export async function loadPreparedOfflineAccountId(): Promise<string | null> {
+  const userId = await cacheStore.get<string>(PREPARED_ACCOUNT_KEY);
+  return typeof userId === 'string' && userId.length > 0 ? userId : null;
+}
+
+export async function clearPreparedOfflineAccountId(): Promise<void> {
+  await cacheStore.remove(PREPARED_ACCOUNT_KEY);
 }

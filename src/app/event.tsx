@@ -33,9 +33,9 @@ import {
 } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
 import { clearBadge } from '@/lib/badge';
+import { signOutAndClearOfflineAccess } from '@/lib/auth';
 import { openTeamConversation } from '@/lib/chat';
 import { clearPushForSignOut } from '@/lib/push';
-import { supabase } from '@/lib/supabase';
 import { useEvent } from '@/state/event';
 import { useNotificationUnread } from '@/state/notification-center';
 import {
@@ -307,7 +307,7 @@ function HomeWithoutFocusedEvent({ unavailable = false }: { unavailable?: boolea
   const signOut = async () => {
     await clearPushForSignOut();
     await clearBadge();
-    await supabase.auth.signOut();
+    await signOutAndClearOfflineAccess();
     router.replace('/');
   };
 

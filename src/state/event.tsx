@@ -43,7 +43,13 @@ import {
   saveEventSnapshot,
 } from '@/lib/offline/event-snapshot';
 import { supabase } from '@/lib/supabase';
-import { enqueue, setSyncScope } from '@/lib/sync';
+import { useOfflinePreparation } from '@/state/offline-preparation';
+import {
+  enqueue,
+  loadScoreOverlays,
+  setSyncScope,
+  subscribeToScoreConflicts,
+} from '@/lib/sync';
 import { isSyntheticEmail, makeInviteCode, syntheticEmail } from '@/lib/invites';
 import {
   AccountEventAccess,
@@ -269,7 +275,8 @@ type EventState = {
   reportUnavailableEventLink: (hasAccessibleEvents: boolean) => void;
 
   // Player actions
-  setScore: (holeIndex: number, strokes: number) => void;
+  /** Resolves only after the score is durably saved on this device. */
+  setScore: (holeIndex: number, strokes: number) => Promise<void>;
   resetRound: () => void;
   inviteToTeam: (participantId: string) => void;
   updateMyProfile: (patch: Partial<Pick<Participant, 'fullName' | 'handicap' | 'avatarUrl'>>) => void;
@@ -356,6 +363,7 @@ function reasonFor(error: unknown): string {
 }
 
 export function EventProvider({ children }: { children: React.ReactNode }) {
+  const { accountId: preparedAccountId } = useOfflinePreparation();
   const routeParams = useGlobalSearchParams<{ eventId?: string | string[] }>();
   const requestedEventId = Array.isArray(routeParams.eventId)
     ? routeParams.eventId[0]
@@ -441,7 +449,45 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     setEventLoadError(null);
   }, []);
 
-  const applyBundle = useCallback((bundle: EventBundle) => {
+  const applyBundle = useCallback(async (
+    bundle: EventBundle,
+    userId: string,
+    authoritative: boolean,
+  ) => {
+    const roundsWithLocalScores = Object.fromEntries(
+      Object.entries(bundle.roundsByEntrant).map(([entrantId, scores]) => [
+        entrantId,
+        [...scores],
+      ]),
+    ) as Record<string, Scores>;
+    let scoreUpdatesWithLocal = [...(bundle.scoreUpdates ?? [])];
+    const overlays = await loadScoreOverlays({
+      userId,
+      eventId: bundle.event.id,
+      authoritativeScores: authoritative ? bundle.scoreUpdates : undefined,
+    });
+    for (const overlay of overlays) {
+      const scores = roundsWithLocalScores[overlay.entrantId]
+        ? [...roundsWithLocalScores[overlay.entrantId]]
+        : emptyScores();
+      scores[overlay.hole - 1] = overlay.strokes;
+      roundsWithLocalScores[overlay.entrantId] = scores;
+      scoreUpdatesWithLocal = [
+        {
+          entrantId: overlay.entrantId,
+          hole: overlay.hole,
+          strokes: overlay.strokes,
+          updatedAt: overlay.clientUpdatedAt,
+          enteredBy: overlay.enteredBy,
+          clientVersion: overlay.clientVersion,
+          mutationId: overlay.mutationId,
+        },
+        ...scoreUpdatesWithLocal.filter(
+          (score) =>
+            score.entrantId !== overlay.entrantId || score.hole !== overlay.hole,
+        ),
+      ];
+    }
     setEvent({
       ...bundle.event,
       lifecycleStatus: bundle.event.lifecycleStatus ?? 'published',
@@ -450,8 +496,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     setTeams(bundle.teams);
     setInvites(bundle.invites);
     setAnnouncements(bundle.announcements);
-    setRounds(bundle.roundsByEntrant);
-    setScoreUpdates(bundle.scoreUpdates ?? []);
+    setRounds(roundsWithLocalScores);
+    setScoreUpdates(scoreUpdatesWithLocal);
     setRoundIds(bundle.roundIdByEntrant);
     setMyId(bundle.meId);
     // Cached data is still real data — writes must keep queueing while offline.
@@ -463,12 +509,11 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     setEventLoadError(null);
     const { data: sessionData } = await supabase.auth.getSession();
     const session = sessionData.session;
-    if (!session) {
+    const userId = session?.user.id ?? preparedAccountId;
+    if (!userId) {
       applySeed();
       return SEED_EVENT.id;
     }
-
-    const userId = session.user.id;
     const routeEventId =
       targetEventId === null
         ? undefined
@@ -514,10 +559,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           };
           setAccountAccess(access);
           setActiveEventId(snapshot.bundle.event.id);
-          setSyncScope(userId, snapshot.bundle.event.id);
+          setSyncScope(userId, snapshot.bundle.event.id, [snapshot.bundle.event.id]);
           setAccessLoading(false);
           setEventLoading(false);
-          applyBundle(snapshot.bundle);
+          await applyBundle(snapshot.bundle, userId, false);
           setSnapshotAt(snapshot.savedAt);
           return snapshot.bundle.event.id;
         }
@@ -563,9 +608,13 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     setEventLoading(true);
     try {
       const bundle = await fetchEventBundle(eventId);
-      applyBundle(bundle);
       setActiveEventId(eventId);
-      setSyncScope(userId, eventId);
+      setSyncScope(
+        userId,
+        eventId,
+        access.events.map((candidate) => candidate.id),
+      );
+      await applyBundle(bundle, userId, true);
       setEventLoading(false);
       setSnapshotAt(null);
       void saveEventSnapshot(bundle, userId, eventId).catch(() => {});
@@ -588,9 +637,13 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         }
       }
       if (snapshot) {
-        applyBundle(snapshot.bundle);
         setActiveEventId(snapshot.bundle.event.id);
-        setSyncScope(userId, snapshot.bundle.event.id);
+        setSyncScope(
+          userId,
+          snapshot.bundle.event.id,
+          access.events.map((candidate) => candidate.id),
+        );
+        await applyBundle(snapshot.bundle, userId, false);
         setEventLoading(false);
         setSnapshotAt(snapshot.savedAt);
         return snapshot.bundle.event.id;
@@ -600,7 +653,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       setEventLoadError(reasonFor(error));
       throw error;
     }
-  }, [applySeed, applyBundle, clearFocusedEvent]);
+  }, [applySeed, applyBundle, clearFocusedEvent, preparedAccountId]);
 
   const loadAndReport = useCallback(async (eventId?: string | null) => {
     try {
@@ -635,7 +688,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     void loadAndReport();
 
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) {
+      if (session || preparedAccountId) {
         void loadAndReport();
       } else {
         applySeed();
@@ -643,7 +696,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => authListener.subscription.unsubscribe();
-  }, [loadAndReport, applySeed]);
+  }, [loadAndReport, applySeed, preparedAccountId]);
 
   // Screen-to-screen navigation inside one event must not recreate the auth
   // subscription or reload the event bundle. Only a genuinely different
@@ -869,8 +922,28 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, [event.gameStyle, event.holes, teams, participants, rounds, myEntrantId]);
 
   const setScore = useCallback(
-    (holeIndex: number, strokes: number) => {
+    async (holeIndex: number, strokes: number) => {
       const updatedAt = new Date().toISOString();
+      if (holeIndex < 0 || holeIndex >= 18 || strokes < 1 || strokes > 20) {
+        throw new Error('Choose a valid hole and score.');
+      }
+
+      if (isLive) {
+        if (!myId) throw new Error('Join this event before entering a score.');
+        // This await is the safety boundary: the UI must not report success or
+        // leave the screen until IndexedDB/AsyncStorage confirms persistence.
+        await enqueue({
+          kind: 'score',
+          eventId: event.id,
+          teamId: myRoundOwner.teamId,
+          participantId: myRoundOwner.participantId,
+          hole: holeIndex + 1,
+          strokes,
+          enteredBy: myId,
+          clientUpdatedAt: updatedAt,
+        });
+      }
+
       setRounds((prev) => {
         const existing = prev[myEntrantId] ?? emptyScores();
         const next = [...existing];
@@ -890,22 +963,40 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
             update.entrantId !== myEntrantId || update.hole !== holeIndex + 1,
         ),
       ]);
-
-      if (!isLive || !myId) return;
-      // Queued rather than written straight through: this is the one write that
-      // has to survive standing in a bunker with no bars.
-      void enqueue({
-        kind: 'score',
-        eventId: event.id,
-        teamId: myRoundOwner.teamId,
-        participantId: myRoundOwner.participantId,
-        hole: holeIndex + 1,
-        strokes,
-        enteredBy: myId,
-        clientUpdatedAt: updatedAt,
-      });
     },
     [myEntrantId, isLive, myId, event.id, myRoundOwner],
+  );
+
+  // If another device already holds a newer score, the RPC returns that
+  // authoritative value without writing. Reconcile it immediately because no
+  // database change means Realtime has nothing to announce.
+  useEffect(
+    () =>
+      subscribeToScoreConflicts((resolution) => {
+        if (resolution.eventId !== activeEventId) return;
+        setRounds((current) => {
+          const scores = [...(current[resolution.entrantId] ?? emptyScores())];
+          scores[resolution.hole - 1] = resolution.strokes;
+          return { ...current, [resolution.entrantId]: scores };
+        });
+        setScoreUpdates((current) => [
+          {
+            entrantId: resolution.entrantId,
+            hole: resolution.hole,
+            strokes: resolution.strokes,
+            updatedAt: resolution.updatedAt,
+            enteredBy: null,
+            clientVersion: resolution.clientVersion,
+            mutationId: resolution.mutationId,
+          },
+          ...current.filter(
+            (score) =>
+              score.entrantId !== resolution.entrantId ||
+              score.hole !== resolution.hole,
+          ),
+        ]);
+      }),
+    [activeEventId],
   );
 
   const resetRound = useCallback(() => {

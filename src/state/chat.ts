@@ -14,8 +14,16 @@ import {
   toggleMessageReaction,
   unsendMessage,
 } from '@/lib/chat';
+import {
+  loadOfflineConversation,
+  loadOfflineConversationSummaries,
+  loadOfflineMessages,
+  saveOfflineConversation,
+  saveOfflineConversationSummaries,
+  saveOfflineMessages,
+} from '@/lib/offline/chat-cache';
+import { loadMessageOverlays } from '@/lib/sync';
 import { refreshUnread, setUnreadTotal } from '@/state/unread';
-import { supabase } from '@/lib/supabase';
 import { useEvent } from '@/state/event';
 import {
   ChatMessage,
@@ -39,27 +47,19 @@ function errorText(error: unknown): string {
   return 'Something went wrong.';
 }
 
-/** Chat needs a real signed-in participant; the seeded preview has neither. */
-async function signedIn(): Promise<boolean> {
-  const { data } = await supabase.auth.getSession();
-  return Boolean(data.session);
-}
-
-
 export function useConversations() {
-  const { event } = useEvent();
+  const { event, accountAccess } = useEvent();
+  const accountId = accountAccess?.accountId ?? null;
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     try {
-      if (!(await signedIn())) {
-        setConversations([]);
-        setError(null);
-        return;
-      }
       const summaries = await fetchConversationSummaries(event.id);
+      if (accountId) {
+        await saveOfflineConversationSummaries(accountId, event.id, summaries);
+      }
       setConversations(summaries);
       // Loading the inbox already computed the count, so hand it straight to
       // the shared store rather than making it go and ask again.
@@ -69,11 +69,25 @@ export function useConversations() {
       );
       setError(null);
     } catch (caught) {
-      setError(errorText(caught));
+      const cached = accountId
+        ? await loadOfflineConversationSummaries(accountId, event.id).catch(
+            () => null,
+          )
+        : null;
+      if (cached) {
+        setConversations(cached);
+        setUnreadTotal(
+          event.id,
+          cached.reduce((total, c) => total + c.unreadCount, 0),
+        );
+        setError(null);
+      } else {
+        setError(errorText(caught));
+      }
     } finally {
       setLoading(false);
     }
-  }, [event.id]);
+  }, [accountId, event.id]);
 
   // Refetch on focus so a thread started elsewhere — or one someone else added
   // you to — appears without a restart.
@@ -99,7 +113,8 @@ export function useConversations() {
 
 /** The conversation behind a thread header or the group settings screen. */
 export function useConversationDetail(conversationId: string | null) {
-  const { event } = useEvent();
+  const { event, accountAccess } = useEvent();
+  const accountId = accountAccess?.accountId ?? null;
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -111,14 +126,30 @@ export function useConversationDetail(conversationId: string | null) {
       return;
     }
     try {
-      setConversation(await fetchConversation(event.id, conversationId));
+      const next = await fetchConversation(event.id, conversationId);
+      setConversation(next);
+      if (accountId && next) {
+        await saveOfflineConversation(accountId, event.id, next);
+      }
       setError(null);
     } catch (caught) {
-      setError(errorText(caught));
+      const cached = accountId
+        ? await loadOfflineConversation(
+            accountId,
+            event.id,
+            conversationId,
+          ).catch(() => null)
+        : null;
+      if (cached) {
+        setConversation(cached);
+        setError(null);
+      } else {
+        setError(errorText(caught));
+      }
     } finally {
       setLoading(false);
     }
-  }, [conversationId, event.id]);
+  }, [accountId, conversationId, event.id]);
 
   useFocusEffect(
     useCallback(() => {
@@ -131,7 +162,8 @@ export function useConversationDetail(conversationId: string | null) {
 }
 
 export function useConversation(conversationId: string | null) {
-  const { event, me } = useEvent();
+  const { event, me, accountAccess } = useEvent();
+  const accountId = accountAccess?.accountId ?? null;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -147,15 +179,50 @@ export function useConversation(conversationId: string | null) {
     }
     try {
       const page = await fetchMessages(event.id, conversationId);
-      setMessages(page.messages);
+      const overlays = accountId
+        ? await loadMessageOverlays({
+            userId: accountId,
+            eventId: event.id,
+            conversationId,
+            authoritativeMessages: page.messages,
+          })
+        : [];
+      const merged = overlays.reduce(mergeMessage, page.messages);
+      setMessages(merged);
       setHasOlder(page.hasOlder);
+      if (accountId) {
+        await saveOfflineMessages(accountId, event.id, conversationId, merged);
+      }
       setError(null);
     } catch (caught) {
-      setError(errorText(caught));
+      const cached = accountId
+        ? await loadOfflineMessages(accountId, event.id, conversationId).catch(
+            () => null,
+          )
+        : null;
+      const overlays = accountId
+        ? await loadMessageOverlays({
+            userId: accountId,
+            eventId: event.id,
+            conversationId,
+          }).catch(() => [])
+        : [];
+      if (cached || overlays.length > 0) {
+        setMessages(overlays.reduce(mergeMessage, cached ?? []));
+        setHasOlder(false);
+        setError(null);
+      } else {
+        setError(errorText(caught));
+      }
     } finally {
       setLoading(false);
     }
-  }, [conversationId, event.id]);
+  }, [accountId, conversationId, event.id]);
+
+  useEffect(() => {
+    if (!accountId || !conversationId || loading) return;
+    void saveOfflineMessages(accountId, event.id, conversationId, messages);
+  }, [accountId, conversationId, event.id, loading, messages]);
 
   useEffect(() => {
     setLoading(true);

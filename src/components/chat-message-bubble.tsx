@@ -14,6 +14,7 @@ import {
   TextInput,
   useWindowDimensions,
   View,
+  type ViewStyle,
 } from 'react-native';
 
 import { fonts } from '@/constants/theme';
@@ -33,6 +34,10 @@ const MENU_GAP = 10;
 const SCREEN_EDGE_GAP = 12;
 const DOUBLE_TAP_DELAY = 280;
 const LONG_PRESS_DELAY = 400;
+const webBubbleInteractionStyle: ViewStyle | undefined =
+  Platform.OS === 'web'
+    ? ({ touchAction: 'manipulation' } as unknown as ViewStyle)
+    : undefined;
 
 type OverlayMode = 'reactions' | 'actions' | 'reactionDetails' | null;
 
@@ -346,6 +351,7 @@ export function ChatMessageBubble({
           {...webContextMenuProps}
           style={[
             styles.bubble,
+            webBubbleInteractionStyle,
             mine ? styles.bubbleOutgoing : styles.bubbleIncoming,
             message.pending && styles.bubblePending,
           ]}>
@@ -705,7 +711,6 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     paddingBottom: 10,
     userSelect: 'none',
-    touchAction: 'manipulation',
   },
   bubbleIncoming: {
     backgroundColor: '#1c211e',

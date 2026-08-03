@@ -19,6 +19,7 @@ import { SyncStatusLine } from '@/components/sync-status';
 import { PageHeader } from '@/components/page-header';
 import { Chevron, GradientPanel, Noise } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
+import { eventPath } from '@/lib/routes';
 import { useEvent } from '@/state/event';
 import {
   GAME_STYLE_LABELS,
@@ -98,9 +99,28 @@ function ScoreCell({ score, par }: { score: number | null; par: number }) {
   );
 }
 
-function HoleRow({ hole, par, score }: { hole: number; par: number; score: number | null }) {
+function HoleRow({
+  hole,
+  par,
+  score,
+  onPress,
+}: {
+  hole: number;
+  par: number;
+  score: number | null;
+  onPress?: () => void;
+}) {
   return (
-    <View style={styles.holeRow}>
+    <Pressable
+      accessibilityLabel={
+        score === null
+          ? `Hole ${hole}, not scored`
+          : `Hole ${hole}, score ${score}. Edit score`
+      }
+      accessibilityRole={onPress ? 'button' : undefined}
+      disabled={!onPress}
+      onPress={onPress}
+      style={styles.holeRow}>
       <View style={styles.leftRail}>
         <Text style={styles.holeNum}>{hole}</Text>
         <Text style={styles.holeNum}>{par}</Text>
@@ -109,14 +129,28 @@ function HoleRow({ hole, par, score }: { hole: number; par: number; score: numbe
       <View style={styles.scoreArea}>
         <ScoreCell score={score} par={par} />
       </View>
-    </View>
+    </Pressable>
   );
 }
 
-function CurrentHoleBanner({ hole, par }: { hole: number; par: number }) {
+function CurrentHoleBanner({
+  eventId,
+  hole,
+  par,
+}: {
+  eventId: string;
+  hole: number;
+  par: number;
+}) {
   const router = useRouter();
   return (
-    <Pressable onPress={() => router.push('/score-input')}>
+    <Pressable
+      onPress={() =>
+        router.push({
+          pathname: eventPath(eventId, 'score-input') as never,
+          params: { hole: String(hole) },
+        })
+      }>
       <GradientPanel colors={colors.gradCta} style={styles.banner}>
         <View style={styles.bannerStats}>
           <View style={styles.bannerStat}>
@@ -188,6 +222,7 @@ const TOTAL_KEYS: TotalKey[] = ['out', 'in', 'total'];
 type Measured = Record<TotalKey, number>;
 
 export default function Scorecard() {
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const { event, me, myTeam, myScores, currentHoleIndex, participantById } = useEvent();
 
@@ -271,10 +306,31 @@ export default function Scorecard() {
     const rows: React.ReactNode[] = [];
     for (let i = start; i < end; i++) {
       if (i === currentHole && scores[i] === null) {
-        rows.push(<CurrentHoleBanner key={i} hole={i + 1} par={pars[i]} />);
+        rows.push(
+          <CurrentHoleBanner
+            key={i}
+            eventId={event.id}
+            hole={i + 1}
+            par={pars[i]}
+          />,
+        );
       } else {
         rows.push(
-          <HoleRow key={i} hole={i + 1} par={pars[i]} score={scores[i]} />,
+          <HoleRow
+            key={i}
+            hole={i + 1}
+            par={pars[i]}
+            score={scores[i]}
+            onPress={
+              scores[i] === null
+                ? undefined
+                : () =>
+                    router.push({
+                      pathname: eventPath(event.id, 'score-input') as never,
+                      params: { hole: String(i + 1) },
+                    })
+            }
+          />,
         );
       }
     }
