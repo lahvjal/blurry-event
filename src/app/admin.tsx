@@ -16,6 +16,7 @@ import { OfflineMutationScreen } from '@/components/offline-state';
 import { ActionButton, Noise, SectionLabel } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
 import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
+import { eventPath } from '@/lib/routes';
 import { useEvent } from '@/state/event';
 import { GAME_STYLE_LABELS, GameStyle, teamSize } from '@/state/types';
 
@@ -25,7 +26,6 @@ export default function Admin() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const {
-    accountAccess,
     event,
     me,
     teams,
@@ -82,25 +82,6 @@ export default function Admin() {
           gap: 24,
         }}
         showsVerticalScrollIndicator={false}>
-        {accountAccess?.profile?.isClubAdmin ? (
-          <View style={{ gap: 10 }}>
-            <SectionLabel color={colors.link} size={10}>
-              club admin
-            </SectionLabel>
-            <Pressable
-              style={styles.rosterLink}
-              onPress={() => router.push('/admin-events')}>
-              <View style={{ flex: 1, gap: 5 }}>
-                <Text style={styles.rosterLinkTitle}>MANAGE EVENTS</Text>
-                <Text style={styles.rosterLinkSub}>
-                  Create Drafts and open any club event
-                </Text>
-              </View>
-              <Text style={styles.rosterLinkArrow}>›</Text>
-            </Pressable>
-          </View>
-        ) : null}
-
         {/* Event details */}
         <View style={{ gap: 10 }}>
           <SectionLabel color={colors.link} size={10}>
@@ -108,7 +89,7 @@ export default function Admin() {
           </SectionLabel>
           <Pressable
             style={styles.rosterLink}
-            onPress={() => router.push('/admin-event')}>
+            onPress={() => router.push(eventPath(event.id, 'admin-event') as never)}>
             <View style={{ flex: 1, gap: 5 }}>
               <Text style={styles.rosterLinkTitle}>EVENT DETAILS</Text>
               <Text style={styles.rosterLinkSub}>
@@ -127,7 +108,7 @@ export default function Admin() {
           </SectionLabel>
           <Pressable
             style={styles.rosterLink}
-            onPress={() => router.push('/admin-roster')}>
+            onPress={() => router.push(eventPath(event.id, 'admin-roster') as never)}>
             <View style={{ flex: 1, gap: 5 }}>
               <Text style={styles.rosterLinkTitle}>ROSTER & INVITES</Text>
               <Text style={styles.rosterLinkSub}>
@@ -194,7 +175,7 @@ export default function Admin() {
           </SectionLabel>
           <Pressable
             style={styles.rosterLink}
-            onPress={() => router.push('/admin-teams')}>
+            onPress={() => router.push(eventPath(event.id, 'admin-teams') as never)}>
             <View style={{ flex: 1, gap: 5 }}>
               <Text style={styles.rosterLinkTitle}>MANAGE TEAMS</Text>
               <Text style={styles.rosterLinkSub}>

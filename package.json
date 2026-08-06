@@ -57,6 +57,7 @@
     "test:score-dial": "node --test scripts/score-dial.test.mjs",
     "test:scorecard-scroll": "node --test scripts/scorecard-scroll.test.mjs",
     "test:club-messaging": "node --test scripts/club-messaging.test.mjs",
+    "test:club-admin": "node --test scripts/club-admin.test.mjs",
     "test:offline-shell": "npm run build:web && node --test scripts/offline-precache.test.mjs scripts/offline-score-revisions.test.mjs scripts/offline-cold-start.test.mjs",
     "serve:web": "npx serve dist -p 8090 -s"
   },

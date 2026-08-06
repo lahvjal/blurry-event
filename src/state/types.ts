@@ -76,6 +76,32 @@ export type AccountEventAccess = {
   events: AccessibleEvent[];
 };
 
+export type ClubMemberAttendance = {
+  eventId: string;
+  eventName: string;
+  courseName: string;
+  eventDate: string;
+  lifecycleStatus: EventLifecycleStatus;
+  participantId: string;
+  claimed: boolean;
+  isEventAdmin: boolean;
+  inviteSentAt: string | null;
+};
+
+/** Least-privilege account/invite identity shown only in Club Admin. */
+export type ClubMember = {
+  personKey: string;
+  accountId: string | null;
+  displayName: string;
+  username: string | null;
+  avatarUrl: string | null;
+  isClubAdmin: boolean;
+  status: 'app_user' | 'invited';
+  nameConflict: boolean;
+  eventCount: number;
+  attendances: ClubMemberAttendance[];
+};
+
 export type Participant = {
   id: string;
   fullName: string;

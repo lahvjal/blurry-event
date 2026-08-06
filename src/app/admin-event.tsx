@@ -22,6 +22,7 @@ import { EventDateTimePicker } from '@/components/event-date-time-picker';
 import { ActionButton, Noise, SectionLabel } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
 import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
+import { eventPath } from '@/lib/routes';
 import { useEvent } from '@/state/event';
 import {
   EVENT_LIFECYCLE_LABELS,
@@ -643,7 +644,9 @@ export default function AdminEvent() {
           <SectionLabel color={colors.link} size={10}>
             scorecard
           </SectionLabel>
-          <Pressable style={styles.linkCard} onPress={() => router.push('/admin-holes')}>
+          <Pressable
+            style={styles.linkCard}
+            onPress={() => router.push(eventPath(event.id, 'admin-holes') as never)}>
             <View style={{ flex: 1, gap: 5 }}>
               <Text style={styles.linkTitle}>HOLES, PAR & YARDAGE</Text>
               <Text style={styles.linkSub}>

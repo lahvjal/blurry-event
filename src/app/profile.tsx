@@ -191,6 +191,31 @@ export default function Profile() {
           </Text>
         </Pressable>
 
+        {accountAccess?.profile?.isClubAdmin ? (
+          <View style={styles.clubAdminSection}>
+            <SectionLabel color={colors.link} size={10}>
+              club admin
+            </SectionLabel>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Open Club Admin"
+              accessibilityHint="Manage club events, members, and event announcements."
+              style={({ pressed }) => [
+                styles.clubAdminButton,
+                pressed && styles.clubAdminButtonPressed,
+              ]}
+              onPress={() => router.push('/admin-events')}>
+              <View style={styles.clubAdminCopy}>
+                <Text style={styles.clubAdminTitle}>MANAGE CLUB</Text>
+                <Text style={styles.clubAdminSubtitle}>
+                  Events, members, and event announcements
+                </Text>
+              </View>
+              <Text style={styles.clubAdminArrow}>›</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
         {/* Teammates */}
         {teammates.length > 0 ? (
           <View style={{ gap: 10 }}>
@@ -329,6 +354,32 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.highlight,
   },
+  clubAdminSection: { gap: 10 },
+  clubAdminButton: {
+    minHeight: 72,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(123,255,178,0.28)',
+    backgroundColor: 'rgba(123,255,178,0.08)',
+  },
+  clubAdminButtonPressed: { backgroundColor: 'rgba(123,255,178,0.14)' },
+  clubAdminCopy: { flex: 1, gap: 5 },
+  clubAdminTitle: {
+    fontFamily: fonts.bold,
+    fontSize: 13,
+    letterSpacing: 0.5,
+    color: colors.highlight,
+  },
+  clubAdminSubtitle: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.textMuted,
+  },
+  clubAdminArrow: { fontSize: 22, color: 'rgba(255,255,255,0.5)' },
   mateRow: {
     flexDirection: 'row',
     alignItems: 'center',

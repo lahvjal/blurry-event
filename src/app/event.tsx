@@ -38,6 +38,7 @@ import { signOutAndClearOfflineAccess } from '@/lib/auth';
 import { openTeamConversation } from '@/lib/chat';
 import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
 import { clearPushForSignOut } from '@/lib/push';
+import { eventPath } from '@/lib/routes';
 import { useEvent } from '@/state/event';
 import { useNotificationUnread } from '@/state/notification-center';
 import {
@@ -608,7 +609,7 @@ function FocusedEventHome() {
           {me.isAdmin ? (
             <Pressable
               style={styles.adminButton}
-              onPress={() => router.push('/admin')}>
+              onPress={() => router.push(eventPath(event.id, 'admin') as never)}>
               <Text style={styles.adminButtonText}>EVENT ADMIN</Text>
               <Chevron color={colors.highlight} />
             </Pressable>

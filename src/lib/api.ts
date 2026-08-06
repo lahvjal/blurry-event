@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import {
   AccountEventAccess,
   Announcement,
+  ClubMember,
   EventConfig,
   EventLifecycleStatus,
   ExistingAccountCandidate,
@@ -365,6 +366,35 @@ export async function apiCreateClubEvent(input: {
   if (error) throw error;
   if (!data) throw new Error('The event was created without an event ID.');
   return data as string;
+}
+
+/** Club-only, contact-free directory of app accounts and pending invitees. */
+export async function apiClubMemberDirectory(): Promise<ClubMember[]> {
+  const { data, error } = await supabase.rpc('club_member_directory');
+  if (error) throw error;
+
+  return (data ?? []).map((member: any) => ({
+    personKey: member.person_key,
+    accountId: member.account_id ?? null,
+    displayName: member.display_name,
+    username: member.username ?? null,
+    avatarUrl: member.avatar_url ?? null,
+    isClubAdmin: Boolean(member.is_club_admin),
+    status: member.status === 'app_user' ? 'app_user' : 'invited',
+    nameConflict: Boolean(member.name_conflict),
+    eventCount: Number(member.event_count),
+    attendances: (member.attendances ?? []).map((attendance: any) => ({
+      eventId: attendance.eventId,
+      eventName: attendance.eventName,
+      courseName: attendance.courseName,
+      eventDate: attendance.eventDate,
+      lifecycleStatus: attendance.lifecycleStatus as EventLifecycleStatus,
+      participantId: attendance.participantId,
+      claimed: Boolean(attendance.claimed),
+      isEventAdmin: Boolean(attendance.isEventAdmin),
+      inviteSentAt: attendance.inviteSentAt ?? null,
+    })),
+  }));
 }
 
 export async function apiUpdateEvent(

@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PageHeader } from '@/components/page-header';
 import { Noise } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
+import { eventPath } from '@/lib/routes';
 import { useEvent } from '@/state/event';
 
 export default function CourseMap() {
@@ -40,7 +41,7 @@ export default function CourseMap() {
           {me.isAdmin ? (
             <Pressable
               style={styles.uploadButton}
-              onPress={() => router.push('/admin-event')}>
+              onPress={() => router.push(eventPath(event.id, 'admin-event') as never)}>
               <Text style={styles.uploadButtonText}>GO TO EVENT DETAILS</Text>
             </Pressable>
           ) : null}

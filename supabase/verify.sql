@@ -250,6 +250,12 @@ select * from (values
      'execute'
    )),
 
+  ('club member directory is club-only and contact-free',
+   exists (select 1 from fn where proname='club_member_directory')
+   and not has_function_privilege(
+     'anon', 'public.club_member_directory()', 'execute'
+   )),
+
   ('RLS   enabled on every public table',
    not exists (select 1 from pg_tables
      where schemaname='public' and rowsecurity = false)),
