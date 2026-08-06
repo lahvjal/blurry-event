@@ -71,7 +71,7 @@ function explain(state: PushState, enabled: boolean): string {
 }
 
 /** Profile row. Hidden entirely where push could never work. */
-export function PushToggleRow() {
+export function PushToggleRow({ disabled = false }: { disabled?: boolean }) {
   const { state, enabled, busy, enable, disable } = usePush();
 
   if (state === 'unsupported') return null;
@@ -82,13 +82,27 @@ export function PushToggleRow() {
     <View style={styles.row}>
       <View style={styles.rowText}>
         <Text style={styles.rowLabel}>NOTIFICATIONS</Text>
-        <Text style={styles.rowHint}>{explain(state, enabled)}</Text>
+        <Text style={styles.rowHint}>
+          {disabled
+            ? 'Reconnect to change notification settings for this device.'
+            : explain(state, enabled)}
+        </Text>
       </View>
       {actionable ? (
         <Pressable
-          disabled={busy}
+          accessibilityRole="switch"
+          accessibilityLabel="Notifications"
+          accessibilityState={{ checked: enabled, disabled: busy || disabled }}
+          accessibilityHint={
+            disabled ? 'Changing notifications requires a connection.' : undefined
+          }
+          disabled={busy || disabled}
           onPress={enabled ? disable : enable}
-          style={[styles.switch, enabled && styles.switchOn, busy && styles.switchBusy]}>
+          style={[
+            styles.switch,
+            enabled && styles.switchOn,
+            (busy || disabled) && styles.switchBusy,
+          ]}>
           <View style={[styles.knob, enabled && styles.knobOn]} />
         </Pressable>
       ) : null}

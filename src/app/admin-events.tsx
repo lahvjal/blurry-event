@@ -13,10 +13,12 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { EventDateTimePicker } from '@/components/event-date-time-picker';
+import { OfflineMutationScreen } from '@/components/offline-state';
 import { PageHeader } from '@/components/page-header';
 import { Noise, SectionLabel } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
 import { apiCreateClubEvent } from '@/lib/api';
+import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
 import { eventPath } from '@/lib/routes';
 import { useEvent } from '@/state/event';
 import { EVENT_LIFECYCLE_LABELS } from '@/state/types';
@@ -45,6 +47,7 @@ export default function AdminEvents() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { accountAccess, accessLoading, refresh } = useEvent();
+  const offline = useBrowserDefinitelyOffline();
   const [formOpen, setFormOpen] = React.useState(false);
   const [name, setName] = React.useState('');
   const [courseName, setCourseName] = React.useState('');
@@ -73,6 +76,15 @@ export default function AdminEvents() {
           </Text>
         </View>
       </View>
+    );
+  }
+
+  if (offline) {
+    return (
+      <OfflineMutationScreen
+        title="manage events"
+        description="Creating an event and changing club event configuration require a connection. Reconnect, then try again."
+      />
     );
   }
 

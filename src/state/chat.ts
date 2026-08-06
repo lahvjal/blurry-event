@@ -23,7 +23,7 @@ import {
   saveOfflineMessages,
 } from '@/lib/offline/chat-cache';
 import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
-import { loadMessageOverlays } from '@/lib/sync';
+import { loadMessageOverlays, subscribeToSync } from '@/lib/sync';
 import { refreshUnread, setUnreadTotal } from '@/state/unread';
 import { useEvent } from '@/state/event';
 import {
@@ -280,6 +280,33 @@ export function useConversation(conversationId: string | null) {
     if (!accountId || !conversationId || loading) return;
     void saveOfflineMessages(accountId, event.id, conversationId, messages);
   }, [accountId, conversationId, event.id, loading, messages]);
+
+  // Queue state can change without a Realtime event (for example, a permanent
+  // rejection or an acknowledgement whose response arrives before the message
+  // page refreshes). Keep each optimistic bubble's queued/sent/failed label in
+  // step with IndexedDB.
+  useEffect(() => {
+    if (!accountId || !conversationId) return;
+    let disposed = false;
+    let revision = 0;
+
+    const refreshDelivery = async () => {
+      const currentRevision = ++revision;
+      const overlays = await loadMessageOverlays({
+        userId: accountId,
+        eventId: event.id,
+        conversationId,
+      }).catch(() => []);
+      if (disposed || currentRevision !== revision || overlays.length === 0) return;
+      setMessages((current) => overlays.reduce(mergeMessage, current));
+    };
+
+    const unsubscribe = subscribeToSync(() => void refreshDelivery());
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
+  }, [accountId, conversationId, event.id]);
 
   useEffect(() => {
     setLoading(true);

@@ -19,6 +19,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PageHeader } from '@/components/page-header';
+import { OfflineMutationScreen } from '@/components/offline-state';
 import { SearchField } from '@/components/search-field';
 import { ActionButton, Noise, SectionLabel } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
@@ -26,6 +27,7 @@ import { CSV_TEMPLATE, CsvImportResult, parseRoster } from '@/lib/csv';
 import { sendInviteEmails } from '@/lib/invite-email';
 import { inviteMessage, invitesAsCsv, isSyntheticEmail } from '@/lib/invites';
 import { useEvent } from '@/state/event';
+import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
 import {
   ExistingAccountCandidate,
   NewParticipantInput,
@@ -118,6 +120,7 @@ export default function AdminRoster() {
     regenerateInviteCode,
     refresh,
   } = useEvent();
+  const offline = useBrowserDefinitelyOffline();
 
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
@@ -233,6 +236,15 @@ export default function AdminRoster() {
           <Text style={styles.muted}>You don’t have admin access for this event.</Text>
         </View>
       </View>
+    );
+  }
+
+  if (offline) {
+    return (
+      <OfflineMutationScreen
+        title="roster"
+        description="Adding, editing, removing, importing, or inviting players requires a connection. Reconnect to make roster changes."
+      />
     );
   }
 

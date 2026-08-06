@@ -39,6 +39,7 @@ import {
   openDirectConversation,
   sendMessage,
 } from '@/lib/chat';
+import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
 import {
   groupThread,
   initialsOf,
@@ -83,6 +84,7 @@ export default function DirectMessage() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { event, me, participantById } = useEvent();
+  const offline = useBrowserDefinitelyOffline();
   // Arrives either as an existing thread, or as the person to open one with.
   const params = useLocalSearchParams<{ id?: string; participant?: string }>();
 
@@ -98,7 +100,7 @@ export default function DirectMessage() {
       setConversationId(params.id);
       return;
     }
-    if (!params.participant) return;
+    if (!params.participant || offline) return;
 
     let active = true;
     findDirectConversation(event.id, params.participant)
@@ -111,7 +113,7 @@ export default function DirectMessage() {
     return () => {
       active = false;
     };
-  }, [event.id, params.id, params.participant]);
+  }, [event.id, offline, params.id, params.participant]);
 
   const { conversation } = useConversationDetail(conversationId);
   const {
@@ -366,6 +368,7 @@ export default function DirectMessage() {
                         }
                         void unsend(message.id);
                       }}
+                      offline={offline}
                     />
                     {/* Avatar sits beside the last bubble of a run only. */}
                     {i === run.messages.length - 1 ? (
@@ -396,6 +399,11 @@ export default function DirectMessage() {
           onHeightChange={setComposerHeight}
           context={composerContext}
           onCancelContext={() => setComposerContext(null)}
+          disabledReason={
+            offline && !conversationId
+              ? 'Starting a new conversation requires a connection. Reconnect, then send your first message.'
+              : null
+          }
         />
       </KeyboardAvoidingView>
     </View>

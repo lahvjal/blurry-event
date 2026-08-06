@@ -3,13 +3,16 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
 
 import { LoginShell, loginStyles as styles } from '@/components/login-shell';
+import { OfflineMutationScreen } from '@/components/offline-state';
 import { Chevron } from '@/components/ui';
 import { colors } from '@/constants/theme';
+import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
 import { eventPath } from '@/lib/routes';
 import { claimEventInvite, lookupInvite, supabase } from '@/lib/supabase';
 
 export default function InviteSignup() {
   const router = useRouter();
+  const offline = useBrowserDefinitelyOffline();
   const params = useLocalSearchParams<{ code?: string }>();
 
   const [code, setCode] = useState('');
@@ -138,6 +141,15 @@ export default function InviteSignup() {
     setConfirm('');
     setError(null);
   };
+
+  if (offline) {
+    return (
+      <OfflineMutationScreen
+        title="redeem invite"
+        description="Looking up or redeeming an invite and creating an account require a connection. Reconnect, then try again."
+      />
+    );
+  }
 
   return (
     <LoginShell

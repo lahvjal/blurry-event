@@ -14,12 +14,14 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FloatingNav } from '@/components/floating-nav';
+import { OfflineNotice } from '@/components/offline-state';
 import { ParticipantAvatar } from '@/components/participant-avatar';
 import { PushToggleRow } from '@/components/push-controls';
 import { Badge, InfoRow, Noise, SectionLabel } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
 import { clearBadge } from '@/lib/badge';
 import { signOutAndClearOfflineAccess } from '@/lib/auth';
+import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
 import { clearPushForSignOut } from '@/lib/push';
 import { useEvent } from '@/state/event';
 import { GAME_STYLE_LABELS } from '@/state/types';
@@ -35,6 +37,7 @@ export default function Profile() {
     updateMyProfile,
     participantById,
   } = useEvent();
+  const offline = useBrowserDefinitelyOffline();
 
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(me.fullName);
@@ -43,6 +46,7 @@ export default function Profile() {
   );
 
   const pickPhoto = async () => {
+    if (offline) return;
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
       Alert.alert(
@@ -64,6 +68,7 @@ export default function Profile() {
   };
 
   const save = () => {
+    if (offline) return;
     const parsed = handicap.trim() === '' ? null : Number(handicap);
     if (parsed !== null && Number.isNaN(parsed)) {
       Alert.alert('Check your handicap', 'Enter a number, for example 8.4.');
@@ -92,9 +97,25 @@ export default function Profile() {
           gap: 20,
         }}
         showsVerticalScrollIndicator={false}>
+        {offline ? (
+          <OfflineNotice
+            compact
+            message="Your saved profile is available, but profile photos, name and handicap changes, notification settings, and sign out require a connection. Reconnect and try again."
+          />
+        ) : null}
+
         {/* Identity */}
         <View style={styles.identity}>
-          <Pressable onPress={pickPhoto} style={styles.avatarWrap}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Change profile photo"
+            accessibilityState={{ disabled: offline }}
+            accessibilityHint={
+              offline ? 'Changing your profile photo requires a connection.' : undefined
+            }
+            disabled={offline}
+            onPress={pickPhoto}
+            style={[styles.avatarWrap, offline && styles.disabledControl]}>
             <ParticipantAvatar participant={me} size={96} />
             <View style={styles.avatarEdit}>
               <Text style={styles.avatarEditText}>EDIT</Text>
@@ -105,6 +126,7 @@ export default function Profile() {
             <TextInput
               value={name}
               onChangeText={setName}
+              editable={!offline}
               style={styles.nameInput}
               placeholder="Your name"
               placeholderTextColor="rgba(255,255,255,0.35)"
@@ -131,6 +153,7 @@ export default function Profile() {
               <TextInput
                 value={handicap}
                 onChangeText={setHandicap}
+                editable={!offline}
                 style={styles.handicapInput}
                 keyboardType="decimal-pad"
                 placeholder="—"
@@ -155,7 +178,13 @@ export default function Profile() {
         </View>
 
         <Pressable
-          style={styles.editButton}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: offline }}
+          accessibilityHint={
+            offline ? 'Editing your profile requires a connection.' : undefined
+          }
+          disabled={offline}
+          style={[styles.editButton, offline && styles.disabledControl]}
           onPress={editing ? save : () => setEditing(true)}>
           <Text style={styles.editButtonText}>
             {editing ? 'SAVE CHANGES' : 'EDIT PROFILE'}
@@ -195,10 +224,16 @@ export default function Profile() {
           </View>
         ) : null}
 
-        <PushToggleRow />
+        <PushToggleRow disabled={offline} />
 
         <Pressable
-          style={styles.signOut}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: offline }}
+          accessibilityHint={
+            offline ? 'Reconnect before signing out of this device.' : undefined
+          }
+          disabled={offline}
+          style={[styles.signOut, offline && styles.disabledControl]}
           onPress={async () => {
             // Drop this device's push registration first, so the next person to
             // sign in on this phone doesn't inherit the last one's alerts — or
@@ -227,6 +262,9 @@ const styles = StyleSheet.create({
   },
   avatarWrap: {
     alignItems: 'center',
+  },
+  disabledControl: {
+    opacity: 0.42,
   },
   avatarEdit: {
     marginTop: -12,

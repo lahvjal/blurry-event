@@ -12,8 +12,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PageHeader } from '@/components/page-header';
+import { OfflineMutationScreen } from '@/components/offline-state';
 import { Noise, SectionLabel } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
+import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
 import { useEvent } from '@/state/event';
 import { GAME_STYLE_LABELS, Participant, Team, teamSize } from '@/state/types';
 
@@ -43,6 +45,7 @@ export default function AdminTeams() {
     deleteTeam,
     autoBalanceTeams,
   } = useEvent();
+  const offline = useBrowserDefinitelyOffline();
 
   /** Player currently picked up and waiting to be dropped on a team. */
   const [movingId, setMovingId] = useState<string | null>(null);
@@ -59,6 +62,15 @@ export default function AdminTeams() {
           <Text style={styles.muted}>You don’t have admin access for this event.</Text>
         </View>
       </View>
+    );
+  }
+
+  if (offline) {
+    return (
+      <OfflineMutationScreen
+        title="teams"
+        description="Team creation, assignments, tee times, carts, and balancing require a connection. Reconnect to make changes."
+      />
     );
   }
 

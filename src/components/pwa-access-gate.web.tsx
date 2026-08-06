@@ -158,6 +158,13 @@ export function PwaAccessGate({ children }: { children: React.ReactNode }) {
       offlinePreparation.phase !== 'signed-out' &&
       offlinePreparation.phase !== 'disabled',
   );
+  const openingInstalledHome = Boolean(
+    standalone && pathname === '/' && (session || preparedOfflineIdentity),
+  );
+
+  useEffect(() => {
+    if (openingInstalledHome) router.replace('/event');
+  }, [openingInstalledHome, router]);
 
   useEffect(() => {
     if (
@@ -180,6 +187,9 @@ export function PwaAccessGate({ children }: { children: React.ReactNode }) {
   if (callbackRoute) return <>{children}</>;
   if ((sessionLoading || offlineIdentityResolving) && !preparedOfflineIdentity) {
     return <LoadingGate label="Checking your sign-in…" />;
+  }
+  if (openingInstalledHome) {
+    return <LoadingGate label="Opening your saved event…" />;
   }
   if (!session && !preparedOfflineIdentity) {
     return authRoute ? <>{children}</> : <LoadingGate label="Returning to sign in…" />;

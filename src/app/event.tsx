@@ -22,6 +22,7 @@ import {
   HomeHeader,
 } from '@/components/home-header';
 import { HomeEventSelector } from '@/components/home-event-selector';
+import { OfflineNotice } from '@/components/offline-state';
 import { ParticipantAvatar } from '@/components/participant-avatar';
 import {
   Badge,
@@ -35,6 +36,7 @@ import { colors, fonts } from '@/constants/theme';
 import { clearBadge } from '@/lib/badge';
 import { signOutAndClearOfflineAccess } from '@/lib/auth';
 import { openTeamConversation } from '@/lib/chat';
+import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
 import { clearPushForSignOut } from '@/lib/push';
 import { useEvent } from '@/state/event';
 import { useNotificationUnread } from '@/state/notification-center';
@@ -294,6 +296,7 @@ function HomeNotice({
 function HomeWithoutFocusedEvent({ unavailable = false }: { unavailable?: boolean }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const offline = useBrowserDefinitelyOffline();
   const {
     accountAccess,
     homeNotice,
@@ -338,18 +341,56 @@ function HomeWithoutFocusedEvent({ unavailable = false }: { unavailable?: boolea
           <HomeNotice message={homeNotice} onDismiss={dismissHomeNotice} />
         ) : null}
 
+        {offline ? (
+          <OfflineNotice
+            compact
+            message="Refreshing events, redeeming an invite, and signing out require a connection. Reconnect and try again."
+          />
+        ) : null}
+
         {unavailable ? (
-          <Pressable style={styles.emptyHomePrimary} onPress={() => void refresh()}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: offline }}
+            accessibilityHint={
+              offline ? 'Refreshing events requires a connection.' : undefined
+            }
+            disabled={offline}
+            style={[
+              styles.emptyHomePrimary,
+              offline && styles.emptyHomeActionDisabled,
+            ]}
+            onPress={() => void refresh()}>
             <Text style={styles.emptyHomePrimaryText}>TRY AGAIN</Text>
           </Pressable>
         ) : (
           <Pressable
-            style={styles.emptyHomePrimary}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: offline }}
+            accessibilityHint={
+              offline ? 'Redeeming an invite requires a connection.' : undefined
+            }
+            disabled={offline}
+            style={[
+              styles.emptyHomePrimary,
+              offline && styles.emptyHomeActionDisabled,
+            ]}
             onPress={() => router.push('/invite')}>
             <Text style={styles.emptyHomePrimaryText}>REDEEM AN EVENT INVITE</Text>
           </Pressable>
         )}
-        <Pressable style={styles.emptyHomeSecondary} onPress={() => void signOut()}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: offline }}
+          accessibilityHint={
+            offline ? 'Reconnect before signing out of this device.' : undefined
+          }
+          disabled={offline}
+          style={[
+            styles.emptyHomeSecondary,
+            offline && styles.emptyHomeActionDisabled,
+          ]}
+          onPress={() => void signOut()}>
           <Text style={styles.emptyHomeSecondaryText}>SIGN OUT</Text>
         </Pressable>
       </ScrollView>
@@ -387,6 +428,7 @@ export default function EventHome() {
 function FocusedEventHome() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const offline = useBrowserDefinitelyOffline();
   const {
     event,
     me,
@@ -472,6 +514,12 @@ function FocusedEventHome() {
   const openTeamChat = async () => {
     if (!myTeam || openingTeamChat) return;
     if (!isLive) {
+      router.push('/my-team');
+      return;
+    }
+    if (offline) {
+      // Team details are cached, while creating/reconciling the official team
+      // conversation is a server mutation.
       router.push('/my-team');
       return;
     }
@@ -907,6 +955,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
+  },
+  emptyHomeActionDisabled: {
+    opacity: 0.4,
   },
   emptyHomeSecondaryText: {
     fontFamily: fonts.bold,

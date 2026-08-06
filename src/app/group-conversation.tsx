@@ -34,6 +34,7 @@ import { FloatingGradientStroke } from '@/components/floating-gradient-stroke';
 import { ParticipantAvatar } from '@/components/participant-avatar';
 import { Noise } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
+import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
 import {
   conversationTitle,
   groupThread,
@@ -76,6 +77,7 @@ export default function GroupConversation() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { event, me, participantById } = useEvent();
+  const offline = useBrowserDefinitelyOffline();
   const params = useLocalSearchParams<{ id?: string }>();
   const conversationId = params.id ?? null;
 
@@ -300,6 +302,7 @@ export default function GroupConversation() {
                           }
                           void unsend(message.id);
                         }}
+                        offline={offline}
                       />
                       {/* Avatar sits beside the last bubble of a run only. */}
                       {last && mine ? (

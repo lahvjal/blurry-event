@@ -6,6 +6,7 @@ import { Platform } from 'react-native';
 
 import { isPermanentError, supabase } from '@/lib/supabase';
 import { enqueue } from '@/lib/sync';
+import { isBrowserDefinitelyOffline } from '@/lib/offline/network';
 import {
   ChatMessage,
   ChatMessageMedia,
@@ -276,6 +277,12 @@ export async function sendMessage(params: {
   attachment?: ChatMessageMediaDraft | null;
 }): Promise<ChatMessage> {
   const clientId = newClientId();
+  const definitelyOffline = isBrowserDefinitelyOffline();
+  if (definitelyOffline && params.attachment) {
+    throw new Error(
+      'Photos need a connection. Remove the attachment to queue this text message, or try again after reconnecting.',
+    );
+  }
   const media = params.attachment
     ? await uploadMessageMedia(params.conversationId, params.attachment)
     : null;
@@ -292,7 +299,24 @@ export async function sendMessage(params: {
     media,
     reactions: [],
     pending: true,
+    deliveryState: 'queued',
   };
+
+  // Avoid waiting for a request the browser already knows cannot succeed. The
+  // durable queue is the success boundary while offline.
+  if (definitelyOffline) {
+    await enqueue({
+      kind: 'message',
+      eventId: params.eventId,
+      conversationId: params.conversationId,
+      senderId: params.senderId,
+      body: params.body,
+      replyToId: params.replyToId ?? null,
+      media,
+      clientId,
+    });
+    return optimistic;
+  }
 
   const { error } = await supabase.from('messages').insert({
     event_id: params.eventId,
@@ -313,7 +337,7 @@ export async function sendMessage(params: {
 
   // A duplicate client_id means this exact message already landed.
   if (!error || error.code === '23505') {
-    return { ...optimistic, pending: false };
+    return { ...optimistic, pending: false, deliveryState: 'sent' };
   }
 
   if (isPermanentError(error)) throw error;

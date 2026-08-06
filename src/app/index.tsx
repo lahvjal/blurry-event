@@ -3,12 +3,15 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
 
 import { LoginShell, loginStyles as styles } from '@/components/login-shell';
+import { OfflineNotice } from '@/components/offline-state';
 import { Chevron } from '@/components/ui';
 import { colors } from '@/constants/theme';
+import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
 import { resolveLoginEmail, supabase } from '@/lib/supabase';
 
 export default function Login() {
   const router = useRouter();
+  const offline = useBrowserDefinitelyOffline();
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -34,6 +37,7 @@ export default function Login() {
 
   const submit = async () => {
     setError(null);
+    if (offline) return;
     if (login.trim().length === 0) {
       setError('Enter your email or username.');
       return;
@@ -88,8 +92,16 @@ export default function Login() {
           ) : null}
 
           <Pressable
-            style={styles.loginButton}
-            disabled={busy}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: busy || offline, busy }}
+            accessibilityHint={
+              offline ? 'Signing in requires an internet connection.' : undefined
+            }
+            style={[
+              styles.loginButton,
+              offline && styles.disabledControl,
+            ]}
+            disabled={busy || offline}
             onPress={submit}>
             {busy ? (
               <ActivityIndicator color="#ffffff" />
@@ -101,12 +113,31 @@ export default function Login() {
             )}
           </Pressable>
 
-          <Pressable onPress={() => router.push('/invite')}>
-            <Text style={styles.secondaryLink}>FIRST TIME? REDEEM INVITE CODE</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: offline }}
+            accessibilityHint={
+              offline ? 'Redeeming an invite requires a connection.' : undefined
+            }
+            disabled={offline}
+            onPress={() => router.push('/invite')}>
+            <Text
+              style={[
+                styles.secondaryLink,
+                offline && styles.disabledText,
+              ]}>
+              FIRST TIME? REDEEM INVITE CODE
+            </Text>
           </Pressable>
         </>
       }>
       <View style={styles.form}>
+        {offline ? (
+          <OfflineNotice
+            compact
+            message="Signing in and redeeming an invite require a connection. Reconnect, then try again."
+          />
+        ) : null}
         <Text style={styles.label}>EMAIL OR USERNAME</Text>
         <TextInput
           value={login}
@@ -120,7 +151,9 @@ export default function Login() {
           textContentType="username"
           selectionColor={colors.highlight}
           returnKeyType="next"
-          onSubmitEditing={submit}
+          onSubmitEditing={() => {
+            if (!offline) void submit();
+          }}
         />
         <Text style={styles.label}>PASSWORD</Text>
         <TextInput
@@ -134,7 +167,9 @@ export default function Login() {
           textContentType="password"
           selectionColor={colors.highlight}
           returnKeyType="go"
-          onSubmitEditing={submit}
+          onSubmitEditing={() => {
+            if (!offline) void submit();
+          }}
         />
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </View>

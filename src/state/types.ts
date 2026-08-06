@@ -221,6 +221,8 @@ export type ChatMessage = {
   reactions: ChatMessageReaction[];
   /** True while the send is still sitting in the offline queue. */
   pending?: boolean;
+  /** Local delivery detail for queued messages; server rows are implicitly sent. */
+  deliveryState?: 'queued' | 'sent' | 'failed';
 };
 
 export type EventConfig = {

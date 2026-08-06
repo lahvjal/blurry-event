@@ -17,9 +17,11 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PageHeader } from '@/components/page-header';
+import { OfflineMutationScreen } from '@/components/offline-state';
 import { EventDateTimePicker } from '@/components/event-date-time-picker';
 import { ActionButton, Noise, SectionLabel } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
+import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
 import { useEvent } from '@/state/event';
 import {
   EVENT_LIFECYCLE_LABELS,
@@ -152,6 +154,7 @@ export default function AdminEvent() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { event, me, teams, updateEvent, updateTeam } = useEvent();
+  const offline = useBrowserDefinitelyOffline();
 
   const [draft, setDraft] = useState<EventDraft>(() => draftFrom(event));
   const [picker, setPicker] = useState<Picker>(null);
@@ -183,6 +186,15 @@ export default function AdminEvent() {
           <Text style={styles.muted}>You don’t have admin access for this event.</Text>
         </View>
       </View>
+    );
+  }
+
+  if (offline) {
+    return (
+      <OfflineMutationScreen
+        title="event details"
+        description="Event details and course-map uploads require a connection. Reconnect to make or save changes."
+      />
     );
   }
 

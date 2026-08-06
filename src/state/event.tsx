@@ -10,6 +10,7 @@ import React, {
 import { useGlobalSearchParams } from 'expo-router';
 import { Alert, AppState } from 'react-native';
 
+import { loadStoredAuthSession } from '@/lib/auth';
 import {
   apiAddExistingAccountToEvent,
   apiAddParticipants,
@@ -43,7 +44,7 @@ import {
   saveEventSnapshot,
 } from '@/lib/offline/event-snapshot';
 import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
-import { supabase } from '@/lib/supabase';
+import { releaseStartupNetworkAfterRender, supabase } from '@/lib/supabase';
 import { useOfflinePreparation } from '@/state/offline-preparation';
 import {
   enqueue,
@@ -513,12 +514,15 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const loadFromServer = useCallback(async (targetEventId?: string | null) => {
     const loadRevision = ++loadRevisionRef.current;
     const isCurrentLoad = () => loadRevisionRef.current === loadRevision;
-    setAccessLoading(true);
+    // Initial launch starts in a loading state already. Foreground/network
+    // refreshes must leave an interactive local event visible.
+    if (!activeEventIdRef.current) setAccessLoading(true);
     setEventLoadError(null);
-    const { data: sessionData } = await supabase.auth.getSession();
+    const storedSession = preparedAccountId
+      ? null
+      : await loadStoredAuthSession();
     if (!isCurrentLoad()) return activeEventIdRef.current;
-    const session = sessionData.session;
-    const userId = session?.user.id ?? preparedAccountId;
+    const userId = preparedAccountId ?? storedSession?.user.id ?? null;
     if (!userId) {
       applySeed();
       return SEED_EVENT.id;
@@ -530,38 +534,63 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     let access: AccountEventAccess | null = null;
     let displayedPreparedEventId: string | null = null;
 
-    // Event switches must never wait behind a weak or doomed server request.
-    // Automatic preparation already saved every selectable event, so render
-    // that exact account/event snapshot first and refresh it in the background.
-    if (routeEventId && routeEventId !== activeEventIdRef.current) {
-      const [preparedAccess, preparedSnapshot] = await Promise.all([
-        loadAccountEventAccess(userId).catch(() => null),
-        loadEventSnapshot(userId, routeEventId).catch(() => null),
-      ]);
+    // Every launch and event switch is local-first. Automatic preparation
+    // saved the exact account access list and every selectable event; apply
+    // that data before beginning any auth refresh or server request.
+    try {
+      const preparedAccess = await loadAccountEventAccess(userId).catch(() => null);
       if (!isCurrentLoad()) return activeEventIdRef.current;
-      if (
-        preparedAccess?.events.some(
-          (candidate) => candidate.id === routeEventId,
-        ) &&
-        preparedSnapshot
-      ) {
+      if (preparedAccess) {
         access = preparedAccess;
-        displayedPreparedEventId = routeEventId;
         setAccountAccess(preparedAccess);
         setAccessLoading(false);
-        setActiveEventId(routeEventId);
-        setSyncScope(
-          userId,
-          routeEventId,
-          preparedAccess.events.map((candidate) => candidate.id),
-        );
-        await applyBundle(preparedSnapshot.bundle, userId, false);
-        if (!isCurrentLoad()) return activeEventIdRef.current;
-        setEventLoading(false);
-        setSnapshotAt(preparedSnapshot.savedAt);
 
-        if (browserOffline) return routeEventId;
+        const requestedPreparedEvent = routeEventId
+          ? preparedAccess.events.find((candidate) => candidate.id === routeEventId) ?? null
+          : null;
+        const defaultPreparedEvent = selectDefaultEventFocus(
+          preparedAccess.events,
+        ).event;
+        let preparedEventId = requestedPreparedEvent?.id ?? defaultPreparedEvent?.id ?? null;
+        let preparedSnapshot = preparedEventId
+          ? await loadEventSnapshot(userId, preparedEventId).catch(() => null)
+          : null;
+        if (!preparedSnapshot && !requestedPreparedEvent) {
+          const lastSnapshot = await loadLastEventSnapshot(userId).catch(() => null);
+          if (
+            lastSnapshot &&
+            preparedAccess.events.some(
+              (candidate) => candidate.id === lastSnapshot.bundle.event.id,
+            )
+          ) {
+            preparedEventId = lastSnapshot.bundle.event.id;
+            preparedSnapshot = lastSnapshot;
+          }
+        }
+        if (!isCurrentLoad()) return activeEventIdRef.current;
+
+        if (preparedEventId && preparedSnapshot) {
+          displayedPreparedEventId = preparedEventId;
+          if (activeEventIdRef.current !== preparedEventId) {
+            setActiveEventId(preparedEventId);
+            setSyncScope(
+              userId,
+              preparedEventId,
+              preparedAccess.events.map((candidate) => candidate.id),
+            );
+            await applyBundle(preparedSnapshot.bundle, userId, false);
+            if (!isCurrentLoad()) return activeEventIdRef.current;
+            setEventLoading(false);
+            setSnapshotAt(preparedSnapshot.savedAt);
+          }
+
+          if (browserOffline) return preparedEventId;
+        }
       }
+    } finally {
+      // Any auth recovery, preparation refresh, sync drain, or server bundle
+      // request queued during startup can proceed only after this local read.
+      if (isCurrentLoad()) releaseStartupNetworkAfterRender();
     }
 
     try {

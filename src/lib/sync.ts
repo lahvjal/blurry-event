@@ -517,6 +517,12 @@ export async function loadMessageOverlays(params: {
       media: payload.media ?? null,
       reactions: [],
       pending: mutation.syncStatus !== 'synced',
+      deliveryState:
+        mutation.syncStatus === 'failed'
+          ? 'failed'
+          : mutation.syncStatus === 'synced'
+            ? 'sent'
+            : 'queued',
     });
   }
   return overlays.sort((a, b) => a.createdAt.localeCompare(b.createdAt));

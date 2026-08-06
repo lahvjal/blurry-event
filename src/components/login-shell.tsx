@@ -102,6 +102,12 @@ export const loginStyles = StyleSheet.create({
     justifyContent: 'center',
     gap: 30,
   },
+  disabledControl: {
+    opacity: 0.42,
+  },
+  disabledText: {
+    color: 'rgba(255,255,255,0.3)',
+  },
   loginText: {
     fontFamily: fonts.bold,
     fontSize: 16,

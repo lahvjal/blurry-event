@@ -4,17 +4,20 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FloatingNav } from '@/components/floating-nav';
+import { OfflineMutationScreen } from '@/components/offline-state';
 import { PageHeader } from '@/components/page-header';
 import { ParticipantAvatar } from '@/components/participant-avatar';
 import { SearchField } from '@/components/search-field';
 import { Noise } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
+import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
 import { useEvent } from '@/state/event';
 
 export default function NewMessage() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { participants, me, teamOf } = useEvent();
+  const offline = useBrowserDefinitelyOffline();
   const [query, setQuery] = React.useState('');
 
   const term = query.trim().toLowerCase();
@@ -22,6 +25,15 @@ export default function NewMessage() {
   const filtered = term
     ? others.filter((player) => player.fullName.toLowerCase().includes(term))
     : others;
+
+  if (offline) {
+    return (
+      <OfflineMutationScreen
+        title="new message"
+        description="Starting a direct message or group creates a server conversation, so it cannot be done offline. Reconnect and try again; your existing conversations remain available from Messages."
+      />
+    );
+  }
 
   return (
     <View style={styles.root}>

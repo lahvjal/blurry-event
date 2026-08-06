@@ -5,10 +5,12 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FloatingNav } from '@/components/floating-nav';
+import { OfflineNotice } from '@/components/offline-state';
 import { PageHeader } from '@/components/page-header';
 import { ParticipantAvatar } from '@/components/participant-avatar';
 import { ActionButton, Badge, InfoRow, Noise, SectionLabel } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
+import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
 import { useEvent } from '@/state/event';
 import { GAME_STYLE_LABELS, isTeamFormat, teamSize } from '@/state/types';
 
@@ -25,6 +27,7 @@ export default function MyTeam() {
     teamOf,
     inviteToTeam,
   } = useEvent();
+  const offline = useBrowserDefinitelyOffline();
 
   const [showRoster, setShowRoster] = useState(false);
 
@@ -92,6 +95,13 @@ export default function MyTeam() {
         </View>
 
         <View style={styles.body}>
+          {offline && openSlots > 0 ? (
+            <OfflineNotice
+              compact
+              message="Team details remain available, but inviting a player requires a connection. Reconnect and try again."
+            />
+          ) : null}
+
           {/* Roster */}
           <SectionLabel color={colors.link} size={10}>
             roster · {members.length}/{capacity}
@@ -163,7 +173,16 @@ export default function MyTeam() {
                         </Text>
                       </View>
                       <Pressable
-                        style={styles.inviteButton}
+                        accessibilityRole="button"
+                        accessibilityState={{ disabled: offline }}
+                        accessibilityHint={
+                          offline ? 'Inviting a player requires a connection.' : undefined
+                        }
+                        disabled={offline}
+                        style={[
+                          styles.inviteButton,
+                          offline && styles.inviteButtonDisabled,
+                        ]}
                         onPress={() => inviteToTeam(p.id)}>
                         <Text style={styles.inviteButtonText}>INVITE</Text>
                       </Pressable>
@@ -175,6 +194,10 @@ export default function MyTeam() {
               <ActionButton
                 label={`INVITE A PLAYER · ${openSlots} SPOT${openSlots > 1 ? 'S' : ''}`}
                 height={64}
+                disabled={offline}
+                accessibilityHint={
+                  offline ? 'Inviting a player requires a connection.' : undefined
+                }
                 onPress={() => setShowRoster(true)}
               />
             )
@@ -316,6 +339,9 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     fontSize: 10,
     color: colors.highlight,
+  },
+  inviteButtonDisabled: {
+    opacity: 0.4,
   },
   card: {
     backgroundColor: 'rgba(15,17,16,0.4)',

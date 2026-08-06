@@ -14,6 +14,7 @@ import {
   saveOfflineMessages,
 } from '@/lib/offline/chat-cache';
 import {
+  loadAccountEventAccess,
   loadEventSnapshot,
   loadOfflinePreparationManifest,
   loadOfflinePreparationProgressManifest,
@@ -31,6 +32,7 @@ import {
   subscribePwaPrepareProgress,
 } from '@/lib/offline/pwa';
 import { requestPersistentStorage } from '@/lib/offline/store';
+import { hasCompletePreparedEventData } from '@/lib/offline/startup';
 import type { AccessibleEvent, AccountEventAccess } from '@/state/types';
 
 export type OfflinePreparationStage =
@@ -300,43 +302,31 @@ export async function inspectOfflineReadiness(
     (await loadOfflinePreparationManifest(accountId)) ??
     (await loadOfflinePreparationProgressManifest(accountId));
   if (!manifest || manifest.status !== 'ready') return manifest;
-  if (manifest.buildFingerprint !== currentOfflineBuildFingerprint()) {
-    return { ...manifest, status: 'incomplete' };
-  }
 
-  for (const eventId of manifest.selectedEventIds) {
-    const snapshot = await loadEventSnapshot(accountId, eventId);
-    if (!snapshot) return { ...manifest, status: 'incomplete' };
-  }
-  if (manifest.shellCacheVersion) {
-    const cacheNames = await caches.keys();
-    const shellName = `blurry-shell-${manifest.shellCacheVersion}`;
-    if (!cacheNames.includes(shellName)) {
-      return { ...manifest, status: 'incomplete' };
-    }
-    const shell = await caches.open(shellName);
-    const [keys, index, root] = await Promise.all([
-      shell.keys(),
-      shell.match('/index.html'),
-      shell.match('/'),
-    ]);
-    if (
-      keys.length < manifest.shellAssetCount ||
-      !index ||
-      !root
-    ) {
-      return { ...manifest, status: 'incomplete' };
-    }
-  }
-  const mediaCache = await caches.open(MEDIA_CACHE);
-  for (const event of Object.values(manifest.events)) {
-    for (const url of event.mediaUrls) {
-      if (!(await mediaCache.match(url))) {
-        return { ...manifest, status: 'incomplete' };
-      }
-    }
-  }
-  return manifest;
+  // Opening is data-first. A running page already proves that the active
+  // service worker supplied a complete, atomically installed shell. A build
+  // fingerprint change, retired historical shell cache, or missing optional
+  // media must schedule a refresh, but must never lock a verified event
+  // snapshot behind the setup screen.
+  const access = await loadAccountEventAccess(accountId);
+  const snapshots = await Promise.all(
+    manifest.selectedEventIds.map((eventId) =>
+      loadEventSnapshot(accountId, eventId),
+    ),
+  );
+  const complete = hasCompletePreparedEventData({
+    manifestAccountId: manifest.accountId,
+    manifestStatus: manifest.status,
+    selectedEventIds: manifest.selectedEventIds,
+    accessAccountId: access?.accountId ?? null,
+    accessibleEventIds: new Set(access?.events.map((event) => event.id) ?? []),
+    snapshotEventIds: new Set(
+      snapshots
+        .filter((snapshot): snapshot is NonNullable<typeof snapshot> => Boolean(snapshot))
+        .map((snapshot) => snapshot.bundle.event.id),
+    ),
+  });
+  return complete ? manifest : { ...manifest, status: 'incomplete' };
 }
 
 export async function runAutomaticOfflinePreparation(

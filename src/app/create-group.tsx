@@ -5,11 +5,13 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PageHeader } from '@/components/page-header';
+import { OfflineMutationScreen } from '@/components/offline-state';
 import { ParticipantAvatar } from '@/components/participant-avatar';
 import { SearchField } from '@/components/search-field';
 import { Noise } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
 import { addConversationMembers, createGroupConversation } from '@/lib/chat';
+import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
 import { useConversationDetail } from '@/state/chat';
 import { useEvent } from '@/state/event';
 
@@ -17,6 +19,7 @@ export default function CreateGroup() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { event, participants, me } = useEvent();
+  const offline = useBrowserDefinitelyOffline();
   // With `add`, the same picker adds people to a group that already exists.
   const params = useLocalSearchParams<{ add?: string }>();
   const addingTo = params.add ?? null;
@@ -45,6 +48,19 @@ export default function CreateGroup() {
   const ready = addingTo
     ? selected.length > 0
     : name.trim().length > 0 && selected.length > 0;
+
+  if (offline) {
+    return (
+      <OfflineMutationScreen
+        title={addingTo ? 'add people' : 'create group'}
+        description={
+          addingTo
+            ? 'Changing group membership requires a connection. Reconnect, then choose the people you want to add.'
+            : 'Creating a group requires a connection. Reconnect, then try again.'
+        }
+      />
+    );
+  }
 
   const submit = async () => {
     if (!ready || busy) return;

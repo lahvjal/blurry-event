@@ -25,6 +25,7 @@ import {
   LiquidGlassSurface,
 } from '@/components/liquid-glass';
 import { fonts } from '@/constants/theme';
+import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
 import { ChatMessageMediaDraft } from '@/state/types';
 
 const composerPlus = require('@/assets/figma/composer-plus.svg');
@@ -40,6 +41,7 @@ const MIN_INPUT_HEIGHT = 16;
 const MAX_INPUT_HEIGHT = 64;
 const CONTEXT_HEIGHT = 48;
 const ATTACHMENT_SECTION_HEIGHT = 100;
+const OFFLINE_FEEDBACK_HEIGHT = 58;
 const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
 const BAR_FIXED_HEIGHT =
   BAR_PADDING * 2 + INPUT_TOP_INSET + INPUT_ACTION_GAP + ACTION_HEIGHT;
@@ -64,6 +66,7 @@ export function MessageComposer({
   onHeightChange,
   context,
   onCancelContext,
+  disabledReason,
 }: {
   onSend?: (
     text: string,
@@ -72,8 +75,11 @@ export function MessageComposer({
   onHeightChange?: (height: number) => void;
   context?: MessageComposerContext | null;
   onCancelContext?: () => void;
+  /** Used when the thread itself cannot be created without a connection. */
+  disabledReason?: string | null;
 }) {
   const insets = useSafeAreaInsets();
+  const offline = useBrowserDefinitelyOffline();
   const [text, setText] = useState('');
   const [inputHeight, setInputHeight] = useState(MIN_INPUT_HEIGHT);
   const [attachment, setAttachment] =
@@ -82,6 +88,18 @@ export function MessageComposer({
   const hasContent = text.trim().length > 0 || attachment !== null;
   const inputRef = useRef<TextInput>(null);
   const sendingRef = useRef(false);
+  const offlineBlockReason =
+    disabledReason ??
+    (offline && context?.kind === 'edit'
+      ? 'Editing a message requires a connection. Reconnect to continue.'
+      : offline && attachment
+        ? 'Photos require a connection. Remove the attachment to queue the text, or reconnect to send both.'
+        : null);
+  const offlineMessage = offline
+    ? offlineBlockReason ??
+      'Text messages are saved on this device and sent automatically when you reconnect. Photos, edits, deletes, and reactions need a connection.'
+    : null;
+  const sendBlocked = Boolean(offlineBlockReason);
   const bottomInset = Math.max(16, insets.bottom + 6);
   // Fixed space around the measured text: panel padding, the 8px text inset,
   // the 20px action gap, and the 40px action row.
@@ -89,7 +107,8 @@ export function MessageComposer({
     BAR_FIXED_HEIGHT +
     inputHeight +
     (context ? CONTEXT_HEIGHT : 0) +
-    (attachment ? ATTACHMENT_SECTION_HEIGHT : 0);
+    (attachment ? ATTACHMENT_SECTION_HEIGHT : 0) +
+    (offlineMessage ? OFFLINE_FEEDBACK_HEIGHT : 0);
   const composerHeight = BAR_TOP_INSET + barHeight + bottomInset;
   const scrimHeight = composerHeight + FLOATING_SCRIM_RISE;
 
@@ -102,7 +121,7 @@ export function MessageComposer({
   }, [context?.kind, context?.messageId]);
 
   const send = async () => {
-    if (!hasContent || sendingRef.current) return;
+    if (!hasContent || sendingRef.current || sendBlocked) return;
     sendingRef.current = true;
     Keyboard.dismiss();
     setSending(true);
@@ -137,7 +156,7 @@ export function MessageComposer({
   };
 
   const pickMedia = async () => {
-    if (context?.kind === 'edit' || sending) return;
+    if (context?.kind === 'edit' || sending || offline) return;
     try {
       if (Platform.OS !== 'web') {
         const permission =
@@ -256,6 +275,23 @@ export function MessageComposer({
               </View>
             ) : null}
 
+            {offlineMessage ? (
+              <View
+                accessible
+                accessibilityRole="alert"
+                accessibilityLiveRegion="polite"
+                accessibilityLabel={`You're offline. ${offlineMessage}`}
+                style={styles.offlineFeedback}>
+                <View style={styles.offlineDot} />
+                <View style={styles.offlineCopy}>
+                  <Text style={styles.offlineLabel}>YOU’RE OFFLINE</Text>
+                  <Text numberOfLines={2} style={styles.offlineText}>
+                    {offlineMessage}
+                  </Text>
+                </View>
+              </View>
+            ) : null}
+
             {attachment ? (
               <View style={styles.attachmentRow}>
                 <Image
@@ -318,7 +354,15 @@ export function MessageComposer({
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Add photo or GIF"
-                disabled={context?.kind === 'edit' || sending}
+                accessibilityHint={
+                  offline
+                    ? 'Photo sharing requires an internet connection.'
+                    : undefined
+                }
+                accessibilityState={{
+                  disabled: context?.kind === 'edit' || sending || offline,
+                }}
+                disabled={context?.kind === 'edit' || sending || offline}
                 onPress={(event) => {
                   event.stopPropagation();
                   void pickMedia();
@@ -326,7 +370,7 @@ export function MessageComposer({
                 hitSlop={8}
                 style={({ pressed }) => [
                   pressed && styles.pressed,
-                  (context?.kind === 'edit' || sending) &&
+                  (context?.kind === 'edit' || sending || offline) &&
                     styles.actionDisabled,
                 ]}>
                 <Image
@@ -339,7 +383,12 @@ export function MessageComposer({
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Send message"
-                disabled={!hasContent || sending}
+                accessibilityHint={offlineBlockReason ?? undefined}
+                accessibilityState={{
+                  disabled: !hasContent || sending || sendBlocked,
+                  busy: sending,
+                }}
+                disabled={!hasContent || sending || sendBlocked}
                 onPressIn={(event) => {
                   if (Platform.OS !== 'web') return;
                   // Mobile browsers can resize the viewport as the text input
@@ -356,7 +405,8 @@ export function MessageComposer({
                 hitSlop={8}
                 style={({ pressed }) => [
                   pressed && styles.pressed,
-                  (!hasContent || sending) && styles.actionDisabled,
+                  (!hasContent || sending || sendBlocked) &&
+                    styles.actionDisabled,
                 ]}>
                 {sending ? (
                   <View style={styles.actionIcon}>
@@ -418,6 +468,41 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+  },
+  offlineFeedback: {
+    height: OFFLINE_FEEDBACK_HEIGHT,
+    marginHorizontal: -BAR_PADDING,
+    marginTop: -BAR_PADDING,
+    marginBottom: BAR_PADDING,
+    paddingHorizontal: BAR_PADDING,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,207,139,0.18)',
+    backgroundColor: 'rgba(255,207,139,0.055)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+  },
+  offlineDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#ffcf8b',
+  },
+  offlineCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  offlineLabel: {
+    fontFamily: fonts.bold,
+    fontSize: 8,
+    letterSpacing: 0.7,
+    color: '#ffcf8b',
+  },
+  offlineText: {
+    fontFamily: fonts.regular,
+    fontSize: 10,
+    lineHeight: 14,
+    color: 'rgba(255,255,255,0.58)',
   },
   contextCopy: {
     flex: 1,

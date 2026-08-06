@@ -11,6 +11,7 @@ import {
   OfflinePreparationScreen,
   type OfflinePreparationScreenPhase,
 } from '@/components/offline-preparation-screen';
+import { loadStoredAuthSession } from '@/lib/auth';
 import {
   loadPreparedOfflineAccountId,
   type OfflinePreparationManifest,
@@ -21,7 +22,8 @@ import {
   runAutomaticOfflinePreparation,
   type OfflinePreparationProgress,
 } from '@/lib/offline/preparation';
-import { supabase } from '@/lib/supabase';
+import { selectLocalStartupIdentity } from '@/lib/offline/startup';
+import { releaseStartupNetwork, supabase } from '@/lib/supabase';
 
 export type OfflinePreparationPhase =
   | 'disabled'
@@ -83,25 +85,41 @@ export function OfflinePreparationProvider({
   useEffect(() => {
     let mounted = true;
     let authRevision = 0;
-    const initialRevision = authRevision;
-    void supabase.auth.getSession().then(async ({ data }) => {
-      if (initialRevision !== authRevision) return;
-      if (!mounted) return;
-      if (data.session) {
-        setOfflineAccountId(null);
-        setSession(data.session);
-        return;
+
+    const reconcileSdkSession = async (revision: number) => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (!mounted || revision !== authRevision) return;
+        if (data.session) {
+          setOfflineAccountId(null);
+          setSession(data.session);
+          return;
+        }
+      } catch {
+        // A local ready receipt remains authoritative for offline opening.
       }
       const preparedId = await loadPreparedOfflineAccountId().catch(() => null);
-      if (!mounted || initialRevision !== authRevision) return;
+      if (!mounted || revision !== authRevision) return;
       setOfflineAccountId(preparedId);
       setSession(null);
-    }).catch(async () => {
-      const preparedId = await loadPreparedOfflineAccountId().catch(() => null);
-      if (!mounted || initialRevision !== authRevision) return;
-      setOfflineAccountId(preparedId);
-      setSession(null);
+    };
+
+    void Promise.all([
+      loadStoredAuthSession(),
+      loadPreparedOfflineAccountId().catch(() => null),
+    ]).then(([storedSession, preparedId]) => {
+      if (!mounted || authRevision !== 0) return;
+      const storedAccountId = storedSession?.user.id ?? null;
+      // Never expose one account's receipt underneath a different locally
+      // persisted login. A same-account receipt, or a receipt with no session,
+      // remains the explicit authorization for offline reopening.
+      const identity = selectLocalStartupIdentity(preparedId, storedAccountId);
+      setOfflineAccountId(identity.preparedAccountId);
+      setSession(storedSession);
+      // Reconcile/refresh only after local identity has unblocked startup.
+      void reconcileSdkSession(authRevision);
     });
+
     const { data } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
       if (!mounted) return;
       authRevision += 1;
@@ -123,18 +141,21 @@ export function OfflinePreparationProvider({
   }, []);
 
   const accountId = session?.user.id ?? offlineAccountId;
+  const identityResolved = session !== undefined;
 
   useEffect(() => {
     if (!enabled) {
       setValue(INITIAL_VALUE);
       return;
     }
-    if (session === undefined) {
+    if (!identityResolved) {
       setValue({ ...INITIAL_VALUE, phase: 'checking' });
       return;
     }
     if (!accountId) {
       setValue({ ...INITIAL_VALUE, phase: 'signed-out' });
+      // There is no prepared account/event to render before authentication.
+      releaseStartupNetwork();
       return;
     }
 
@@ -233,6 +254,9 @@ export function OfflinePreparationProvider({
         if (navigator.onLine) void prepare(true);
         return;
       }
+      // No complete local install exists, so preparation/authentication needs
+      // the network rather than waiting for an EventProvider that cannot mount.
+      releaseStartupNetwork();
       setValue({
         phase: navigator.onLine ? 'preparing' : 'incomplete',
         accountId,
@@ -268,7 +292,7 @@ export function OfflinePreparationProvider({
       window.removeEventListener('online', retryNow);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [accountId, enabled, session]);
+  }, [accountId, enabled, identityResolved]);
 
   const contextValue = useMemo(() => value, [value]);
   return (
@@ -290,6 +314,7 @@ export function useOfflinePreparation(): OfflinePreparationContextValue {
 export function OfflinePreparationGate({ children }: { children: React.ReactNode }) {
   const state = useOfflinePreparation();
   if (
+    state.isReady ||
     state.phase === 'disabled' ||
     state.phase === 'signed-out' ||
     state.phase === 'ready'

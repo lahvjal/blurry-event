@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 
 import { fonts } from '@/constants/theme';
+import { syncNow } from '@/lib/sync';
 import { formatMessageTime } from '@/state/chat';
 import { ChatMessage } from '@/state/types';
 
@@ -87,6 +88,7 @@ export function ChatMessageBubble({
   onReply,
   onEdit,
   onUnsend,
+  offline = false,
 }: {
   message: ChatMessage;
   replyToMessage?: ChatMessage;
@@ -97,6 +99,7 @@ export function ChatMessageBubble({
   onReply: () => void;
   onEdit: () => void;
   onUnsend: () => void;
+  offline?: boolean;
 }) {
   const { width: windowWidth } = useWindowDimensions();
   const bubbleRef = React.useRef<View>(null);
@@ -171,6 +174,24 @@ export function ChatMessageBubble({
       ? message.media.width / message.media.height
       : 1;
   const mediaHeight = Math.min(310, Math.max(140, mediaWidth / mediaAspect));
+  const queued = message.deliveryState === 'queued' || Boolean(message.pending);
+  const failed = message.deliveryState === 'failed';
+  const deliveryTimeLabel = failed
+    ? 'Created at'
+    : queued
+      ? 'Queued at'
+      : 'Sent at';
+  const deliveryDescription = failed
+    ? offline
+      ? 'Not sent. Reconnect, then tap to retry.'
+      : 'Not sent. Tap to retry.'
+    : queued
+      ? offline
+        ? 'Offline and queued. Sends automatically when you reconnect.'
+        : 'Queued. Sends automatically.'
+      : message.deliveryState === 'sent'
+        ? 'Sent.'
+        : '';
 
   const reactedWith = React.useMemo(
     () =>
@@ -240,7 +261,7 @@ export function ChatMessageBubble({
   };
 
   const chooseReaction = (emoji: string) => {
-    if (!canChangeMessage) return;
+    if (!canChangeMessage || offline) return;
     void Haptics.selectionAsync();
     onReact(emoji);
     closeOverlay();
@@ -327,10 +348,14 @@ export function ChatMessageBubble({
         <Pressable
           ref={bubbleRef}
           accessibilityRole="button"
-          accessibilityLabel={`${accessibleBody}. Sent at ${formatMessageTime(
+          accessibilityLabel={`${accessibleBody}. ${deliveryTimeLabel} ${formatMessageTime(
             message.createdAt,
-          )}`}
-          accessibilityHint="Double tap to react. Press and hold for message actions."
+          )}${deliveryDescription ? `. ${deliveryDescription}` : ''}`}
+          accessibilityHint={
+            offline
+              ? 'Press and hold for available message actions. Reactions, edits, and unsend require a connection.'
+              : 'Double tap to react. Press and hold for message actions.'
+          }
           accessibilityActions={[
             { name: 'activate', label: 'Open reactions' },
             { name: 'longpress', label: 'Open message actions' },
@@ -353,7 +378,8 @@ export function ChatMessageBubble({
             styles.bubble,
             webBubbleInteractionStyle,
             mine ? styles.bubbleOutgoing : styles.bubbleIncoming,
-            message.pending && styles.bubblePending,
+            queued && styles.bubblePending,
+            failed && styles.bubbleFailed,
           ]}>
           {message.replyToId ? (
             <View style={styles.replyPreview}>
@@ -399,11 +425,44 @@ export function ChatMessageBubble({
           <Text
             selectable={false}
             style={[styles.timestamp, mine && styles.timestampMine]}>
-            {message.pending ? 'SENDING · ' : ''}
+            {message.deliveryState === 'sent' ? 'SENT · ' : ''}
             {message.editedAt ? 'EDITED · ' : ''}
             {formatMessageTime(message.createdAt)}
           </Text>
         </Pressable>
+
+        {failed ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={
+              offline
+                ? 'Message not sent. Reconnect, then retry.'
+                : 'Message not sent. Retry now.'
+            }
+            accessibilityHint={
+              offline
+                ? 'Reconnect before retrying this message.'
+                : 'Attempts to send this message again.'
+            }
+            accessibilityState={{ disabled: offline }}
+            disabled={offline}
+            onPress={() => void syncNow()}
+            hitSlop={8}>
+            <Text style={[styles.deliveryStatus, styles.deliveryFailed]}>
+              {offline
+                ? 'NOT SENT · RECONNECT, THEN TAP TO RETRY'
+                : 'NOT SENT · TAP TO RETRY'}
+            </Text>
+          </Pressable>
+        ) : queued ? (
+          <Text
+            accessibilityLiveRegion="polite"
+            style={styles.deliveryStatus}>
+            {offline
+              ? 'OFFLINE · QUEUED · SENDS AUTOMATICALLY'
+              : 'QUEUED · SENDS AUTOMATICALLY'}
+          </Text>
+        ) : null}
 
         {summaries.length > 0 ? (
           <View
@@ -415,6 +474,7 @@ export function ChatMessageBubble({
               <ReactionChip
                 key={reaction.emoji}
                 reaction={reaction}
+                disabled={offline}
                 onPress={() => chooseReaction(reaction.emoji)}
                 onShowDetails={openReactionDetails}
               />
@@ -440,7 +500,11 @@ export function ChatMessageBubble({
                   styles.reactionMenu,
                   { left: menuLeft, top: menuTop },
                 ]}>
-                {!addingCustom ? (
+                {offline ? (
+                  <Text style={styles.offlineReactionNotice}>
+                    OFFLINE · REACTIONS REQUIRE A CONNECTION
+                  </Text>
+                ) : !addingCustom ? (
                   <>
                     {QUICK_REACTIONS.map((emoji) => (
                       <Pressable
@@ -523,13 +587,19 @@ export function ChatMessageBubble({
                 {mine && canChangeMessage ? (
                   <>
                     <MessageAction
-                      label="UNSEND"
+                      label={offline ? 'UNSEND · OFFLINE' : 'UNSEND'}
                       destructive
+                      disabled={offline}
                       last={!canEditMessage}
                       onPress={confirmUnsend}
                     />
                     {canEditMessage ? (
-                      <MessageAction label="EDIT" onPress={chooseEdit} last />
+                      <MessageAction
+                        label={offline ? 'EDIT · OFFLINE' : 'EDIT'}
+                        disabled={offline}
+                        onPress={chooseEdit}
+                        last
+                      />
                     ) : null}
                   </>
                 ) : null}
@@ -581,10 +651,12 @@ export function ChatMessageBubble({
 
 function ReactionChip({
   reaction,
+  disabled = false,
   onPress,
   onShowDetails,
 }: {
   reaction: ReactionSummary;
+  disabled?: boolean;
   onPress: () => void;
   onShowDetails: (anchor: {
     x: number;
@@ -619,14 +691,18 @@ function ReactionChip({
       accessibilityLabel={`${reaction.emoji}, ${reaction.count} ${
         reaction.count === 1 ? 'reaction' : 'reactions'
       }`}
-      accessibilityHint="Tap to toggle. Press and hold to see who reacted."
+      accessibilityHint={
+        disabled
+          ? 'Reaction changes require a connection. Press and hold to see who reacted.'
+          : 'Tap to toggle. Press and hold to see who reacted.'
+      }
       accessibilityActions={[
         { name: 'activate', label: 'Toggle reaction' },
         { name: 'longpress', label: 'Show reaction details' },
       ]}
       onAccessibilityAction={(event) => {
         if (event.nativeEvent.actionName === 'activate') {
-          onPress();
+          if (!disabled) onPress();
         } else if (event.nativeEvent.actionName === 'longpress') {
           showDetails();
         }
@@ -641,12 +717,13 @@ function ReactionChip({
           held.current = false;
           return;
         }
-        onPress();
+        if (!disabled) onPress();
       }}
       {...webContextMenuProps}
       style={[
         styles.reactionChip,
         reaction.reactedByMe && styles.reactionChipMine,
+        disabled && styles.reactionChipDisabled,
       ]}>
       <Text selectable={false} style={styles.reactionEmoji}>
         {reaction.emoji}
@@ -662,12 +739,14 @@ function MessageAction({
   label,
   destructive = false,
   error = false,
+  disabled = false,
   last = false,
   onPress,
 }: {
   label: string;
   destructive?: boolean;
   error?: boolean;
+  disabled?: boolean;
   last?: boolean;
   onPress: () => void;
 }) {
@@ -675,6 +754,11 @@ function MessageAction({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label.toLowerCase()}
+      accessibilityState={{ disabled }}
+      accessibilityHint={
+        disabled ? 'Reconnect to use this message action.' : undefined
+      }
+      disabled={disabled}
       onPress={onPress}
       style={[
         styles.messageAction,
@@ -685,6 +769,7 @@ function MessageAction({
           styles.messageActionLabel,
           destructive && styles.messageActionDestructive,
           error && styles.messageActionError,
+          disabled && styles.messageActionDisabled,
         ]}>
         {label}
       </Text>
@@ -720,6 +805,22 @@ const styles = StyleSheet.create({
   },
   bubblePending: {
     opacity: 0.55,
+  },
+  bubbleFailed: {
+    opacity: 0.78,
+    borderWidth: 1,
+    borderColor: 'rgba(255,157,157,0.35)',
+  },
+  deliveryStatus: {
+    paddingHorizontal: 3,
+    fontFamily: fonts.bold,
+    fontSize: 8,
+    lineHeight: 12,
+    letterSpacing: 0.4,
+    color: '#ffcf8b',
+  },
+  deliveryFailed: {
+    color: '#ff9d9d',
   },
   replyPreview: {
     marginBottom: 10,
@@ -789,6 +890,18 @@ const styles = StyleSheet.create({
   reactionChipMine: {
     borderColor: 'rgba(123,255,178,0.48)',
     backgroundColor: 'rgba(30,54,41,0.92)',
+  },
+  reactionChipDisabled: {
+    opacity: 0.55,
+  },
+  offlineReactionNotice: {
+    flex: 1,
+    paddingHorizontal: 18,
+    textAlign: 'center',
+    fontFamily: fonts.bold,
+    fontSize: 9,
+    lineHeight: 14,
+    color: '#ffcf8b',
   },
   reactionEmoji: {
     fontSize: 15,
@@ -914,6 +1027,9 @@ const styles = StyleSheet.create({
   },
   messageActionError: {
     color: '#ff9d9d',
+  },
+  messageActionDisabled: {
+    color: 'rgba(255,255,255,0.34)',
   },
   quickReaction: {
     width: 42,

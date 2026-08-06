@@ -4,11 +4,13 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FloatingNav } from '@/components/floating-nav';
+import { OfflineNotice } from '@/components/offline-state';
 import { ParticipantAvatar } from '@/components/participant-avatar';
 import { PushPrompt } from '@/components/push-controls';
 import { SearchField } from '@/components/search-field';
 import { Noise } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
+import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
 import {
   conversationTitle,
   formatInboxTime,
@@ -22,6 +24,7 @@ export default function Messages() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { event, me, participantById } = useEvent();
+  const offline = useBrowserDefinitelyOffline();
   const { conversations, loading, error } = useConversations();
   const [query, setQuery] = React.useState('');
 
@@ -60,7 +63,14 @@ export default function Messages() {
         <View style={styles.titleRow}>
           <Text style={styles.title}>Messages</Text>
           <Pressable
-            style={styles.newButton}
+            accessibilityRole="button"
+            accessibilityLabel="Start a new conversation"
+            accessibilityHint={
+              offline ? 'Starting a conversation requires a connection.' : undefined
+            }
+            accessibilityState={{ disabled: offline }}
+            disabled={offline}
+            style={[styles.newButton, offline && styles.newButtonDisabled]}
             onPress={() => router.push('/new-message')}>
             <Text style={styles.newButtonText}>+</Text>
           </Pressable>
@@ -73,7 +83,15 @@ export default function Messages() {
           style={{ marginBottom: 8 }}
         />
 
-        {me.claimed ? <PushPrompt /> : null}
+        {offline ? (
+          <OfflineNotice
+            compact
+            message="Saved conversations and recent messages are available. Starting a new conversation requires a connection; reconnect and try again."
+            style={styles.offlineNotice}
+          />
+        ) : null}
+
+        {me.claimed && !offline ? <PushPrompt /> : null}
 
         {error ? <Text style={styles.notice}>{error}</Text> : null}
 
@@ -208,6 +226,13 @@ const styles = StyleSheet.create({
     fontSize: 22,
     color: '#ffffff',
     marginTop: -2,
+  },
+  newButtonDisabled: {
+    opacity: 0.38,
+  },
+  offlineNotice: {
+    marginHorizontal: 12,
+    marginBottom: 10,
   },
   row: {
     flexDirection: 'row',

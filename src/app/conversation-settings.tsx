@@ -10,6 +10,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FloatingNav } from '@/components/floating-nav';
+import { OfflineNotice } from '@/components/offline-state';
 import { PAGE_HEADER_HEIGHT, PageHeader } from '@/components/page-header';
 import { ParticipantAvatar } from '@/components/participant-avatar';
 import { Noise } from '@/components/ui';
@@ -70,7 +71,7 @@ export default function ConversationSettings() {
     }
     if (browserOffline) {
       setNotificationsLoading(false);
-      setSettingsError('Reconnect to view or change notification settings.');
+      setSettingsError(null);
       return;
     }
 
@@ -128,7 +129,7 @@ export default function ConversationSettings() {
   };
 
   const leave = async () => {
-    if (!conversationId || leaving) return;
+    if (!conversationId || leaving || browserOffline) return;
     setLeaving(true);
     setLeaveError(null);
     try {
@@ -176,6 +177,13 @@ export default function ConversationSettings() {
           </View>
         </View>
 
+        {browserOffline ? (
+          <OfflineNotice
+            compact
+            message="Conversation details remain available, but notification settings, membership changes, and leaving a group require a connection. Reconnect and try again."
+          />
+        ) : null}
+
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
         <View>
@@ -192,15 +200,27 @@ export default function ConversationSettings() {
               accessibilityLabel={`Notifications for ${title}`}
               accessibilityState={{
                 checked: notificationsEnabled,
-                disabled: notificationsLoading || notificationsBusy,
+                disabled:
+                  browserOffline || notificationsLoading || notificationsBusy,
                 busy: notificationsBusy,
               }}
-              disabled={notificationsLoading || notificationsBusy || !me.claimed}
+              accessibilityHint={
+                browserOffline
+                  ? 'Changing notification settings requires a connection.'
+                  : undefined
+              }
+              disabled={
+                browserOffline ||
+                notificationsLoading ||
+                notificationsBusy ||
+                !me.claimed
+              }
               onPress={toggleNotifications}
               style={[
                 styles.switch,
                 notificationsEnabled && styles.switchOn,
-                (notificationsLoading || notificationsBusy) && styles.switchBusy,
+                (browserOffline || notificationsLoading || notificationsBusy) &&
+                  styles.switchBusy,
               ]}>
               <View
                 style={[
@@ -219,6 +239,14 @@ export default function ConversationSettings() {
               <Text style={styles.sectionLabel}>MEMBERS · {members.length}</Text>
               {isEventGroup || isTeamChat ? null : (
                 <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: browserOffline }}
+                  accessibilityHint={
+                    browserOffline
+                      ? 'Changing group membership requires a connection.'
+                      : undefined
+                  }
+                  disabled={browserOffline}
                   onPress={() =>
                     conversationId
                       ? router.push({
@@ -227,7 +255,13 @@ export default function ConversationSettings() {
                         })
                       : undefined
                   }>
-                  <Text style={styles.addPeople}>ADD PEOPLE</Text>
+                  <Text
+                    style={[
+                      styles.addPeople,
+                      browserOffline && styles.actionDisabled,
+                    ]}>
+                    ADD PEOPLE
+                  </Text>
                 </Pressable>
               )}
             </View>
@@ -271,9 +305,17 @@ export default function ConversationSettings() {
 
         {!direct && conversation && !isEventGroup && !isTeamChat ? (
           <Pressable
-            style={styles.leaveButton}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: leaving || browserOffline }}
+            accessibilityHint={
+              browserOffline ? 'Leaving a group requires a connection.' : undefined
+            }
+            style={[
+              styles.leaveButton,
+              browserOffline && styles.leaveButtonDisabled,
+            ]}
             onPress={leave}
-            disabled={leaving}>
+            disabled={leaving || browserOffline}>
             <Text style={styles.leaveText}>
               {leaving ? 'LEAVING…' : 'LEAVE GROUP'}
             </Text>
@@ -358,6 +400,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     color: 'rgba(255,255,255,0.45)',
+  },
+  actionDisabled: {
+    color: 'rgba(255,255,255,0.28)',
+  },
+  leaveButtonDisabled: {
+    opacity: 0.4,
   },
   switch: {
     width: 50,

@@ -12,8 +12,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PageHeader } from '@/components/page-header';
+import { OfflineMutationScreen } from '@/components/offline-state';
 import { ActionButton, Noise, SectionLabel } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
+import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
 import { useEvent } from '@/state/event';
 import { GAME_STYLE_LABELS, GameStyle, teamSize } from '@/state/types';
 
@@ -32,6 +34,7 @@ export default function Admin() {
     postAnnouncement,
     teamOf,
   } = useEvent();
+  const offline = useBrowserDefinitelyOffline();
 
   const [draft, setDraft] = useState('');
 
@@ -45,6 +48,15 @@ export default function Admin() {
           <Text style={styles.denied}>You don’t have admin access for this event.</Text>
         </View>
       </View>
+    );
+  }
+
+  if (offline) {
+    return (
+      <OfflineMutationScreen
+        title="event admin"
+        description="Admin changes are written directly to the club database and cannot be queued safely. Reconnect to edit event details, rosters, teams, game style, scorecard setup, or announcements."
+      />
     );
   }
 

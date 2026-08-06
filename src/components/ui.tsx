@@ -182,16 +182,26 @@ export function ActionButton({
   label,
   onPress,
   height = 74,
+  disabled = false,
+  accessibilityHint,
 }: {
   label: string;
   onPress?: () => void;
   height?: number;
+  disabled?: boolean;
+  accessibilityHint?: string;
 }) {
   return (
-    <Pressable onPress={onPress}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityHint={accessibilityHint}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}>
       <LinearGradient
         colors={['#151e19', '#0c1611']}
-        style={[styles.actionButton, { height }]}>
+        style={[styles.actionButton, { height }, disabled && styles.actionDisabled]}>
         <Text style={styles.actionButtonText}>{label}</Text>
       </LinearGradient>
     </Pressable>
@@ -229,6 +239,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#ffffff',
     textTransform: 'uppercase',
+  },
+  actionDisabled: {
+    opacity: 0.42,
   },
   linkAction: {
     flexDirection: 'row',
