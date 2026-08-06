@@ -6,6 +6,10 @@ import {
   subscribeToMessageReactions,
   subscribeToMessages,
 } from '@/lib/chat';
+import {
+  isBrowserDefinitelyOffline,
+  useBrowserDefinitelyOffline,
+} from '@/lib/offline/network';
 import { supabase } from '@/lib/supabase';
 
 /**
@@ -20,6 +24,7 @@ import { supabase } from '@/lib/supabase';
 
 let total = 0;
 let activeEventId = '';
+let activeBrowserOffline = false;
 let stopRealtime: (() => void) | null = null;
 const listeners = new Set<() => void>();
 
@@ -48,7 +53,7 @@ export function setUnreadTotal(eventId: string, next: number): void {
 
 /** Asks the server for the current count. */
 export async function refreshUnread(eventId: string): Promise<void> {
-  if (eventId !== activeEventId) return;
+  if (eventId !== activeEventId || isBrowserDefinitelyOffline()) return;
   try {
     const { data } = await supabase.auth.getSession();
     if (!data.session) {
@@ -66,13 +71,28 @@ export async function refreshUnread(eventId: string): Promise<void> {
   }
 }
 
-function activateUnreadEvent(eventId: string): void {
-  if (activeEventId === eventId) return;
+function activateUnreadEvent(eventId: string, browserOffline: boolean): void {
+  if (
+    activeEventId === eventId &&
+    activeBrowserOffline === browserOffline
+  ) {
+    return;
+  }
+  const eventChanged = activeEventId !== eventId;
   stopRealtime?.();
+  stopRealtime = null;
   activeEventId = eventId;
-  total = 0;
-  emit();
-  void setBadge(0);
+  activeBrowserOffline = browserOffline;
+  if (eventChanged) {
+    total = 0;
+    emit();
+    void setBadge(0);
+  }
+
+  // Offline preparation already stored the inbox. The inbox hook publishes
+  // its cached unread total when opened; until then, preserve the last known
+  // value and do not start a doomed HTTP/WebSocket connection.
+  if (browserOffline) return;
 
   const stopMessages = subscribeToMessages(eventId, null, () =>
     void refreshUnread(eventId),
@@ -88,9 +108,11 @@ function activateUnreadEvent(eventId: string): void {
 }
 
 export function useUnreadTotal(eventId: string): number {
+  const browserOffline = useBrowserDefinitelyOffline();
+
   useEffect(() => {
-    activateUnreadEvent(eventId);
-  }, [eventId]);
+    activateUnreadEvent(eventId, browserOffline);
+  }, [browserOffline, eventId]);
 
   return useSyncExternalStore(
     subscribe,

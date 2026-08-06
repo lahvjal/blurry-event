@@ -19,6 +19,7 @@ import {
   leaveConversation,
   setConversationNotifications,
 } from '@/lib/chat';
+import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
 import {
   conversationTitle,
   initialsOf,
@@ -32,6 +33,7 @@ export default function ConversationSettings() {
   const { event, me, participantById } = useEvent();
   const params = useLocalSearchParams<{ id?: string }>();
   const conversationId = params.id ?? null;
+  const browserOffline = useBrowserDefinitelyOffline();
 
   const { conversation, loading, error } = useConversationDetail(conversationId);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
@@ -66,6 +68,11 @@ export default function ConversationSettings() {
       setNotificationsLoading(false);
       return;
     }
+    if (browserOffline) {
+      setNotificationsLoading(false);
+      setSettingsError('Reconnect to view or change notification settings.');
+      return;
+    }
 
     let active = true;
     setNotificationsLoading(true);
@@ -89,11 +96,12 @@ export default function ConversationSettings() {
     return () => {
       active = false;
     };
-  }, [conversationId, me.claimed, me.id]);
+  }, [browserOffline, conversationId, me.claimed, me.id]);
 
   const toggleNotifications = async () => {
     if (
       !conversationId ||
+      browserOffline ||
       notificationsLoading ||
       notificationsBusy ||
       !me.claimed

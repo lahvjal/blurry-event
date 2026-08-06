@@ -42,6 +42,7 @@ import {
   saveAccountEventAccess,
   saveEventSnapshot,
 } from '@/lib/offline/event-snapshot';
+import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
 import { supabase } from '@/lib/supabase';
 import { useOfflinePreparation } from '@/state/offline-preparation';
 import {
@@ -364,6 +365,7 @@ function reasonFor(error: unknown): string {
 
 export function EventProvider({ children }: { children: React.ReactNode }) {
   const { accountId: preparedAccountId } = useOfflinePreparation();
+  const browserOffline = useBrowserDefinitelyOffline();
   const routeParams = useGlobalSearchParams<{ eventId?: string | string[] }>();
   const requestedEventId = Array.isArray(routeParams.eventId)
     ? routeParams.eventId[0]
@@ -521,8 +523,15 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     let access: AccountEventAccess | null = null;
 
     try {
-      access = await fetchAccountEventAccess(userId);
-      void saveAccountEventAccess(access).catch(() => {});
+      if (browserOffline) {
+        access = await loadAccountEventAccess(userId);
+        if (!access) {
+          throw new Error('This account was not included in offline setup.');
+        }
+      } else {
+        access = await fetchAccountEventAccess(userId);
+        void saveAccountEventAccess(access).catch(() => {});
+      }
     } catch (error) {
       access = await loadAccountEventAccess(userId).catch(() => null);
       if (access) {
@@ -607,6 +616,9 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
     setEventLoading(true);
     try {
+      if (browserOffline) {
+        throw new Error('The prepared event snapshot must be used offline.');
+      }
       const bundle = await fetchEventBundle(eventId);
       setActiveEventId(eventId);
       setSyncScope(
@@ -653,7 +665,13 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       setEventLoadError(reasonFor(error));
       throw error;
     }
-  }, [applySeed, applyBundle, clearFocusedEvent, preparedAccountId]);
+  }, [
+    applySeed,
+    applyBundle,
+    browserOffline,
+    clearFocusedEvent,
+    preparedAccountId,
+  ]);
 
   const loadAndReport = useCallback(async (eventId?: string | null) => {
     try {
@@ -730,7 +748,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   // it is open, not only after an app foreground. A short debounce folds a team
   // submitting several nearby scores into one consistent bundle refresh.
   useEffect(() => {
-    if (!isLive) return;
+    if (!isLive || browserOffline) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const refreshSoon = () => {
       if (timer) clearTimeout(timer);
@@ -767,7 +785,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       if (timer) clearTimeout(timer);
       void supabase.removeChannel(channel);
     };
-  }, [event.id, isLive, loadFromServer]);
+  }, [browserOffline, event.id, isLive, loadFromServer]);
 
   /**
    * Sends one write to Supabase behind an optimistic local update. If the server

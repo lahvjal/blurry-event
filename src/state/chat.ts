@@ -22,6 +22,7 @@ import {
   saveOfflineConversationSummaries,
   saveOfflineMessages,
 } from '@/lib/offline/chat-cache';
+import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
 import { loadMessageOverlays } from '@/lib/sync';
 import { refreshUnread, setUnreadTotal } from '@/state/unread';
 import { useEvent } from '@/state/event';
@@ -50,12 +51,28 @@ function errorText(error: unknown): string {
 export function useConversations() {
   const { event, accountAccess } = useEvent();
   const accountId = accountAccess?.accountId ?? null;
+  const browserOffline = useBrowserDefinitelyOffline();
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     try {
+      if (browserOffline) {
+        const cached = accountId
+          ? await loadOfflineConversationSummaries(accountId, event.id)
+          : null;
+        if (!cached) {
+          throw new Error('Messages were not included in offline setup.');
+        }
+        setConversations(cached);
+        setUnreadTotal(
+          event.id,
+          cached.reduce((total, c) => total + c.unreadCount, 0),
+        );
+        setError(null);
+        return;
+      }
       const summaries = await fetchConversationSummaries(event.id);
       if (accountId) {
         await saveOfflineConversationSummaries(accountId, event.id, summaries);
@@ -87,7 +104,7 @@ export function useConversations() {
     } finally {
       setLoading(false);
     }
-  }, [accountId, event.id]);
+  }, [accountId, browserOffline, event.id]);
 
   // Refetch on focus so a thread started elsewhere — or one someone else added
   // you to — appears without a restart.
@@ -100,12 +117,18 @@ export function useConversations() {
 
   // Any incoming message restacks the list and lights an unread badge.
   useEffect(
-    () => subscribeToMessages(event.id, null, () => void reload()),
-    [event.id, reload],
+    () =>
+      browserOffline
+        ? undefined
+        : subscribeToMessages(event.id, null, () => void reload()),
+    [browserOffline, event.id, reload],
   );
   useEffect(
-    () => subscribeToMessageReactions(event.id, () => void reload()),
-    [event.id, reload],
+    () =>
+      browserOffline
+        ? undefined
+        : subscribeToMessageReactions(event.id, () => void reload()),
+    [browserOffline, event.id, reload],
   );
 
   return { conversations, loading, error, reload };
@@ -115,6 +138,7 @@ export function useConversations() {
 export function useConversationDetail(conversationId: string | null) {
   const { event, accountAccess } = useEvent();
   const accountId = accountAccess?.accountId ?? null;
+  const browserOffline = useBrowserDefinitelyOffline();
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -126,6 +150,17 @@ export function useConversationDetail(conversationId: string | null) {
       return;
     }
     try {
+      if (browserOffline) {
+        const cached = accountId
+          ? await loadOfflineConversation(accountId, event.id, conversationId)
+          : null;
+        if (!cached) {
+          throw new Error('This conversation was not included in offline setup.');
+        }
+        setConversation(cached);
+        setError(null);
+        return;
+      }
       const next = await fetchConversation(event.id, conversationId);
       setConversation(next);
       if (accountId && next) {
@@ -149,7 +184,7 @@ export function useConversationDetail(conversationId: string | null) {
     } finally {
       setLoading(false);
     }
-  }, [accountId, conversationId, event.id]);
+  }, [accountId, browserOffline, conversationId, event.id]);
 
   useFocusEffect(
     useCallback(() => {
@@ -164,6 +199,7 @@ export function useConversationDetail(conversationId: string | null) {
 export function useConversation(conversationId: string | null) {
   const { event, me, accountAccess } = useEvent();
   const accountId = accountAccess?.accountId ?? null;
+  const browserOffline = useBrowserDefinitelyOffline();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -178,6 +214,27 @@ export function useConversation(conversationId: string | null) {
       return;
     }
     try {
+      if (browserOffline) {
+        const [cached, overlays] = await Promise.all([
+          accountId
+            ? loadOfflineMessages(accountId, event.id, conversationId)
+            : Promise.resolve(null),
+          accountId
+            ? loadMessageOverlays({
+                userId: accountId,
+                eventId: event.id,
+                conversationId,
+              })
+            : Promise.resolve([]),
+        ]);
+        if (!cached && overlays.length === 0) {
+          throw new Error('This conversation was not included in offline setup.');
+        }
+        setMessages(overlays.reduce(mergeMessage, cached ?? []));
+        setHasOlder(false);
+        setError(null);
+        return;
+      }
       const page = await fetchMessages(event.id, conversationId);
       const overlays = accountId
         ? await loadMessageOverlays({
@@ -217,7 +274,7 @@ export function useConversation(conversationId: string | null) {
     } finally {
       setLoading(false);
     }
-  }, [accountId, conversationId, event.id]);
+  }, [accountId, browserOffline, conversationId, event.id]);
 
   useEffect(() => {
     if (!accountId || !conversationId || loading) return;
@@ -233,7 +290,7 @@ export function useConversation(conversationId: string | null) {
   useRefreshOnPull(reload);
 
   useEffect(() => {
-    if (!conversationId) return;
+    if (!conversationId || browserOffline) return;
     return subscribeToMessages(event.id, conversationId, (change) =>
       setMessages((prev) => {
         if (change.event === 'DELETE') {
@@ -250,16 +307,16 @@ export function useConversation(conversationId: string | null) {
         return mergeMessage(prev, change.message);
       }),
     );
-  }, [conversationId, event.id]);
+  }, [browserOffline, conversationId, event.id]);
 
   useEffect(() => {
-    if (!conversationId) return;
+    if (!conversationId || browserOffline) return;
     return subscribeToMessageReactions(event.id, (change) =>
       setMessages((prev) =>
         mergeReaction(prev, change.messageId, change.reaction, change.event),
       ),
     );
-  }, [conversationId, event.id]);
+  }, [browserOffline, conversationId, event.id]);
 
   const reactionCount = messages.reduce(
     (total, message) => total + message.reactions.length,
@@ -269,7 +326,14 @@ export function useConversation(conversationId: string | null) {
   // Clear the badge on open, and again as messages or reactions arrive while
   // the conversation is visible.
   useEffect(() => {
-    if (!conversationId || messages.length === 0 || !me.claimed) return;
+    if (
+      browserOffline ||
+      !conversationId ||
+      messages.length === 0 ||
+      !me.claimed
+    ) {
+      return;
+    }
     void markConversationRead(conversationId, me.id)
       // Reading here is often the whole reason the badges were showing.
       .then(() => refreshUnread(event.id))
@@ -283,6 +347,7 @@ export function useConversation(conversationId: string | null) {
     messages.length,
     reactionCount,
     event.id,
+    browserOffline,
   ]);
 
   const loadOlder = useCallback(async () => {

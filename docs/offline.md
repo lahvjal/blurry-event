@@ -19,13 +19,30 @@ React / Expo Web PWA
 | Storage contracts, ids, dedupe keys | `src/lib/offline/types.ts` |
 | IndexedDB implementation (web) | `src/lib/offline/store.web.ts` |
 | AsyncStorage implementation (native) | `src/lib/offline/store.ts` |
-| Cached event bundle | `src/lib/offline/snapshot.ts` |
+| Account-scoped event bundles | `src/lib/offline/event-snapshot.ts`, `event-snapshot.web.ts` |
+| Initial offline preparation | `src/lib/offline/preparation.web.ts` |
+| Cached conversations/messages | `src/lib/offline/chat-cache.ts` |
+| Browser offline read signal | `src/lib/offline/network.ts` |
 | Queue, retries, connection state | `src/lib/sync.ts` |
 | Service worker + manifest wiring | `src/lib/offline/pwa.web.ts`, `public/` |
 | Status UI and Sync Now | `src/components/sync-status.tsx` |
 
 Metro resolves `store.web.ts` on web and `store.ts` on native, so the rest of
 the app imports one module and never branches on platform.
+
+## Initial offline preparation
+
+The installed PWA does not declare itself ready after caching only the current
+screen. The production export injects every emitted file into the service
+worker's versioned precache: the Expo Router bundle containing every screen,
+HTML, fonts, local images, icons, and any future split chunks. Preparation also
+saves every event visible to the account, each conversation and its recent
+message page, plus course maps, avatars, and recent message media.
+
+The ready receipt is written only after those files and account-scoped records
+have been verified. When the browser explicitly reports offline, switching
+screens or events reads the prepared records directly and does not first make a
+doomed Supabase or Realtime request.
 
 ## Score entry path
 
@@ -109,9 +126,10 @@ older than the stored one, which turns it into last-*recorded*-wins.
 
 ## What still needs a connection
 
-By design, and acceptable for this release: messaging, the social feed, photo
-upload, the realtime leaderboard, and admin screens. Realtime is never a
-dependency for scoring — scores work with it switched off entirely.
+Fresh server changes, chat history older than the prepared recent page, photo
+upload, notification-setting changes, realtime updates, and admin writes still
+need a connection. Prepared event screens, recent messages, maps, and score
+entry remain available without one. Realtime is never a dependency for scoring.
 
 ## Authentication
 
@@ -122,7 +140,8 @@ that players redeem their invite code before arriving.
 
 ## Caching policy
 
-The service worker caches the app shell only: HTML, JS, CSS, fonts, icons.
-Supabase requests are explicitly never cached — a stale cached score read could
-show a golfer the wrong card and let them overwrite a teammate. Application data
-belongs in IndexedDB, where the app controls staleness.
+The service worker caches the complete generated app shell and explicitly
+prepared media. Supabase API responses are never cached implicitly — a stale
+cached score read could show a golfer the wrong card and let them overwrite a
+teammate. Account/event application data belongs in IndexedDB, where the app
+controls scope and staleness.
