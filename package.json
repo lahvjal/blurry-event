@@ -54,6 +54,7 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "build:web": "expo export -p web && node scripts/inject-pwa.mjs",
+    "test:score-dial": "node --test scripts/score-dial.test.mjs",
     "test:offline-shell": "npm run build:web && node --test scripts/offline-precache.test.mjs scripts/offline-score-revisions.test.mjs scripts/offline-cold-start.test.mjs",
     "serve:web": "npx serve dist -p 8090 -s"
   },
