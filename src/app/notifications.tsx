@@ -10,7 +10,11 @@ import { PAGE_HEADER_HEIGHT, PageHeader } from '@/components/page-header';
 import { Noise } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
 import {
-  conversationTitle,
+  conversationSummaryPreview,
+  conversationSummaryTitle,
+} from '@/lib/conversation-summary';
+import { eventPath } from '@/lib/routes';
+import {
   formatInboxTime,
   useConversations,
 } from '@/state/chat';
@@ -34,7 +38,7 @@ type NotificationRow = {
 export default function Notifications() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { event, me, announcements, participantById } = useEvent();
+  const { event, me, announcements } = useEvent();
   const { conversations, loading, error } = useConversations();
 
   const announcementIds = React.useMemo(
@@ -64,13 +68,8 @@ export default function Notifications() {
       .map((conversation) => ({
         id: `message-${conversation.id}`,
         kind: 'message',
-        title: conversationTitle(
-          conversation,
-          me.id,
-          participantById,
-          event.name,
-        ),
-        body: messagePreview(conversation, me.id, participantById),
+        title: conversationSummaryTitle(conversation),
+        body: conversationSummaryPreview(conversation),
         createdAt: conversation.lastActivityAt ?? '',
         unread: conversation.unreadCount > 0,
         conversation,
@@ -82,9 +81,7 @@ export default function Notifications() {
   }, [
     announcements,
     conversations,
-    event.name,
     me.id,
-    participantById,
   ]);
 
   return (
@@ -115,10 +112,12 @@ export default function Notifications() {
               const conversation = row.conversation;
               if (!conversation) return;
               router.push({
-                pathname:
+                pathname: eventPath(
+                  conversation.eventId,
                   conversation.kind === 'direct'
-                    ? '/direct-message'
-                    : '/group-conversation',
+                    ? 'direct-message'
+                    : 'group-conversation',
+                ) as never,
                 params: { id: conversation.id },
               });
             }}>
@@ -163,49 +162,6 @@ export default function Notifications() {
       <FloatingNav />
     </View>
   );
-}
-
-function messagePreview(
-  conversation: ConversationSummary,
-  myId: string,
-  participantById: (id: string) => { fullName: string } | undefined,
-): string {
-  if (
-    conversation.lastActivityKind === 'reaction' &&
-    conversation.lastReactionEmoji
-  ) {
-    const reactor =
-      participantById(conversation.lastReactorId ?? '')?.fullName.split(' ')[0] ??
-      'Someone';
-    const message = conversation.lastReactionMessageBody?.trim();
-    const media =
-      conversation.lastReactionMessageMediaMimeType === 'image/gif'
-        ? 'GIF'
-        : conversation.lastReactionMessageMediaMimeType
-          ? 'photo'
-          : null;
-    return `${reactor} reacted ${conversation.lastReactionEmoji}${
-      message ? ` to “${message}”` : media ? ` to a ${media}` : ''
-    }`;
-  }
-
-  const message =
-    conversation.lastMessageBody?.trim() ||
-    (conversation.lastMessageMediaMimeType === 'image/gif'
-      ? 'GIF'
-      : conversation.lastMessageMediaMimeType
-        ? 'Photo'
-        : null);
-  if (!message) return 'No messages yet.';
-  if (conversation.kind === 'direct') return message;
-
-  const senderId = conversation.lastSenderId;
-  if (!senderId) return message;
-  const sender =
-    senderId === myId
-      ? 'You'
-      : (participantById(senderId)?.fullName.split(' ')[0] ?? 'Someone');
-  return `${sender}: ${message}`;
 }
 
 const styles = StyleSheet.create({

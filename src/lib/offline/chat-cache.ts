@@ -6,12 +6,19 @@ import type {
 } from '@/state/types';
 
 const SUMMARY_PREFIX = 'offlineChat.summaries.v1';
+const CLUB_SUMMARY_PREFIX = 'offlineChat.clubSummaries.v2';
 const DETAIL_PREFIX = 'offlineChat.detail.v1';
 const MESSAGE_PREFIX = 'offlineChat.messages.v1';
 
 type ScopedRecord<T> = {
   userId: string;
   eventId: string;
+  savedAt: string;
+  value: T;
+};
+
+type AccountRecord<T> = {
+  userId: string;
   savedAt: string;
   value: T;
 };
@@ -53,6 +60,31 @@ export async function loadOfflineConversationSummaries(
     scopedKey(SUMMARY_PREFIX, userId, eventId),
   );
   return valid(record, userId, eventId) && Array.isArray(record.value)
+    ? record.value
+    : null;
+}
+
+/** The default inbox is account-wide, so its authoritative cache cannot use the
+ * focused event as part of its key. Event-scoped v1 rows remain readable below
+ * as a compatibility fallback for installs upgrading while offline. */
+export async function saveOfflineClubConversationSummaries(
+  userId: string,
+  value: ConversationSummary[],
+): Promise<void> {
+  await cacheStore.set(`${CLUB_SUMMARY_PREFIX}:${encodeURIComponent(userId)}`, {
+    userId,
+    savedAt: new Date().toISOString(),
+    value,
+  } satisfies AccountRecord<ConversationSummary[]>);
+}
+
+export async function loadOfflineClubConversationSummaries(
+  userId: string,
+): Promise<ConversationSummary[] | null> {
+  const record = await cacheStore.get<AccountRecord<ConversationSummary[]>>(
+    `${CLUB_SUMMARY_PREFIX}:${encodeURIComponent(userId)}`,
+  );
+  return record?.userId === userId && Array.isArray(record.value)
     ? record.value
     : null;
 }

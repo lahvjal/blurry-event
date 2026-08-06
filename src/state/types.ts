@@ -162,15 +162,26 @@ export type Conversation = {
 
 /** An inbox row: the conversation plus its preview line and unread count. */
 export type ConversationSummary = Conversation & {
+  /** Immutable event of origin. It labels and opens the thread; it does not filter the inbox. */
+  eventId: string;
+  eventName: string;
+  /** This account's event-specific participant identity for the conversation. */
+  myParticipantId: string;
+  /** Inbox-ready identity for the other person in a direct conversation. */
+  directParticipantId: string | null;
+  directParticipantName: string | null;
+  directParticipantAvatarUrl: string | null;
   lastMessageBody: string | null;
   lastMessageAt: string | null;
   lastSenderId: string | null;
+  lastSenderName: string | null;
   lastMessageMediaMimeType: string | null;
   /** Newest message or reaction activity that is relevant to this member. */
   lastActivityAt: string | null;
   lastActivityKind: 'message' | 'reaction' | null;
   lastReactionEmoji: string | null;
   lastReactorId: string | null;
+  lastReactorName: string | null;
   lastReactionMessageBody: string | null;
   lastReactionMessageMediaMimeType: string | null;
   unreadCount: number;

@@ -10,20 +10,23 @@ import { PushPrompt } from '@/components/push-controls';
 import { SearchField } from '@/components/search-field';
 import { Noise } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
-import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
 import {
-  conversationTitle,
+  conversationSummaryPreview,
+  conversationSummaryTitle,
+} from '@/lib/conversation-summary';
+import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
+import { eventPath } from '@/lib/routes';
+import {
   formatInboxTime,
   initialsOf,
   useConversations,
 } from '@/state/chat';
 import { useEvent } from '@/state/event';
-import { ConversationSummary } from '@/state/types';
 
 export default function Messages() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { event, me, participantById } = useEvent();
+  const { me } = useEvent();
   const offline = useBrowserDefinitelyOffline();
   const { conversations, loading, error } = useConversations();
   const [query, setQuery] = React.useState('');
@@ -32,16 +35,21 @@ export default function Messages() {
     () =>
       conversations.map((conversation) => ({
         conversation,
-        title: conversationTitle(conversation, me.id, participantById, event.name),
-        preview: previewOf(conversation, me.id, participantById),
+        title: conversationSummaryTitle(conversation),
+        preview: conversationSummaryPreview(conversation),
         directParticipant:
-          conversation.kind === 'direct'
-            ? participantById(
-                conversation.memberIds.find((id) => id !== me.id) ?? '',
-              )
-            : undefined,
+          conversation.kind === 'direct' &&
+          conversation.directParticipantId &&
+          conversation.directParticipantName
+            ? {
+                id: conversation.directParticipantId,
+                fullName: conversation.directParticipantName,
+                initials: initialsOf(conversation.directParticipantName),
+                avatarUrl: conversation.directParticipantAvatarUrl,
+              }
+            : null,
       })),
-    [conversations, me.id, participantById, event.name],
+    [conversations],
   );
 
   const term = query.trim().toLowerCase();
@@ -49,7 +57,8 @@ export default function Messages() {
     ? rows.filter(
         (row) =>
           row.title.toLowerCase().includes(term) ||
-          row.preview.toLowerCase().includes(term),
+          row.preview.toLowerCase().includes(term) ||
+          row.conversation.eventName.toLowerCase().includes(term),
       )
     : rows;
 
@@ -104,10 +113,12 @@ export default function Messages() {
               style={styles.row}
               onPress={() =>
                 router.push({
-                  pathname:
+                  pathname: eventPath(
+                    conversation.eventId,
                     conversation.kind === 'direct'
-                      ? '/direct-message'
-                      : '/group-conversation',
+                      ? 'direct-message'
+                      : 'group-conversation',
+                  ) as never,
                   params: { id: conversation.id },
                 })
               }>
@@ -124,6 +135,9 @@ export default function Messages() {
                 </Text>
                 <Text style={styles.rowPreview} numberOfLines={2}>
                   {preview}
+                </Text>
+                <Text style={styles.rowOrigin} numberOfLines={1}>
+                  {conversation.eventName}
                 </Text>
               </View>
               <View style={styles.rowMeta}>
@@ -149,51 +163,6 @@ export default function Messages() {
       <FloatingNav />
     </View>
   );
-}
-
-/** "Marco: I booked the 8:20." — the sender is only worth naming in a group. */
-function previewOf(
-  conversation: ConversationSummary,
-  myId: string,
-  participantById: (id: string) => { fullName: string } | undefined,
-): string {
-  if (
-    conversation.lastActivityKind === 'reaction' &&
-    conversation.lastReactionEmoji
-  ) {
-    const reactor =
-      participantById(conversation.lastReactorId ?? '')?.fullName.split(' ')[0] ??
-      'Someone';
-    const message = conversation.lastReactionMessageBody?.trim();
-    const media =
-      conversation.lastReactionMessageMediaMimeType === 'image/gif'
-        ? 'GIF'
-        : conversation.lastReactionMessageMediaMimeType
-          ? 'photo'
-          : null;
-    return `${reactor} reacted ${conversation.lastReactionEmoji}${
-      message ? ` to “${message}”` : media ? ` to a ${media}` : ''
-    }`;
-  }
-
-  const message =
-    conversation.lastMessageBody?.trim() ||
-    (conversation.lastMessageMediaMimeType === 'image/gif'
-      ? 'GIF'
-      : conversation.lastMessageMediaMimeType
-        ? 'Photo'
-        : null);
-  if (!message) return 'No messages yet.';
-  if (conversation.kind === 'direct') return message;
-
-  const senderId = conversation.lastSenderId;
-  if (!senderId) return message;
-
-  const name =
-    senderId === myId
-      ? 'You'
-      : (participantById(senderId)?.fullName.split(' ')[0] ?? 'Someone');
-  return `${name}: ${message}`;
 }
 
 const styles = StyleSheet.create({
@@ -270,6 +239,13 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     fontSize: 12,
     color: 'rgba(255,255,255,0.5)',
+  },
+  rowOrigin: {
+    fontFamily: fonts.medium,
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.32)',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   rowMeta: {
     alignItems: 'flex-end',

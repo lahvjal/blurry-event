@@ -1,5 +1,5 @@
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useRefreshOnPull } from '@/components/pull-to-refresh';
 import {
@@ -17,9 +17,11 @@ import {
 import {
   loadOfflineConversation,
   loadOfflineConversationSummaries,
+  loadOfflineClubConversationSummaries,
   loadOfflineMessages,
   saveOfflineConversation,
   saveOfflineConversationSummaries,
+  saveOfflineClubConversationSummaries,
   saveOfflineMessages,
 } from '@/lib/offline/chat-cache';
 import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
@@ -49,52 +51,95 @@ function errorText(error: unknown): string {
 }
 
 export function useConversations() {
-  const { event, accountAccess } = useEvent();
+  const { accountAccess } = useEvent();
   const accountId = accountAccess?.accountId ?? null;
   const browserOffline = useBrowserDefinitelyOffline();
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const registeredEvents = useMemo(
+    () => accountAccess?.events.filter((item) => item.registration) ?? [],
+    [accountAccess],
+  );
+  const registeredEventIds = useMemo(
+    () => registeredEvents.map((item) => item.id),
+    [registeredEvents],
+  );
+  const registeredEventKey = registeredEventIds.join(':');
+
+  const loadCached = useCallback(async (): Promise<ConversationSummary[] | null> => {
+    if (!accountId) return null;
+    const club = await loadOfflineClubConversationSummaries(accountId);
+    if (club) return club;
+
+    // Upgrade path for installs that only have the old per-event inbox caches.
+    // Actor names may be absent until the next online refresh, but every thread
+    // remains visible and opens against its exact event snapshot.
+    const legacy = await Promise.all(
+      registeredEvents.map(async (item) => {
+        const rows = await loadOfflineConversationSummaries(accountId, item.id);
+        return (rows ?? []).map((row) => ({
+          ...row,
+          eventId: row.eventId ?? item.id,
+          eventName: row.eventName ?? item.name,
+          myParticipantId:
+            row.myParticipantId ?? item.registration?.participantId ?? '',
+          directParticipantId: row.directParticipantId ?? null,
+          directParticipantName: row.directParticipantName ?? null,
+          directParticipantAvatarUrl: row.directParticipantAvatarUrl ?? null,
+          lastSenderName: row.lastSenderName ?? null,
+          lastReactorName: row.lastReactorName ?? null,
+        }));
+      }),
+    );
+    const combined = legacy.flat().sort((a, b) =>
+      (b.lastActivityAt ?? '').localeCompare(a.lastActivityAt ?? ''),
+    );
+    return combined.length > 0 ? combined : null;
+  }, [accountId, registeredEventKey, registeredEvents]);
 
   const reload = useCallback(async () => {
     try {
       if (browserOffline) {
-        const cached = accountId
-          ? await loadOfflineConversationSummaries(accountId, event.id)
-          : null;
+        const cached = await loadCached();
         if (!cached) {
           throw new Error('Messages were not included in offline setup.');
         }
         setConversations(cached);
         setUnreadTotal(
-          event.id,
+          accountId,
           cached.reduce((total, c) => total + c.unreadCount, 0),
         );
         setError(null);
         return;
       }
-      const summaries = await fetchConversationSummaries(event.id);
+      const summaries = await fetchConversationSummaries();
       if (accountId) {
-        await saveOfflineConversationSummaries(accountId, event.id, summaries);
+        await Promise.all([
+          saveOfflineClubConversationSummaries(accountId, summaries),
+          ...registeredEvents.map((item) =>
+            saveOfflineConversationSummaries(
+              accountId,
+              item.id,
+              summaries.filter((summary) => summary.eventId === item.id),
+            ),
+          ),
+        ]);
       }
       setConversations(summaries);
       // Loading the inbox already computed the count, so hand it straight to
       // the shared store rather than making it go and ask again.
       setUnreadTotal(
-        event.id,
+        accountId,
         summaries.reduce((total, c) => total + c.unreadCount, 0),
       );
       setError(null);
     } catch (caught) {
-      const cached = accountId
-        ? await loadOfflineConversationSummaries(accountId, event.id).catch(
-            () => null,
-          )
-        : null;
+      const cached = await loadCached().catch(() => null);
       if (cached) {
         setConversations(cached);
         setUnreadTotal(
-          event.id,
+          accountId,
           cached.reduce((total, c) => total + c.unreadCount, 0),
         );
         setError(null);
@@ -104,7 +149,13 @@ export function useConversations() {
     } finally {
       setLoading(false);
     }
-  }, [accountId, browserOffline, event.id]);
+  }, [
+    accountId,
+    browserOffline,
+    loadCached,
+    registeredEventKey,
+    registeredEvents,
+  ]);
 
   // Refetch on focus so a thread started elsewhere — or one someone else added
   // you to — appears without a restart.
@@ -116,20 +167,14 @@ export function useConversations() {
   useRefreshOnPull(reload);
 
   // Any incoming message restacks the list and lights an unread badge.
-  useEffect(
-    () =>
-      browserOffline
-        ? undefined
-        : subscribeToMessages(event.id, null, () => void reload()),
-    [browserOffline, event.id, reload],
-  );
-  useEffect(
-    () =>
-      browserOffline
-        ? undefined
-        : subscribeToMessageReactions(event.id, () => void reload()),
-    [browserOffline, event.id, reload],
-  );
+  useEffect(() => {
+    if (browserOffline) return;
+    const stops = registeredEventIds.flatMap((eventId) => [
+      subscribeToMessages(eventId, null, () => void reload()),
+      subscribeToMessageReactions(eventId, () => void reload()),
+    ]);
+    return () => stops.forEach((stop) => stop());
+  }, [browserOffline, registeredEventIds, registeredEventKey, reload]);
 
   return { conversations, loading, error, reload };
 }
@@ -363,7 +408,7 @@ export function useConversation(conversationId: string | null) {
     }
     void markConversationRead(conversationId, me.id)
       // Reading here is often the whole reason the badges were showing.
-      .then(() => refreshUnread(event.id))
+      .then(() => refreshUnread())
       .catch(() => {
         // A stale badge isn't worth interrupting anyone over.
       });

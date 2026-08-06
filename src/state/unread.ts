@@ -23,7 +23,8 @@ import { supabase } from '@/lib/supabase';
  */
 
 let total = 0;
-let activeEventId = '';
+let activeAccountId: string | null = null;
+let activeEventScope = '';
 let activeBrowserOffline = false;
 let stopRealtime: (() => void) | null = null;
 const listeners = new Set<() => void>();
@@ -43,8 +44,8 @@ function subscribe(listener: () => void) {
  * Publishes a total the caller already has — the inbox computes one as a side
  * effect of loading, so it would be wasteful to go and ask again.
  */
-export function setUnreadTotal(eventId: string, next: number): void {
-  if (eventId !== activeEventId) return;
+export function setUnreadTotal(accountId: string | null, next: number): void {
+  if (accountId !== activeAccountId) return;
   if (next === total) return;
   total = next;
   emit();
@@ -52,17 +53,27 @@ export function setUnreadTotal(eventId: string, next: number): void {
 }
 
 /** Asks the server for the current count. */
-export async function refreshUnread(eventId: string): Promise<void> {
-  if (eventId !== activeEventId || isBrowserDefinitelyOffline()) return;
+export async function refreshUnread(
+  eventScope = activeEventScope,
+  accountId = activeAccountId,
+): Promise<void> {
+  if (
+    accountId !== activeAccountId ||
+    eventScope !== activeEventScope ||
+    isBrowserDefinitelyOffline()
+  ) {
+    return;
+  }
   try {
     const { data } = await supabase.auth.getSession();
     if (!data.session) {
-      setUnreadTotal(eventId, 0);
+      setUnreadTotal(accountId, 0);
       return;
     }
-    const summaries = await fetchConversationSummaries(eventId);
+    const summaries = await fetchConversationSummaries();
+    if (accountId !== activeAccountId || eventScope !== activeEventScope) return;
     setUnreadTotal(
-      eventId,
+      accountId,
       summaries.reduce((sum, c) => sum + c.unreadCount, 0),
     );
   } catch {
@@ -71,19 +82,28 @@ export async function refreshUnread(eventId: string): Promise<void> {
   }
 }
 
-function activateUnreadEvent(eventId: string, browserOffline: boolean): void {
+function activateUnreadEvents(
+  accountId: string | null,
+  eventIds: string[],
+  browserOffline: boolean,
+): void {
+  const normalizedEventIds = [...new Set(eventIds)].sort();
+  const eventScope = normalizedEventIds.join(':');
   if (
-    activeEventId === eventId &&
+    activeAccountId === accountId &&
+    activeEventScope === eventScope &&
     activeBrowserOffline === browserOffline
   ) {
     return;
   }
-  const eventChanged = activeEventId !== eventId;
+  const accountOrEventsChanged =
+    activeAccountId !== accountId || activeEventScope !== eventScope;
   stopRealtime?.();
   stopRealtime = null;
-  activeEventId = eventId;
+  activeAccountId = accountId;
+  activeEventScope = eventScope;
   activeBrowserOffline = browserOffline;
-  if (eventChanged) {
+  if (accountOrEventsChanged) {
     total = 0;
     emit();
     void setBadge(0);
@@ -92,27 +112,36 @@ function activateUnreadEvent(eventId: string, browserOffline: boolean): void {
   // Offline preparation already stored the inbox. The inbox hook publishes
   // its cached unread total when opened; until then, preserve the last known
   // value and do not start a doomed HTTP/WebSocket connection.
-  if (browserOffline) return;
+  if (browserOffline || !accountId) return;
 
-  const stopMessages = subscribeToMessages(eventId, null, () =>
-    void refreshUnread(eventId),
-  );
-  const stopReactions = subscribeToMessageReactions(eventId, () =>
-    void refreshUnread(eventId),
-  );
+  const stops = normalizedEventIds.flatMap((eventId) => [
+    subscribeToMessages(eventId, null, () =>
+      void refreshUnread(eventScope, accountId),
+    ),
+    subscribeToMessageReactions(eventId, () =>
+      void refreshUnread(eventScope, accountId),
+    ),
+  ]);
   stopRealtime = () => {
-    stopMessages();
-    stopReactions();
+    stops.forEach((stop) => stop());
   };
-  void refreshUnread(eventId);
+  void refreshUnread(eventScope, accountId);
 }
 
-export function useUnreadTotal(eventId: string): number {
+export function useUnreadTotal(
+  accountId: string | null,
+  eventIds: string[],
+): number {
   const browserOffline = useBrowserDefinitelyOffline();
+  const eventScope = [...new Set(eventIds)].sort().join(':');
 
   useEffect(() => {
-    activateUnreadEvent(eventId, browserOffline);
-  }, [browserOffline, eventId]);
+    activateUnreadEvents(
+      accountId,
+      eventScope ? eventScope.split(':') : [],
+      browserOffline,
+    );
+  }, [accountId, browserOffline, eventScope]);
 
   return useSyncExternalStore(
     subscribe,

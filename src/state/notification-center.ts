@@ -84,9 +84,10 @@ export async function markAnnouncementsSeen(
 export function useNotificationUnread(
   scope: string,
   announcementIds: string[],
-  eventId: string,
+  accountId: string | null,
+  messageEventIds: string[],
 ): number {
-  const messageUnread = useUnreadTotal(eventId);
+  const messageUnread = useUnreadTotal(accountId, messageEventIds);
 
   useFocusEffect(
     useCallback(() => {

@@ -10,6 +10,7 @@ import {
 } from '@/lib/chat';
 import {
   saveOfflineConversation,
+  saveOfflineClubConversationSummaries,
   saveOfflineConversationSummaries,
   saveOfflineMessages,
 } from '@/lib/offline/chat-cache';
@@ -390,6 +391,8 @@ export async function runAutomaticOfflinePreparation(
 
   const bundles = new Map<string, EventBundle>();
   const messageMediaByEvent = new Map<string, string[]>();
+  const clubSummaries = await fetchConversationSummaries();
+  await saveOfflineClubConversationSummaries(accountId, clubSummaries);
   for (let index = 0; index < selected.length; index += 1) {
     throwIfAborted(signal);
     const event = selected[index];
@@ -412,7 +415,9 @@ export async function runAutomaticOfflinePreparation(
     let conversationCount = 0;
     let chatPreparedAt: string | null = null;
     if (event.registration) {
-      const summaries = await fetchConversationSummaries(event.id);
+      const summaries = clubSummaries.filter(
+        (summary) => summary.eventId === event.id,
+      );
       await saveOfflineConversationSummaries(accountId, event.id, summaries);
       conversationCount = summaries.length;
       const eventMessageMedia: string[] = [];

@@ -40,8 +40,12 @@ export function FloatingNav() {
   const router = useRouter();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
-  const { event } = useEvent();
-  const unread = useUnreadTotal(event.id);
+  const { event, accountAccess } = useEvent();
+  const messageEventIds =
+    accountAccess?.events
+      .filter((item) => item.registration)
+      .map((item) => item.id) ?? [];
+  const unread = useUnreadTotal(accountAccess?.accountId ?? null, messageEventIds);
 
   const bottomInset = Math.max(20, insets.bottom + 12);
   // Measured from the bottom edge up to the fade above the bar's top edge.

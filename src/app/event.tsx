@@ -442,6 +442,7 @@ function FocusedEventHome() {
     isLive,
     homeNotice,
     dismissHomeNotice,
+    accountAccess,
   } = useEvent();
   const [headerStuck, setHeaderStuck] = React.useState(false);
   const [openingTeamChat, setOpeningTeamChat] = React.useState(false);
@@ -479,7 +480,10 @@ function FocusedEventHome() {
   const notificationUnread = useNotificationUnread(
     `${event.id}.${me.id}`,
     announcementIds,
-    event.id,
+    accountAccess?.accountId ?? null,
+    accountAccess?.events
+      .filter((item) => item.registration)
+      .map((item) => item.id) ?? [],
   );
   const latestAnnouncement = announcements[0];
 

@@ -33,18 +33,26 @@ const PHOTO_COMPRESSION = 0.78;
 
 type SummaryRow = {
   id: string;
+  event_id: string;
+  event_name: string;
   kind: ConversationKind;
   name: string | null;
   created_by: string | null;
+  my_participant_id: string;
   member_ids: string[] | null;
+  direct_participant_id: string | null;
+  direct_participant_name: string | null;
+  direct_participant_avatar_url: string | null;
   last_message_body: string | null;
   last_message_at: string | null;
   last_sender_id: string | null;
+  last_sender_name: string | null;
   last_message_media_mime_type?: string | null;
   last_activity_at?: string | null;
   last_activity_kind?: 'message' | 'reaction' | null;
   last_reaction_emoji?: string | null;
   last_reactor_id?: string | null;
+  last_reactor_name?: string | null;
   last_reaction_message_body?: string | null;
   last_reaction_message_media_mime_type?: string | null;
   unread_count: number;
@@ -127,23 +135,26 @@ function toMessage(row: MessageRow): ChatMessage {
   };
 }
 
-export async function fetchConversationSummaries(
-  eventId: string,
-): Promise<ConversationSummary[]> {
-  const { data, error } = await supabase.rpc('conversation_summaries', {
-    p_event_id: eventId,
-  });
+export async function fetchConversationSummaries(): Promise<ConversationSummary[]> {
+  const { data, error } = await supabase.rpc('club_conversation_summaries');
   if (error) throw error;
 
   return ((data ?? []) as SummaryRow[]).map((row) => ({
     id: row.id,
+    eventId: row.event_id,
+    eventName: row.event_name,
     kind: row.kind,
     name: row.name,
     createdBy: row.created_by,
+    myParticipantId: row.my_participant_id,
     memberIds: row.member_ids ?? [],
+    directParticipantId: row.direct_participant_id,
+    directParticipantName: row.direct_participant_name,
+    directParticipantAvatarUrl: row.direct_participant_avatar_url,
     lastMessageBody: row.last_message_body,
     lastMessageAt: row.last_message_at,
     lastSenderId: row.last_sender_id,
+    lastSenderName: row.last_sender_name,
     lastMessageMediaMimeType: row.last_message_media_mime_type ?? null,
     // These fields arrive with migration 0019. Falling back to the newest
     // message keeps the inbox usable while the app and database roll out.
@@ -153,6 +164,7 @@ export async function fetchConversationSummaries(
       (row.last_message_at ? 'message' : null),
     lastReactionEmoji: row.last_reaction_emoji ?? null,
     lastReactorId: row.last_reactor_id ?? null,
+    lastReactorName: row.last_reactor_name ?? null,
     lastReactionMessageBody: row.last_reaction_message_body ?? null,
     lastReactionMessageMediaMimeType:
       row.last_reaction_message_media_mime_type ?? null,

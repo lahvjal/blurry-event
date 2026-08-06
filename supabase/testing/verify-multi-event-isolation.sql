@@ -39,6 +39,19 @@ select * from (values
       '00000000-0000-4000-8000-0000000000b2'
     )
   )),
+  ('A club inbox includes both registered events', (
+    select count(distinct event_id) from club_conversation_summaries()
+  ) >= 2),
+  ('A club inbox rows use one of A registrations', not exists (
+    select 1
+    from club_conversation_summaries() summary
+    where not exists (
+      select 1 from participants registration
+      where registration.id = summary.my_participant_id
+        and registration.claimed_by = :'user_a_id'::uuid
+        and registration.event_id = summary.event_id
+    )
+  )),
   ('A sees only event-matching test messages', not exists (
     select 1
     from messages message
@@ -85,6 +98,20 @@ select * from (values
   )),
   ('B Invitational inbox RPC returns no rows', not exists (
     select 1 from conversation_summaries(:'invitational_id'::uuid)
+  )),
+  ('B club inbox never includes the Invitational', not exists (
+    select 1 from club_conversation_summaries()
+    where event_id = :'invitational_id'::uuid
+  )),
+  ('B club inbox contains only B memberships', not exists (
+    select 1
+    from club_conversation_summaries() summary
+    where not exists (
+      select 1 from participants registration
+      where registration.id = summary.my_participant_id
+        and registration.claimed_by = :'user_b_id'::uuid
+        and registration.event_id = summary.event_id
+    )
   )),
   ('B event-access helper denies the Invitational', not has_event_access(
     :'invitational_id'::uuid
