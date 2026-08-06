@@ -24,7 +24,7 @@ import {
   apiResetRound,
   apiSetGameStyle,
   apiUpdateEvent,
-  apiUpdateHole,
+  apiUpdateScorecard,
   apiUpdateParticipant,
   apiUpdateProfile,
   apiUpdateTeam,
@@ -305,8 +305,8 @@ type EventState = {
       >
     >,
   ) => Promise<boolean>;
-  /** Edits one hole of the scorecard. `hole` is 1-based. */
-  updateHole: (hole: number, patch: Partial<Pick<Hole, 'par' | 'yards'>>) => void;
+  /** Validates and saves the event's complete 18-hole scorecard. */
+  updateScorecard: (holes: Hole[]) => Promise<boolean>;
   postAnnouncement: (body: string) => void;
   assignToTeam: (participantId: string, teamId: string | null) => void;
   updateTeam: (teamId: string, patch: Partial<Pick<Team, 'name' | 'teeTime' | 'startingHole' | 'cart'>>) => void;
@@ -1253,13 +1253,18 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     [event.id, persist],
   );
 
-  const updateHole = useCallback(
-    (hole: number, patch: Partial<Pick<Hole, 'par' | 'yards'>>) => {
-      setEvent((prev) => ({
-        ...prev,
-        holes: prev.holes.map((h) => (h.hole === hole ? { ...h, ...patch } : h)),
-      }));
-      void persist('the scorecard', () => apiUpdateHole(event.id, hole, patch));
+  const updateScorecard = useCallback<EventState['updateScorecard']>(
+    async (holes) => {
+      const saved = await persist('the scorecard', () =>
+        apiUpdateScorecard(event.id, holes),
+      );
+      if (saved) {
+        setEvent((prev) => ({
+          ...prev,
+          holes: holes.map((hole) => ({ ...hole })),
+        }));
+      }
+      return saved;
     },
     [event.id, persist],
   );
@@ -1650,7 +1655,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     updateMyProfile,
     setGameStyle,
     updateEvent,
-    updateHole,
+    updateScorecard,
     postAnnouncement,
     assignToTeam,
     updateTeam,

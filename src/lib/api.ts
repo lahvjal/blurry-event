@@ -7,6 +7,7 @@ import {
   EventLifecycleStatus,
   ExistingAccountCandidate,
   GameStyle,
+  Hole,
   Participant,
   ScoreUpdate,
   Scores,
@@ -405,20 +406,25 @@ export async function apiUpdateEvent(
   if (error) throw error;
 }
 
-export async function apiUpdateHole(
-  eventId: string,
-  hole: number,
-  patch: { par?: number; yards?: number },
-) {
-  const payload = assigned({ par: patch.par, yards: patch.yards });
-  if (!payload) return;
+export async function apiUpdateScorecard(eventId: string, holes: Hole[]) {
+  const rows = holes.map((hole) => ({
+    event_id: eventId,
+    hole: hole.hole,
+    par: hole.par,
+    yards: hole.yards,
+  }));
 
-  const { error } = await supabase
+  // Supabase does not return changed rows unless select() is chained. Asking
+  // for the hole numbers lets us distinguish a real save from a policy/filter
+  // no-op that otherwise looks successful to the client.
+  const { data, error } = await supabase
     .from('holes')
-    .update(payload)
-    .eq('event_id', eventId)
-    .eq('hole', hole);
-  if (error) throw error;
+    .upsert(rows, { onConflict: 'event_id,hole' })
+    .select('hole');
+  if (error) throw new Error(error.message);
+  if (!data || data.length !== rows.length) {
+    throw new Error('The scorecard update did not reach every hole.');
+  }
 }
 
 /**
