@@ -375,6 +375,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const attemptedRouteEventIdRef = useRef<string | null>(null);
   const [accountAccess, setAccountAccess] = useState<AccountEventAccess | null>(null);
   const [activeEventId, setActiveEventId] = useState<string | null>(null);
+  const activeEventIdRef = useRef(activeEventId);
+  activeEventIdRef.current = activeEventId;
+  /** Prevents a slow response for an older route from replacing a newer event. */
+  const loadRevisionRef = useRef(0);
   const [accessLoading, setAccessLoading] = useState(true);
   const [eventLoading, setEventLoading] = useState(true);
   const [event, setEvent] = useState<EventConfig>(SEED_EVENT);
@@ -507,9 +511,12 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const loadFromServer = useCallback(async (targetEventId?: string | null) => {
+    const loadRevision = ++loadRevisionRef.current;
+    const isCurrentLoad = () => loadRevisionRef.current === loadRevision;
     setAccessLoading(true);
     setEventLoadError(null);
     const { data: sessionData } = await supabase.auth.getSession();
+    if (!isCurrentLoad()) return activeEventIdRef.current;
     const session = sessionData.session;
     const userId = session?.user.id ?? preparedAccountId;
     if (!userId) {
@@ -521,15 +528,51 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         ? undefined
         : targetEventId ?? requestedEventIdRef.current;
     let access: AccountEventAccess | null = null;
+    let displayedPreparedEventId: string | null = null;
+
+    // Event switches must never wait behind a weak or doomed server request.
+    // Automatic preparation already saved every selectable event, so render
+    // that exact account/event snapshot first and refresh it in the background.
+    if (routeEventId && routeEventId !== activeEventIdRef.current) {
+      const [preparedAccess, preparedSnapshot] = await Promise.all([
+        loadAccountEventAccess(userId).catch(() => null),
+        loadEventSnapshot(userId, routeEventId).catch(() => null),
+      ]);
+      if (!isCurrentLoad()) return activeEventIdRef.current;
+      if (
+        preparedAccess?.events.some(
+          (candidate) => candidate.id === routeEventId,
+        ) &&
+        preparedSnapshot
+      ) {
+        access = preparedAccess;
+        displayedPreparedEventId = routeEventId;
+        setAccountAccess(preparedAccess);
+        setAccessLoading(false);
+        setActiveEventId(routeEventId);
+        setSyncScope(
+          userId,
+          routeEventId,
+          preparedAccess.events.map((candidate) => candidate.id),
+        );
+        await applyBundle(preparedSnapshot.bundle, userId, false);
+        if (!isCurrentLoad()) return activeEventIdRef.current;
+        setEventLoading(false);
+        setSnapshotAt(preparedSnapshot.savedAt);
+
+        if (browserOffline) return routeEventId;
+      }
+    }
 
     try {
       if (browserOffline) {
-        access = await loadAccountEventAccess(userId);
+        access ??= await loadAccountEventAccess(userId);
         if (!access) {
           throw new Error('This account was not included in offline setup.');
         }
       } else {
         access = await fetchAccountEventAccess(userId);
+        if (!isCurrentLoad()) return activeEventIdRef.current;
         void saveAccountEventAccess(access).catch(() => {});
       }
     } catch (error) {
@@ -586,6 +629,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
+    if (!isCurrentLoad()) return activeEventIdRef.current;
     setAccountAccess(access);
     setAccessLoading(false);
 
@@ -614,12 +658,14 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       return null;
     }
 
-    setEventLoading(true);
+    const preparedEventIsVisible = displayedPreparedEventId === eventId;
+    if (!preparedEventIsVisible) setEventLoading(true);
     try {
       if (browserOffline) {
         throw new Error('The prepared event snapshot must be used offline.');
       }
       const bundle = await fetchEventBundle(eventId);
+      if (!isCurrentLoad()) return activeEventIdRef.current;
       setActiveEventId(eventId);
       setSyncScope(
         userId,
@@ -632,7 +678,16 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       void saveEventSnapshot(bundle, userId, eventId).catch(() => {});
       return eventId;
     } catch (error) {
+      if (!isCurrentLoad()) return activeEventIdRef.current;
+      // A prepared event is already interactive. A failed background refresh
+      // must leave it visible rather than returning to the loading gate.
+      if (preparedEventIsVisible) {
+        setAccessLoading(false);
+        setEventLoading(false);
+        return eventId;
+      }
       let snapshot = await loadEventSnapshot(userId, eventId).catch(() => null);
+      if (!isCurrentLoad()) return activeEventIdRef.current;
       if (!snapshot && usingDefaultFocus) {
         const lastSnapshot = await loadLastEventSnapshot(userId).catch(() => null);
         if (
