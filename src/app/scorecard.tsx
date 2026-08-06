@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   LayoutChangeEvent,
   Pressable,
@@ -16,10 +16,15 @@ import {
   ParticipantAvatarStack,
 } from '@/components/participant-avatar';
 import { SyncStatusLine } from '@/components/sync-status';
-import { PageHeader } from '@/components/page-header';
+import { PAGE_HEADER_HEIGHT, PageHeader } from '@/components/page-header';
 import { Chevron, GradientPanel, Noise } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
 import { eventPath } from '@/lib/routes';
+import {
+  scorecardActiveHoleScrollTarget,
+  scorecardSummarySlots,
+  shouldAutoPositionScorecard,
+} from '@/lib/scorecard-scroll';
 import { useEvent } from '@/state/event';
 import {
   GAME_STYLE_LABELS,
@@ -104,21 +109,27 @@ function HoleRow({
   par,
   score,
   onPress,
+  isCurrent = false,
+  onLayout,
 }: {
   hole: number;
   par: number;
   score: number | null;
   onPress?: () => void;
+  isCurrent?: boolean;
+  onLayout?: (event: LayoutChangeEvent) => void;
 }) {
   return (
     <Pressable
       accessibilityLabel={
         score === null
-          ? `Hole ${hole}, not scored`
-          : `Hole ${hole}, score ${score}. Edit score`
+          ? `Hole ${hole}, not scored${isCurrent ? ', current hole' : ''}`
+          : `Hole ${hole}, score ${score}${isCurrent ? ', current hole' : ''}. Edit score`
       }
       accessibilityRole={onPress ? 'button' : undefined}
+      accessibilityState={isCurrent ? { selected: true } : undefined}
       disabled={!onPress}
+      onLayout={onLayout}
       onPress={onPress}
       style={styles.holeRow}>
       <View style={styles.leftRail}>
@@ -137,14 +148,21 @@ function CurrentHoleBanner({
   eventId,
   hole,
   par,
+  onLayout,
 }: {
   eventId: string;
   hole: number;
   par: number;
+  onLayout?: (event: LayoutChangeEvent) => void;
 }) {
   const router = useRouter();
   return (
     <Pressable
+      accessibilityHint="Opens score entry for this hole"
+      accessibilityLabel={`Hole ${hole}, par ${par}, current hole. Enter score`}
+      accessibilityRole="button"
+      accessibilityState={{ selected: true }}
+      onLayout={onLayout}
       onPress={() =>
         router.push({
           pathname: eventPath(eventId, 'score-input') as never,
@@ -265,9 +283,91 @@ export default function Scorecard() {
   const rowHeight = useRef<Measured>({ out: 0, in: 0, total: 0 });
   const scrollY = useRef(0);
   const viewportH = useRef(0);
+  const contentH = useRef(0);
+  const scrollRef = useRef<ScrollView>(null);
+  const activeHoleLayout = useRef<{
+    holeIndex: number;
+    top: number;
+    height: number;
+  } | null>(null);
+  const pendingAutoPositionHole = useRef<number | null>(currentHole);
+  const positionedHole = useRef<number | null>(null);
+  const hasAutoPositioned = useRef(false);
+  const userIsDragging = useRef(false);
+  const userHasMomentum = useRef(false);
+  const autoPositionFrame = useRef<ReturnType<typeof requestAnimationFrame> | null>(null);
 
   /** Clear of the nav, matching FloatingNav's own inset plus the bar. */
   const navSpace = Math.max(20, insets.bottom + 12) + 72 + 10;
+
+  const autoPositionActiveHole = useCallback(() => {
+    const activeLayout = activeHoleLayout.current;
+    if (
+      !shouldAutoPositionScorecard({
+        pendingHole: pendingAutoPositionHole.current,
+        positionedHole: positionedHole.current,
+        measuredHole: activeLayout?.holeIndex ?? null,
+        userIsDragging: userIsDragging.current,
+        userHasMomentum: userHasMomentum.current,
+      }) ||
+      !activeLayout ||
+      !scrollRef.current ||
+      !viewportH.current ||
+      !contentH.current ||
+      !rowHeight.current.out ||
+      !rowHeight.current.in ||
+      !rowHeight.current.total
+    ) {
+      return;
+    }
+
+    const target = scorecardActiveHoleScrollTarget({
+      activeHoleIndex: activeLayout.holeIndex,
+      activeRowTop: activeLayout.top,
+      activeRowHeight: activeLayout.height,
+      viewportHeight: viewportH.current,
+      contentHeight: contentH.current,
+      navSpace,
+      summaryHeights: rowHeight.current,
+    });
+    const animated = hasAutoPositioned.current;
+
+    pendingAutoPositionHole.current = null;
+    positionedHole.current = activeLayout.holeIndex;
+    hasAutoPositioned.current = true;
+
+    if (Math.abs(scrollY.current - target) > 0.5) {
+      scrollRef.current.scrollTo({ y: target, animated });
+    }
+  }, [navSpace]);
+
+  const scheduleAutoPosition = useCallback(() => {
+    if (autoPositionFrame.current !== null) return;
+
+    autoPositionFrame.current = requestAnimationFrame(() => {
+      autoPositionFrame.current = null;
+      autoPositionActiveHole();
+    });
+  }, [autoPositionActiveHole]);
+
+  useEffect(() => {
+    if (positionedHole.current === currentHole) return;
+
+    pendingAutoPositionHole.current = currentHole;
+    if (activeHoleLayout.current?.holeIndex !== currentHole) {
+      activeHoleLayout.current = null;
+    }
+    scheduleAutoPosition();
+  }, [currentHole, scheduleAutoPosition]);
+
+  useEffect(
+    () => () => {
+      if (autoPositionFrame.current !== null) {
+        cancelAnimationFrame(autoPositionFrame.current);
+      }
+    },
+    [],
+  );
 
   const sync = useCallback(() => {
     const heights = rowHeight.current;
@@ -275,12 +375,7 @@ export default function Scorecard() {
 
     // Slots stack up from just above the nav, in card order, so releasing the
     // top one simply shortens the stack.
-    const slotTop: Measured = {
-      total: viewportH.current - navSpace - heights.total,
-      in: viewportH.current - navSpace - heights.total - heights.in,
-      out:
-        viewportH.current - navSpace - heights.total - heights.in - heights.out,
-    };
+    const slotTop = scorecardSummarySlots(viewportH.current, navSpace, heights);
 
     const next = {} as Record<TotalKey, boolean>;
     let changed = false;
@@ -300,6 +395,18 @@ export default function Scorecard() {
     rowTop.current[key] = event.nativeEvent.layout.y;
     rowHeight.current[key] = event.nativeEvent.layout.height;
     sync();
+    scheduleAutoPosition();
+  };
+
+  const measureActiveHole = (holeIndex: number) => (event: LayoutChangeEvent) => {
+    if (holeIndex !== currentHole) return;
+
+    activeHoleLayout.current = {
+      holeIndex,
+      top: event.nativeEvent.layout.y,
+      height: event.nativeEvent.layout.height,
+    };
+    scheduleAutoPosition();
   };
 
   const renderRows = (start: number, end: number) => {
@@ -312,6 +419,7 @@ export default function Scorecard() {
             eventId={event.id}
             hole={i + 1}
             par={pars[i]}
+            onLayout={measureActiveHole(i)}
           />,
         );
       } else {
@@ -321,6 +429,8 @@ export default function Scorecard() {
             hole={i + 1}
             par={pars[i]}
             score={scores[i]}
+            isCurrent={i === currentHole}
+            onLayout={i === currentHole ? measureActiveHole(i) : undefined}
             onPress={
               scores[i] === null
                 ? undefined
@@ -345,21 +455,41 @@ export default function Scorecard() {
         subtitle={event.courseName}
       />
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={{
-          paddingTop: insets.top + 54 + 12,
+          paddingTop: insets.top + PAGE_HEADER_HEIGHT + 12,
           // Just enough that the last summary comes to rest in its own slot
           // rather than under the nav.
           paddingBottom: navSpace,
         }}
         showsVerticalScrollIndicator={false}
         scrollEventThrottle={16}
+        onContentSizeChange={(_width, height) => {
+          contentH.current = height;
+          scheduleAutoPosition();
+        }}
         onLayout={(event) => {
           viewportH.current = event.nativeEvent.layout.height;
           sync();
+          scheduleAutoPosition();
+        }}
+        onMomentumScrollBegin={() => {
+          userHasMomentum.current = true;
+        }}
+        onMomentumScrollEnd={() => {
+          userHasMomentum.current = false;
+          scheduleAutoPosition();
         }}
         onScroll={(event) => {
           scrollY.current = event.nativeEvent.contentOffset.y;
           sync();
+        }}
+        onScrollBeginDrag={() => {
+          userIsDragging.current = true;
+        }}
+        onScrollEndDrag={() => {
+          userIsDragging.current = false;
+          scheduleAutoPosition();
         }}>
         {/* Column headers */}
         <View style={styles.headerRow}>
