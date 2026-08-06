@@ -33,6 +33,7 @@ export default function Profile() {
     accountAccess,
     me,
     myTeam,
+    myPlayingGroup,
     event,
     updateMyProfile,
     participantById,
@@ -170,10 +171,17 @@ export default function Profile() {
           <InfoRow label="EVENT" value={event.name} />
           <InfoRow label="FORMAT" value={GAME_STYLE_LABELS[event.gameStyle]} />
           <InfoRow label="TEAM" value={myTeam?.name ?? 'Unassigned'} />
-          <InfoRow label="TEE TIME" value={myTeam?.teeTime ?? '—'} />
+          <InfoRow
+            label={event.startFormat === 'shotgun' ? 'SHOTGUN START' : 'TEE TIME'}
+            value={myPlayingGroup?.teeTime ?? '—'}
+          />
           <InfoRow
             label="STARTING HOLE"
-            value={myTeam?.startingHole ? String(myTeam.startingHole) : '—'}
+            value={
+              myPlayingGroup?.startingHole
+                ? String(myPlayingGroup.startingHole)
+                : '—'
+            }
           />
         </View>
 

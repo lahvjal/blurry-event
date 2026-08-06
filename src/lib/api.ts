@@ -10,10 +10,12 @@ import {
   GameStyle,
   Hole,
   Participant,
+  PlayingGroup,
   ScoreUpdate,
   Scores,
   Team,
   TeamInvite,
+  StartFormat,
   emptyScores,
 } from '@/state/types';
 
@@ -47,6 +49,8 @@ export type EventBundle = {
   event: EventConfig;
   participants: Participant[];
   teams: Team[];
+  /** Optional only for reading v1 offline snapshots created before scheduling v2. */
+  playingGroups?: PlayingGroup[];
   invites: TeamInvite[];
   announcements: Announcement[];
   /** Keyed by team id (scramble) or participant id (solo). */
@@ -114,6 +118,7 @@ export async function fetchEventBundle(eventId: string): Promise<EventBundle> {
     holesRes,
     participantsRes,
     teamsRes,
+    playingGroupsRes,
     roundsRes,
     announcementsRes,
   ] = await Promise.all([
@@ -125,6 +130,12 @@ export async function fetchEventBundle(eventId: string): Promise<EventBundle> {
       .eq('event_id', eventId)
       .order('full_name'),
     supabase.from('teams').select('*').eq('event_id', eventId).order('tee_time'),
+    supabase
+      .from('playing_groups')
+      .select('*')
+      .eq('event_id', eventId)
+      .order('sort_order')
+      .order('created_at'),
     supabase.from('rounds').select('*').eq('event_id', eventId),
     supabase
       .from('announcements')
@@ -138,6 +149,7 @@ export async function fetchEventBundle(eventId: string): Promise<EventBundle> {
     holesRes.error,
     participantsRes.error,
     teamsRes.error,
+    playingGroupsRes.error,
     roundsRes.error,
     announcementsRes.error,
   ].find(Boolean);
@@ -149,14 +161,22 @@ export async function fetchEventBundle(eventId: string): Promise<EventBundle> {
   // Child tables without event_id are scoped through their already-filtered
   // parent rows. Avoid an unfiltered query when an event has no teams/rounds.
   const teamIds = (teamsRes.data ?? []).map((team: any) => team.id);
+  const playingGroupIds = (playingGroupsRes.data ?? []).map((group: any) => group.id);
   const roundIds = (roundsRes.data ?? []).map((round: any) => round.id);
   const profileIds = (participantsRes.data ?? [])
     .map((participant: any) => participant.claimed_by)
     .filter((id: string | null): id is string => Boolean(id));
 
-  const [membersRes, invitesRes, scoresRes, profilesRes] = await Promise.all([
+  const [membersRes, playingGroupMembersRes, invitesRes, scoresRes, profilesRes] = await Promise.all([
     teamIds.length
       ? supabase.from('team_members').select('*').in('team_id', teamIds)
+      : Promise.resolve({ data: [], error: null }),
+    playingGroupIds.length
+      ? supabase
+          .from('playing_group_members')
+          .select('*')
+          .in('playing_group_id', playingGroupIds)
+          .order('sort_order')
       : Promise.resolve({ data: [], error: null }),
     teamIds.length
       ? supabase.from('team_invites').select('*').in('team_id', teamIds)
@@ -171,6 +191,7 @@ export async function fetchEventBundle(eventId: string): Promise<EventBundle> {
 
   const firstChildError = [
     membersRes.error,
+    playingGroupMembersRes.error,
     invitesRes.error,
     scoresRes.error,
     profilesRes.error,
@@ -215,10 +236,26 @@ export async function fetchEventBundle(eventId: string): Promise<EventBundle> {
   const teams: Team[] = (teamsRes.data ?? []).map((t: any) => ({
     id: t.id,
     name: t.name,
+    individualException: Boolean(t.individual_exception),
     teeTime: t.tee_time,
     startingHole: t.starting_hole,
     cart: t.cart,
     memberIds: membersByTeam.get(t.id) ?? [],
+  }));
+
+  const membersByPlayingGroup = new Map<string, string[]>();
+  (playingGroupMembersRes.data ?? []).forEach((membership: any) => {
+    const list = membersByPlayingGroup.get(membership.playing_group_id) ?? [];
+    list.push(membership.participant_id);
+    membersByPlayingGroup.set(membership.playing_group_id, list);
+  });
+  const playingGroups: PlayingGroup[] = (playingGroupsRes.data ?? []).map((group: any) => ({
+    id: group.id,
+    name: group.name,
+    teeTime: group.tee_time,
+    startingHole: group.starting_hole,
+    cart: group.cart,
+    memberIds: membersByPlayingGroup.get(group.id) ?? [],
   }));
 
   // Fold scores into per-entrant 18-slot arrays.
@@ -278,6 +315,7 @@ export async function fetchEventBundle(eventId: string): Promise<EventBundle> {
       eventDate: row.event_date,
       checkInTime: row.check_in_time,
       startTime: row.start_time ?? '8:00 AM',
+      startFormat: (row.start_format ?? 'staggered') as StartFormat,
       teeTimes: row.tee_times ?? [],
       courseMapUrl: row.course_map_url ?? null,
       teeColor: row.tee_color || 'White',
@@ -290,6 +328,7 @@ export async function fetchEventBundle(eventId: string): Promise<EventBundle> {
     },
     participants,
     teams,
+    playingGroups,
     invites: (invitesRes.data ?? []).map((i: any) => ({
       id: i.id,
       teamId: i.team_id,
@@ -409,6 +448,7 @@ export async function apiUpdateEvent(
     eventDate?: string;
     checkInTime?: string;
     startTime?: string;
+    startFormat?: StartFormat;
     teeTimes?: string[];
     courseMapUrl?: string | null;
     teeColor?: string;
@@ -425,6 +465,7 @@ export async function apiUpdateEvent(
     event_date: patch.eventDate,
     check_in_time: patch.checkInTime,
     start_time: patch.startTime,
+    start_format: patch.startFormat,
     tee_times: patch.teeTimes,
     course_map_url: patch.courseMapUrl,
     tee_color: patch.teeColor,
@@ -434,6 +475,33 @@ export async function apiUpdateEvent(
 
   const { error } = await supabase.from('events').update(payload).eq('id', eventId);
   if (error) throw error;
+}
+
+/** Applies the complete schedule and all physical foursomes in one transaction. */
+export async function apiApplyEventSchedule(input: {
+  eventId: string;
+  startFormat: StartFormat;
+  startTime: string;
+  teeTimes: string[];
+  groups: PlayingGroup[];
+}): Promise<string[]> {
+  const { data, error } = await supabase.rpc('apply_event_schedule', {
+    p_event_id: input.eventId,
+    p_start_format: input.startFormat,
+    p_start_time: input.startTime,
+    p_tee_times: input.teeTimes,
+    p_groups: input.groups.map((group, index) => ({
+      id: group.id.startsWith('new-playing-group-') ? null : group.id,
+      name: group.name,
+      tee_time: group.teeTime,
+      starting_hole: group.startingHole,
+      cart: group.cart,
+      sort_order: index,
+      member_ids: group.memberIds,
+    })),
+  });
+  if (error) throw error;
+  return (data as string[] | null) ?? [];
 }
 
 export async function apiUpdateScorecard(eventId: string, holes: Hole[]) {
@@ -495,10 +563,17 @@ export async function apiPostAnnouncement(
 
 export async function apiUpdateTeam(
   teamId: string,
-  patch: { name?: string; teeTime?: string | null; startingHole?: number | null; cart?: string | null },
+  patch: {
+    name?: string;
+    individualException?: boolean;
+    teeTime?: string | null;
+    startingHole?: number | null;
+    cart?: string | null;
+  },
 ) {
   const payload = assigned({
     name: patch.name,
+    individual_exception: patch.individualException,
     tee_time: patch.teeTime,
     starting_hole: patch.startingHole,
     cart: patch.cart,
@@ -509,20 +584,17 @@ export async function apiUpdateTeam(
   if (error) throw error;
 }
 
-export async function apiAssignToTeam(participantId: string, teamId: string | null) {
-  // team_members has a unique constraint on participant_id, so clear first.
-  const del = await supabase
-    .from('team_members')
-    .delete()
-    .eq('participant_id', participantId);
-  if (del.error) throw del.error;
-
-  if (teamId) {
-    const { error } = await supabase
-      .from('team_members')
-      .insert({ team_id: teamId, participant_id: participantId });
-    if (error) throw error;
-  }
+export async function apiAssignToTeam(
+  eventId: string,
+  participantId: string,
+  teamId: string | null,
+) {
+  const { error } = await supabase.rpc('assign_scoring_team_member', {
+    p_event_id: eventId,
+    p_participant_id: participantId,
+    p_team_id: teamId,
+  });
+  if (error) throw error;
 }
 
 export async function apiCreateTeam(eventId: string, name: string): Promise<string> {
@@ -551,6 +623,7 @@ export async function apiApplyTeamAssignments(
   teams: {
     id: string | null;
     name: string;
+    individualException: boolean;
     teeTime: string | null;
     startingHole: number | null;
     cart: string | null;
@@ -562,6 +635,7 @@ export async function apiApplyTeamAssignments(
     p_teams: teams.map((team) => ({
       id: team.id,
       name: team.name,
+      individual_exception: team.individualException,
       tee_time: team.teeTime,
       starting_hole: team.startingHole,
       cart: team.cart,

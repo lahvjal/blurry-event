@@ -2,6 +2,7 @@ import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useLocalSearchParams } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -19,6 +20,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PageHeader } from '@/components/page-header';
+import { AdminRosterTabs } from '@/components/admin-roster-tabs';
 import { OfflineMutationScreen } from '@/components/offline-state';
 import { SearchField } from '@/components/search-field';
 import { ActionButton, Noise, SectionLabel } from '@/components/ui';
@@ -107,6 +109,7 @@ function RemoveParticipantModal({
 
 export default function AdminRoster() {
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ tab?: string | string[] }>();
   const {
     event,
     me,
@@ -121,6 +124,8 @@ export default function AdminRoster() {
     refresh,
   } = useEvent();
   const offline = useBrowserDefinitelyOffline();
+  const requestedTab = Array.isArray(params.tab) ? params.tab[0] : params.tab;
+  const workspaceTab = requestedTab === 'invites' ? 'invites' : 'players';
 
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
@@ -204,6 +209,7 @@ export default function AdminRoster() {
     const q = query.trim().toLowerCase();
     return participants
       .filter((p) => {
+        if (workspaceTab === 'invites' && p.claimed) return false;
         if (filter === 'claimed' && !p.claimed) return false;
         if (filter === 'pending' && p.claimed) return false;
         if (!q) return true;
@@ -214,7 +220,7 @@ export default function AdminRoster() {
         );
       })
       .sort((a, b) => a.fullName.localeCompare(b.fullName));
-  }, [participants, query, filter]);
+  }, [participants, query, filter, workspaceTab]);
 
   const visibleAccounts = useMemo(() => {
     const q = accountQuery.trim().toLowerCase();
@@ -493,7 +499,10 @@ export default function AdminRoster() {
     <GestureHandlerRootView style={styles.root}>
       <LinearGradient colors={['#203329', '#1b2a22']} style={StyleSheet.absoluteFill} />
       <Noise />
-      <PageHeader title="roster" subtitle={`${participants.length} PARTICIPANTS`} />
+      <PageHeader
+        title="roster & invites"
+        subtitle={`${participants.length} PARTICIPANTS`}
+      />
       <ScrollView
         contentContainerStyle={{
           paddingTop: insets.top + 54 + 22,
@@ -502,6 +511,8 @@ export default function AdminRoster() {
         }}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled">
+        <AdminRosterTabs eventId={event.id} active={workspaceTab} />
+
         {/* Summary */}
         <View style={styles.summary}>
           <View style={styles.summaryCell}>
@@ -523,7 +534,17 @@ export default function AdminRoster() {
         </View>
 
         {/* CSV import preview */}
-        {preview ? (
+        {workspaceTab === 'invites' ? (
+          <View style={styles.workspaceIntro}>
+            <SectionLabel color={colors.link} size={10}>
+              invitations
+            </SectionLabel>
+            <Text style={styles.hint}>
+              Pending players are shown here. Open a player to copy, share, email,
+              resend, or regenerate their invitation.
+            </Text>
+          </View>
+        ) : preview ? (
           <View style={styles.previewCard}>
             <SectionLabel color={colors.highlight} size={10}>
               import preview
@@ -599,7 +620,7 @@ export default function AdminRoster() {
         )}
 
         {/* New player / existing account */}
-        {adding && !preview ? (
+        {workspaceTab === 'players' && adding && !preview ? (
           <View style={styles.addCard}>
             <SectionLabel color={colors.link} size={10}>
               add a player
@@ -757,19 +778,21 @@ export default function AdminRoster() {
         ) : null}
 
         {/* Filters + search */}
-        <View style={styles.filters}>
-          {(['all', 'pending', 'claimed'] as Filter[]).map((key) => (
-            <Pressable
-              key={key}
-              style={[styles.filterChip, filter === key && styles.filterChipActive]}
-              onPress={() => setFilter(key)}>
-              <Text
-                style={[styles.filterText, filter === key && styles.filterTextActive]}>
-                {key === 'claimed' ? 'SIGNED UP' : key.toUpperCase()}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
+        {workspaceTab === 'players' ? (
+          <View style={styles.filters}>
+            {(['all', 'pending', 'claimed'] as Filter[]).map((key) => (
+              <Pressable
+                key={key}
+                style={[styles.filterChip, filter === key && styles.filterChipActive]}
+                onPress={() => setFilter(key)}>
+                <Text
+                  style={[styles.filterText, filter === key && styles.filterTextActive]}>
+                  {key === 'claimed' ? 'SIGNED UP' : key.toUpperCase()}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
 
         <SearchField
           value={query}
@@ -955,7 +978,7 @@ export default function AdminRoster() {
         </View>
 
         {/* Bulk tools */}
-        <View style={styles.bulk}>
+        {workspaceTab === 'invites' ? <View style={styles.bulk}>
           <SectionLabel color={colors.link} size={10}>
             bulk
           </SectionLabel>
@@ -993,7 +1016,7 @@ export default function AdminRoster() {
             CSV needs a name column. Email, handicap, and admin are optional.
             Players without an email get a code-based login instead.
           </Text>
-        </View>
+        </View> : null}
       </ScrollView>
       <RemoveParticipantModal
         participant={removeTarget}
@@ -1023,6 +1046,12 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: 'rgba(255,255,255,0.4)',
     lineHeight: 16,
+  },
+  workspaceIntro: {
+    marginHorizontal: 20,
+    gap: 8,
+    padding: 16,
+    backgroundColor: 'rgba(15,17,16,0.42)',
   },
   summary: {
     flexDirection: 'row',

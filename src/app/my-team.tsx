@@ -21,6 +21,7 @@ export default function MyTeam() {
     event,
     me,
     myTeam,
+    myPlayingGroup,
     participants,
     invites,
     participantById,
@@ -31,17 +32,17 @@ export default function MyTeam() {
 
   const [showRoster, setShowRoster] = useState(false);
 
-  if (!myTeam) {
+  if (!myTeam && !myPlayingGroup) {
     return (
       <View style={styles.root}>
         <LinearGradient colors={['#203329', '#1b2a22']} style={StyleSheet.absoluteFill} />
         <Noise />
         <PageHeader title="my team" />
         <View style={[styles.empty, { paddingTop: insets.top + 54 + 60 }]}>
-          <Text style={styles.emptyTitle}>No team yet</Text>
+          <Text style={styles.emptyTitle}>No playing group yet</Text>
           <Text style={styles.emptyBody}>
-            An admin will assign you a team, or a captain can invite you. Check back
-            before pairings close.
+            An admin will place you into a four-player start slot. Check back before
+            pairings close.
           </Text>
         </View>
         <FloatingNav />
@@ -49,14 +50,19 @@ export default function MyTeam() {
     );
   }
 
-  const members = myTeam.memberIds
+  const scoringMemberIds = myTeam?.memberIds ?? [me.id];
+  const members = scoringMemberIds
     .map((id) => participantById(id))
     .filter((p): p is NonNullable<typeof p> => Boolean(p));
 
-  const capacity = teamSize(event.gameStyle);
-  const openSlots = Math.max(0, capacity - members.length);
+  const capacity = isTeamFormat(event.gameStyle) ? teamSize(event.gameStyle) : 1;
+  const openSlots = myTeam?.individualException
+    ? 0
+    : myTeam
+      ? Math.max(0, capacity - members.length)
+      : 0;
   const pendingInvites = invites.filter(
-    (inv) => inv.teamId === myTeam.id && inv.status === 'pending',
+    (inv) => inv.teamId === myTeam?.id && inv.status === 'pending',
   );
 
   // Anyone not already on a team, and not already invited by us.
@@ -70,7 +76,10 @@ export default function MyTeam() {
     <View style={styles.root}>
       <LinearGradient colors={['#203329', '#1b2a22']} style={StyleSheet.absoluteFill} />
       <Noise />
-      <PageHeader title="my team" subtitle={myTeam.name} />
+      <PageHeader
+        title={myTeam ? 'my team' : 'my group'}
+        subtitle={myTeam?.name ?? myPlayingGroup?.name}
+      />
       <ScrollView
         contentContainerStyle={{
           paddingTop: insets.top + 54 + 22,
@@ -82,15 +91,21 @@ export default function MyTeam() {
         <View style={styles.hero}>
           <View style={styles.heroTop}>
             <Text style={styles.heroLabel}>
-              {myTeam.name.toUpperCase()}
-              {myTeam.startingHole ? ` · HOLE ${myTeam.startingHole}` : ''}
+              {(myTeam?.name ?? myPlayingGroup?.name ?? 'PLAYING GROUP').toUpperCase()}
+              {myPlayingGroup?.startingHole
+                ? ` · HOLE ${myPlayingGroup.startingHole}`
+                : ''}
             </Text>
             <Badge label={openSlots > 0 ? `${openSlots} OPEN` : 'CONFIRMED'} />
           </View>
-          <Text style={styles.teeTime}>{myTeam.teeTime ?? 'TBD'}</Text>
+          <Text style={styles.teeTime}>{myPlayingGroup?.teeTime ?? 'TBD'}</Text>
           <Text style={styles.heroSub}>
             {GAME_STYLE_LABELS[event.gameStyle]}
-            {isTeamFormat(event.gameStyle) ? ' · one card per team' : ''}
+            {isTeamFormat(event.gameStyle)
+              ? myTeam?.individualException
+                ? ' · individual exception · team-owned card'
+                : ' · one card per scoring team'
+              : ' · individual cards'}
           </Text>
         </View>
 
@@ -104,7 +119,7 @@ export default function MyTeam() {
 
           {/* Roster */}
           <SectionLabel color={colors.link} size={10}>
-            roster · {members.length}/{capacity}
+            {myTeam ? 'scoring team' : 'individual'} · {members.length}/{capacity}
           </SectionLabel>
           <View>
             {members.map((member, i) => {
@@ -205,17 +220,45 @@ export default function MyTeam() {
 
           {/* Logistics */}
           <View style={styles.card}>
-            <InfoRow label="TEE TIME" value={myTeam.teeTime ?? 'TBD'} />
+            <InfoRow
+              label={event.startFormat === 'shotgun' ? 'SHOTGUN START' : 'TEE TIME'}
+              value={myPlayingGroup?.teeTime ?? 'TBD'}
+            />
             <InfoRow
               label="STARTING HOLE"
-              value={myTeam.startingHole ? String(myTeam.startingHole) : 'TBD'}
+              value={
+                myPlayingGroup?.startingHole
+                  ? String(myPlayingGroup.startingHole)
+                  : 'TBD'
+              }
             />
-            <InfoRow label="CART" value={myTeam.cart ?? '—'} />
+            <InfoRow label="PLAYING GROUP" value={myPlayingGroup?.name ?? 'TBD'} />
+            <InfoRow label="CART" value={myPlayingGroup?.cart ?? '—'} />
             <InfoRow label="CHECK-IN" value={event.checkInTime} />
           </View>
 
+          {myPlayingGroup ? (
+            <View style={{ gap: 10 }}>
+              <SectionLabel color={colors.link} size={10}>
+                playing together · {myPlayingGroup.memberIds.length}/4
+              </SectionLabel>
+              {myPlayingGroup.memberIds.map((participantId) => {
+                const player = participantById(participantId);
+                if (!player) return null;
+                return (
+                  <View key={player.id} style={styles.inviteRow}>
+                    <Text style={styles.inviteName}>{player.fullName}</Text>
+                    <Text style={styles.memberHcp}>
+                      {player.handicap === null ? '—' : `${player.handicap} HCP`}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          ) : null}
+
           <ActionButton
-            label="OPEN TEAM SCORECARD"
+            label={myTeam ? 'OPEN TEAM SCORECARD' : 'OPEN MY SCORECARD'}
             onPress={() => router.push('/scorecard')}
           />
         </View>

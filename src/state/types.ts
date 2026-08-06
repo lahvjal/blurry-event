@@ -5,6 +5,8 @@
 
 /** Set by an admin on the event; the scorecard adapts to it. */
 export type GameStyle = 'solo' | 'scramble_2' | 'scramble_4';
+/** How playing groups enter the course. Independent from the scoring format. */
+export type StartFormat = 'staggered' | 'shotgun' | 'split_tee';
 export type EventLifecycleStatus =
   | 'draft'
   | 'published'
@@ -24,6 +26,18 @@ export const GAME_STYLE_LABELS: Record<GameStyle, string> = {
   solo: 'SOLO',
   scramble_2: '2-MAN SCRAMBLE',
   scramble_4: '4-MAN SCRAMBLE',
+};
+
+export const START_FORMAT_LABELS: Record<StartFormat, string> = {
+  staggered: 'STAGGERED TEE TIMES',
+  shotgun: 'SHOTGUN START',
+  split_tee: 'SPLIT-TEE START',
+};
+
+export const START_FORMAT_DESCRIPTIONS: Record<StartFormat, string> = {
+  staggered: 'Groups start from Hole 1 at different assigned times.',
+  shotgun: 'All groups start together, each from a different hole.',
+  split_tee: 'Groups start from Holes 1 and 10 in parallel at assigned times.',
 };
 
 /** How many players a team holds under a given format. */
@@ -139,6 +153,24 @@ export type ExistingAccountCandidate = {
 };
 
 export type Team = {
+  id: string;
+  name: string;
+  /**
+   * Explicit one-player scoring-team exception for an otherwise team-scored
+   * event. The round remains team-owned and appears in the main leaderboard.
+   */
+  individualException: boolean;
+  teeTime: string | null;
+  startingHole: number | null;
+  cart: string | null;
+  memberIds: string[];
+};
+
+/**
+ * A physical group on the course. It owns one start slot and always contains
+ * zero to four participants, regardless of whether they score alone or as a team.
+ */
+export type PlayingGroup = {
   id: string;
   name: string;
   teeTime: string | null;
@@ -278,6 +310,8 @@ export type EventConfig = {
   checkInTime: string;
   /** First tee / shotgun start time shown to players. */
   startTime: string;
+  /** Scheduling policy; deliberately independent from gameStyle. */
+  startFormat: StartFormat;
   /** Slots teams can be assigned to, in play order, e.g. "8:40 AM". */
   teeTimes: string[];
   /** Uploaded course map image; null until an admin adds one. */

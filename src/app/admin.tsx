@@ -29,10 +29,11 @@ export default function Admin() {
     event,
     me,
     teams,
+    playingGroups,
     participants,
+    leaderboard,
     setGameStyle,
     postAnnouncement,
-    teamOf,
   } = useEvent();
   const offline = useBrowserDefinitelyOffline();
 
@@ -66,8 +67,8 @@ export default function Admin() {
     setDraft('');
   };
 
-  const unassigned = participants.filter((p) => !teamOf(p.id));
-  const capacity = teamSize(event.gameStyle);
+  const scoringLocked =
+    event.lifecycleStatus !== 'draft' || leaderboard.some((row) => row.thru > 0);
 
   return (
     <View style={styles.root}>
@@ -93,7 +94,7 @@ export default function Admin() {
             <View style={{ flex: 1, gap: 5 }}>
               <Text style={styles.rosterLinkTitle}>EVENT DETAILS</Text>
               <Text style={styles.rosterLinkSub}>
-                {event.courseName} · {event.teeTimes.length} tee times ·{' '}
+                {event.courseName} · {event.startFormat.replace('_', ' ')} start ·{' '}
                 {event.courseMapUrl ? 'map added' : 'no map'}
               </Text>
             </View>
@@ -101,7 +102,7 @@ export default function Admin() {
           </Pressable>
         </View>
 
-        {/* Roster */}
+        {/* Roster workspace */}
         <View style={{ gap: 10 }}>
           <SectionLabel color={colors.link} size={10}>
             participants
@@ -112,8 +113,8 @@ export default function Admin() {
             <View style={{ flex: 1, gap: 5 }}>
               <Text style={styles.rosterLinkTitle}>ROSTER & INVITES</Text>
               <Text style={styles.rosterLinkSub}>
-                {participants.length} on the list ·{' '}
-                {participants.filter((p) => !p.claimed).length} yet to sign up
+                Players · Invites · Teams · {participants.length} golfers ·{' '}
+                {teams.length} scoring teams · {playingGroups.length} playing groups
               </Text>
             </View>
             <Text style={styles.rosterLinkArrow}>›</Text>
@@ -127,14 +128,22 @@ export default function Admin() {
           </SectionLabel>
           <Text style={styles.hint}>
             Sets how the scorecard and leaderboard work for everyone in the event.
+            {scoringLocked
+              ? ' Locked because this event is published or has scores.'
+              : ''}
           </Text>
           {STYLES.map((style) => {
             const active = event.gameStyle === style;
             return (
               <Pressable
                 key={style}
+                disabled={scoringLocked && !active}
                 onPress={() => setGameStyle(style)}
-                style={[styles.option, active && styles.optionActive]}>
+                style={[
+                  styles.option,
+                  active && styles.optionActive,
+                  scoringLocked && !active && { opacity: 0.42 },
+                ]}>
                 <View style={{ flex: 1, gap: 5 }}>
                   <Text style={[styles.optionName, active && { color: colors.highlight }]}>
                     {GAME_STYLE_LABELS[style]}
@@ -142,7 +151,7 @@ export default function Admin() {
                   <Text style={styles.optionSub}>
                     {style === 'solo'
                       ? 'Every player keeps their own card'
-                      : `One shared card per team of ${teamSize(style)}`}
+                      : `One shared card per team of ${teamSize(style)}; a one-player exception may be marked explicitly`}
                   </Text>
                 </View>
                 <View style={[styles.radio, active && styles.radioOn]} />
@@ -168,24 +177,6 @@ export default function Admin() {
           <ActionButton label="POST ANNOUNCEMENT" height={56} onPress={post} />
         </View>
 
-        {/* Teams */}
-        <View style={{ gap: 10 }}>
-          <SectionLabel color={colors.link} size={10}>
-            teams
-          </SectionLabel>
-          <Pressable
-            style={styles.rosterLink}
-            onPress={() => router.push(eventPath(event.id, 'admin-teams') as never)}>
-            <View style={{ flex: 1, gap: 5 }}>
-              <Text style={styles.rosterLinkTitle}>MANAGE TEAMS</Text>
-              <Text style={styles.rosterLinkSub}>
-                {teams.length} teams · {unassigned.length} unassigned · capacity{' '}
-                {capacity}
-              </Text>
-            </View>
-            <Text style={styles.rosterLinkArrow}>›</Text>
-          </Pressable>
-        </View>
       </ScrollView>
     </View>
   );

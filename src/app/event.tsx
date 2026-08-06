@@ -434,6 +434,7 @@ function FocusedEventHome() {
     event,
     me,
     myTeam,
+    myPlayingGroup,
     myScores,
     currentHoleIndex,
     announcements,
@@ -460,6 +461,7 @@ function FocusedEventHome() {
   const canStart =
     !eventEnded &&
     isEventDay &&
+    Boolean(myPlayingGroup) &&
     (!isTeamFormat(event.gameStyle) || Boolean(myTeam));
   const myRow = leaderboard.find((row) => row.isMine);
   const position = competitionPosition(myRow, leaderboard);
@@ -472,7 +474,7 @@ function FocusedEventHome() {
       ? Math.max(0, myRow.toPar - leader.toPar)
       : null;
   const nextHole = currentHoleIndex + 1;
-  const teeTime = splitTime(myTeam?.teeTime ?? event.startTime);
+  const teeTime = splitTime(myPlayingGroup?.teeTime ?? event.startTime);
 
   const announcementIds = React.useMemo(
     () => announcements.map((announcement) => announcement.id),
@@ -490,10 +492,10 @@ function FocusedEventHome() {
 
   const teammates = React.useMemo(
     () =>
-      (myTeam?.memberIds ?? [])
+      (myPlayingGroup?.memberIds ?? [])
         .map((id) => participantById(id))
         .filter((player): player is NonNullable<typeof player> => Boolean(player)),
-    [myTeam?.memberIds, participantById],
+    [myPlayingGroup?.memberIds, participantById],
   );
   const achievements = React.useMemo(
     () => buildAchievements(scoreUpdates, event, leaderboard),
@@ -579,7 +581,7 @@ function FocusedEventHome() {
         : gapToLead === null
           ? `THRU ${holesPlayed}`
           : `THRU ${holesPlayed} · ${gapToLead} STROKE${gapToLead === 1 ? '' : 'S'} OFF THE LEAD`
-    : `START HOLE ${myTeam?.startingHole ?? 'TBD'}`;
+    : `START HOLE ${myPlayingGroup?.startingHole ?? 'TBD'}`;
 
   return (
     <View style={styles.root}>
@@ -632,7 +634,7 @@ function FocusedEventHome() {
               <Text style={styles.teamTag}>
                 {isTeamFormat(event.gameStyle)
                   ? (myTeam?.name ?? 'UNASSIGNED')
-                  : 'SOLO'}
+                  : (myPlayingGroup?.name ?? 'SOLO')}
               </Text>
             </View>
 
@@ -763,7 +765,7 @@ function FocusedEventHome() {
                 </Text>
                 <View style={styles.microDot} />
                 <Text style={styles.courseCaptionText}>
-                  HOLE {roundStarted ? nextHole : (myTeam?.startingHole ?? 'TBD')}
+                  HOLE {roundStarted ? nextHole : (myPlayingGroup?.startingHole ?? 'TBD')}
                 </Text>
               </View>
             </GradientPanel>
@@ -803,13 +805,17 @@ function FocusedEventHome() {
               </View>
             </Pressable>
           </View>
-        ) : myTeam ? (
+        ) : myPlayingGroup ? (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <SectionLabel>{myTeam.name}</SectionLabel>
+              <SectionLabel>{myTeam?.name ?? myPlayingGroup.name}</SectionLabel>
               <LinkAction
-                label={openingTeamChat ? 'opening…' : 'view team'}
-                onPress={() => void openTeamChat()}
+                label={myTeam ? (openingTeamChat ? 'opening…' : 'view team') : 'view group'}
+                onPress={
+                  myTeam
+                    ? () => void openTeamChat()
+                    : () => router.push('/my-team')
+                }
               />
             </View>
             <View style={styles.playerList}>

@@ -15,6 +15,7 @@ import {
   apiAddExistingAccountToEvent,
   apiAddParticipants,
   apiApplyTeamAssignments,
+  apiApplyEventSchedule,
   apiAssignToTeam,
   apiCreateTeam,
   apiDeleteTeam,
@@ -36,6 +37,7 @@ import {
   fetchEventBundle,
 } from '@/lib/api';
 import { selectDefaultEventFocus } from '@/lib/event-focus';
+import { nextUnscoredHoleIndex, seatPlayingGroups } from '@/lib/scheduling';
 import {
   loadAccountEventAccess,
   loadEventSnapshot,
@@ -63,6 +65,7 @@ import {
   LeaderboardRow,
   NewParticipantInput,
   Participant,
+  PlayingGroup,
   ScoreUpdate,
   Scores,
   Team,
@@ -99,6 +102,7 @@ const SEED_EVENT: EventConfig = {
   eventDate: '2026-08-24',
   checkInTime: '7:00 AM',
   startTime: '8:20 AM',
+  startFormat: 'staggered',
   teeTimes: ['8:20 AM', '8:30 AM', '8:40 AM', '8:50 AM'],
   courseMapUrl: null,
   teeColor: 'White',
@@ -174,6 +178,7 @@ const SEED_TEAMS: Team[] = [
   {
     id: 't1',
     name: 'Team 4',
+    individualException: false,
     teeTime: '8:40 AM',
     startingHole: 1,
     cart: 'Cart 14',
@@ -182,6 +187,7 @@ const SEED_TEAMS: Team[] = [
   {
     id: 't2',
     name: 'The Turn Dogs',
+    individualException: false,
     teeTime: '8:20 AM',
     startingHole: 1,
     cart: 'Cart 11',
@@ -190,6 +196,7 @@ const SEED_TEAMS: Team[] = [
   {
     id: 't3',
     name: 'Sunday Service',
+    individualException: false,
     teeTime: '8:30 AM',
     startingHole: 1,
     cart: 'Cart 12',
@@ -198,12 +205,22 @@ const SEED_TEAMS: Team[] = [
   {
     id: 't4',
     name: 'Green Jackets',
+    individualException: false,
     teeTime: '8:50 AM',
     startingHole: 1,
     cart: 'Cart 13',
     memberIds: ['p13', 'p14', 'p15', 'p16'],
   },
 ];
+
+const SEED_PLAYING_GROUPS: PlayingGroup[] = SEED_TEAMS.map((team) => ({
+  id: `group-${team.id}`,
+  name: team.name,
+  teeTime: team.teeTime,
+  startingHole: team.startingHole,
+  cart: team.cart,
+  memberIds: [...team.memberIds],
+}));
 
 /** Partial cards for the other groups so the leaderboard has something to rank. */
 function seedScores(strokes: number[]): Scores {
@@ -243,11 +260,13 @@ type EventState = {
   event: EventConfig;
   participants: Participant[];
   teams: Team[];
+  playingGroups: PlayingGroup[];
   announcements: Announcement[];
   invites: TeamInvite[];
   /** The signed-in participant. */
   me: Participant;
   myTeam: Team | null;
+  myPlayingGroup: PlayingGroup | null;
   /** Key the active round is stored under: team id for scrambles, else participant id. */
   myEntrantId: string;
   myScores: Scores;
@@ -269,6 +288,7 @@ type EventState = {
 
   participantById: (id: string) => Participant | undefined;
   teamOf: (participantId: string) => Team | undefined;
+  playingGroupOf: (participantId: string) => PlayingGroup | undefined;
   /** Re-reads everything from Supabase. Runs on sign-in and on app foreground. */
   refresh: () => Promise<void>;
   /** Ignores route/current focus and returns the event Home actually opened. */
@@ -299,6 +319,7 @@ type EventState = {
         | 'eventDate'
         | 'checkInTime'
         | 'startTime'
+        | 'startFormat'
         | 'teeTimes'
         | 'courseMapUrl'
         | 'teeColor'
@@ -310,7 +331,14 @@ type EventState = {
   updateScorecard: (holes: Hole[]) => Promise<boolean>;
   postAnnouncement: (body: string) => void;
   assignToTeam: (participantId: string, teamId: string | null) => void;
-  updateTeam: (teamId: string, patch: Partial<Pick<Team, 'name' | 'teeTime' | 'startingHole' | 'cart'>>) => void;
+  updateTeam: (
+    teamId: string,
+    patch: Partial<
+      Pick<Team, 'name' | 'individualException' | 'teeTime' | 'startingHole' | 'cart'>
+    >,
+  ) => void;
+  /** Atomically validates and saves every physical foursome and start slot. */
+  savePlayingGroups: (groups: PlayingGroup[]) => Promise<boolean>;
 
   // Team admin
   /** Resolves to the new team's id, or null if the server refused it. */
@@ -385,6 +413,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const [event, setEvent] = useState<EventConfig>(SEED_EVENT);
   const [participants, setParticipants] = useState<Participant[]>(SEED_PARTICIPANTS);
   const [teams, setTeams] = useState<Team[]>(SEED_TEAMS);
+  const [playingGroups, setPlayingGroups] = useState<PlayingGroup[]>(SEED_PLAYING_GROUPS);
   const [announcements, setAnnouncements] = useState<Announcement[]>(SEED_ANNOUNCEMENTS);
   const [invites, setInvites] = useState<TeamInvite[]>([]);
   const [rounds, setRounds] = useState<Record<string, Scores>>(SEED_ROUNDS);
@@ -402,6 +431,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     setActiveEventId(null);
     setParticipants([]);
     setTeams([]);
+    setPlayingGroups([]);
     setInvites([]);
     setAnnouncements([]);
     setRounds({});
@@ -444,6 +474,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     setEvent(SEED_EVENT);
     setParticipants(SEED_PARTICIPANTS);
     setTeams(SEED_TEAMS);
+    setPlayingGroups(SEED_PLAYING_GROUPS);
     setInvites([]);
     setAnnouncements(SEED_ANNOUNCEMENTS);
     setRounds(SEED_ROUNDS);
@@ -498,9 +529,29 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     setEvent({
       ...bundle.event,
       lifecycleStatus: bundle.event.lifecycleStatus ?? 'published',
+      startFormat: bundle.event.startFormat ?? 'staggered',
     });
     setParticipants(bundle.participants);
-    setTeams(bundle.teams);
+    const compatibleTeams = bundle.teams.map((team) => ({
+      ...team,
+      // v1/v2 snapshots saved before the explicit one-player exception.
+      individualException: team.individualException ?? false,
+    }));
+    setTeams(compatibleTeams);
+    // v1 offline snapshots predate playing groups. Derive the exact legacy
+    // schedule without mutating the saved snapshot; the next online refresh
+    // replaces it with canonical database rows.
+    setPlayingGroups(
+      bundle.playingGroups ??
+        compatibleTeams.map((team) => ({
+          id: `legacy-playing-group-${team.id}`,
+          name: team.name,
+          teeTime: team.teeTime,
+          startingHole: team.startingHole ?? (team.teeTime ? 1 : null),
+          cart: team.cart,
+          memberIds: [...team.memberIds].slice(0, 4),
+        })),
+    );
     setInvites(bundle.invites);
     setAnnouncements(bundle.announcements);
     setRounds(roundsWithLocalScores);
@@ -911,7 +962,12 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   );
 
   const persistTeamPatch = useCallback(
-    (teamId: string, patch: Partial<Pick<Team, 'name' | 'teeTime' | 'startingHole' | 'cart'>>) => {
+    (
+      teamId: string,
+      patch: Partial<
+        Pick<Team, 'name' | 'individualException' | 'teeTime' | 'startingHole' | 'cart'>
+      >,
+    ) => {
       if (!isLive) return;
 
       const inFlight = teamWrites.current.get(teamId);
@@ -951,24 +1007,35 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, [accountAccess?.profile, participants, myId]);
 
   const myTeam = useMemo(
-    () => (myId ? teams.find((t) => t.memberIds.includes(myId)) ?? null : null),
-    [teams, myId],
+    () =>
+      myId && isTeamFormat(event.gameStyle)
+        ? teams.find((team) => team.memberIds.includes(myId)) ?? null
+        : null,
+    [event.gameStyle, teams, myId],
+  );
+
+  const myPlayingGroup = useMemo(
+    () =>
+      myId
+        ? playingGroups.find((group) => group.memberIds.includes(myId)) ?? null
+        : null,
+    [playingGroups, myId],
   );
 
   const myEntrantId = myId
     ? isTeamFormat(event.gameStyle)
-      ? (myTeam?.id ?? myId)
+      ? (myTeam?.id ?? `unassigned:${myId}`)
       : myId
     : 'unlinked';
 
   /**
-   * Who owns the active round server-side: the team under a scramble, the player
-   * under solo — and the player too when a scramble hasn't paired them yet.
+   * Who owns the active round server-side: always the scoring team under a
+   * scramble (including an explicit one-member team), otherwise the player.
    */
   const myRoundOwner = useMemo(
     () =>
-      isTeamFormat(event.gameStyle) && myTeam
-        ? { teamId: myTeam.id, participantId: null }
+      isTeamFormat(event.gameStyle)
+        ? { teamId: myTeam?.id ?? null, participantId: null }
         : { teamId: null, participantId: myId },
     [event.gameStyle, myTeam, myId],
   );
@@ -976,13 +1043,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const myScores = rounds[myEntrantId] ?? emptyScores();
 
   const currentHoleIndex = useMemo(() => {
-    const start = Math.max(0, Math.min(17, (myTeam?.startingHole ?? 1) - 1));
-    for (let offset = 0; offset < 18; offset += 1) {
-      const index = (start + offset) % 18;
-      if (myScores[index] === null) return index;
-    }
-    return (start + 17) % 18;
-  }, [myScores, myTeam?.startingHole]);
+    return nextUnscoredHoleIndex(myScores, myPlayingGroup?.startingHole);
+  }, [myScores, myPlayingGroup?.startingHole]);
 
   const participantById = useCallback(
     (id: string) => participants.find((p) => p.id === id),
@@ -994,9 +1056,18 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     [teams],
   );
 
+  const playingGroupOf = useCallback(
+    (participantId: string) =>
+      playingGroups.find((group) => group.memberIds.includes(participantId)),
+    [playingGroups],
+  );
+
   const leaderboard = useMemo<LeaderboardRow[]>(() => {
     const entrants = isTeamFormat(event.gameStyle)
-      ? teams.map((t) => ({ id: t.id, name: t.name }))
+      ? teams.map((t) => ({
+          id: t.id,
+          name: t.individualException ? `${t.name} · Individual` : t.name,
+        }))
       : participants.map((p) => ({ id: p.id, name: p.fullName }));
 
     return entrants
@@ -1028,6 +1099,9 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       const updatedAt = new Date().toISOString();
       if (holeIndex < 0 || holeIndex >= 18 || strokes < 1 || strokes > 20) {
         throw new Error('Choose a valid hole and score.');
+      }
+      if (isTeamFormat(event.gameStyle) && !myRoundOwner.teamId) {
+        throw new Error('An admin must assign you to a scoring team before you score.');
       }
 
       if (isLive) {
@@ -1066,7 +1140,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         ),
       ]);
     },
-    [myEntrantId, isLive, myId, event.id, myRoundOwner],
+    [myEntrantId, isLive, myId, event.id, event.gameStyle, myRoundOwner],
   );
 
   // If another device already holds a newer score, the RPC returns that
@@ -1227,15 +1301,29 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
   const setGameStyle = useCallback(
     (style: GameStyle) => {
-      setEvent((prev) => ({ ...prev, gameStyle: style }));
-      void persist('the format', () => apiSetGameStyle(event.id, style));
+      const hasScores = Object.values(rounds).some((scores) =>
+        scores.some((score) => score !== null),
+      );
+      if (event.lifecycleStatus !== 'draft' || hasScores) {
+        Alert.alert(
+          'Scoring format is locked',
+          'A published or scored event keeps its scoring identity so existing cards and offline score revisions remain valid.',
+        );
+        return;
+      }
+      void persist('the format', () => apiSetGameStyle(event.id, style)).then(
+        (saved) => {
+          if (saved) setEvent((prev) => ({ ...prev, gameStyle: style }));
+        },
+      );
     },
-    [event.id, persist],
+    [event.id, event.lifecycleStatus, persist, rounds],
   );
 
   const updateEvent = useCallback<EventState['updateEvent']>(
     async (patch) => {
       let savedPatch = patch;
+      let savedGroups = playingGroups;
       const saved = await persist('the event details', async () => {
         // A freshly picked course map is a local file:// uri, which resolves to
         // nothing on anybody else's phone. The bytes go to Storage first and the
@@ -1249,11 +1337,43 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           ...patch,
           courseMapUrl: uploaded ?? patch.courseMapUrl,
         };
-        await apiUpdateEvent(event.id, savedPatch);
+        const changesSchedule =
+          patch.startFormat !== undefined ||
+          patch.startTime !== undefined ||
+          patch.teeTimes !== undefined;
+        if (changesSchedule) {
+          const startFormat = patch.startFormat ?? event.startFormat;
+          const startTime = patch.startTime ?? event.startTime;
+          const teeTimes = patch.teeTimes ?? event.teeTimes;
+          savedGroups = seatPlayingGroups(
+            playingGroups,
+            startFormat,
+            startTime,
+            teeTimes,
+          );
+          const ids = await apiApplyEventSchedule({
+            eventId: event.id,
+            startFormat,
+            startTime,
+            teeTimes,
+            groups: savedGroups,
+          });
+          savedGroups = savedGroups.map((group, index) => ({
+            ...group,
+            id: ids[index] ?? group.id,
+          }));
+        }
+        await apiUpdateEvent(event.id, {
+          ...savedPatch,
+          startFormat: changesSchedule ? undefined : savedPatch.startFormat,
+          startTime: changesSchedule ? undefined : savedPatch.startTime,
+          teeTimes: changesSchedule ? undefined : savedPatch.teeTimes,
+        });
       });
 
       if (saved) {
         setEvent((prev) => ({ ...prev, ...savedPatch }));
+        setPlayingGroups(savedGroups);
         setAccountAccess((current) =>
           current
             ? {
@@ -1279,7 +1399,29 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       }
       return saved;
     },
-    [event.id, persist],
+    [event.id, event.startFormat, event.startTime, event.teeTimes, persist, playingGroups],
+  );
+
+  const savePlayingGroups = useCallback<EventState['savePlayingGroups']>(
+    async (groups) => {
+      let savedGroups = groups;
+      const saved = await persist('the playing groups', async () => {
+        const ids = await apiApplyEventSchedule({
+          eventId: event.id,
+          startFormat: event.startFormat,
+          startTime: event.startTime,
+          teeTimes: event.teeTimes,
+          groups,
+        });
+        savedGroups = groups.map((group, index) => ({
+          ...group,
+          id: ids[index] ?? group.id,
+        }));
+      });
+      if (saved) setPlayingGroups(savedGroups);
+      return saved;
+    },
+    [event.id, event.startFormat, event.startTime, event.teeTimes, persist],
   );
 
   const updateScorecard = useCallback<EventState['updateScorecard']>(
@@ -1319,17 +1461,37 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       setTeams((prev) =>
         prev.map((team) => {
           const without = team.memberIds.filter((id) => id !== participantId);
-          if (team.id === teamId) return { ...team, memberIds: [...without, participantId] };
-          return { ...team, memberIds: without };
+          if (team.id === teamId) {
+            const memberIds = [...without, participantId];
+            return {
+              ...team,
+              memberIds,
+              individualException:
+                team.individualException && memberIds.length === 1,
+            };
+          }
+          return {
+            ...team,
+            memberIds: without,
+            individualException:
+              team.individualException && without.length === 1,
+          };
         }),
       );
-      void persist('the pairing', () => apiAssignToTeam(participantId, teamId));
+      void persist('the pairing', () =>
+        apiAssignToTeam(event.id, participantId, teamId),
+      );
     },
-    [persist],
+    [event.id, persist],
   );
 
   const updateTeam = useCallback(
-    (teamId: string, patch: Partial<Pick<Team, 'name' | 'teeTime' | 'startingHole' | 'cart'>>) => {
+    (
+      teamId: string,
+      patch: Partial<
+        Pick<Team, 'name' | 'individualException' | 'teeTime' | 'startingHole' | 'cart'>
+      >,
+    ) => {
       setTeams((prev) => prev.map((t) => (t.id === teamId ? { ...t, ...patch } : t)));
       persistTeamPatch(teamId, patch);
     },
@@ -1341,6 +1503,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       const teamName = name?.trim() || `Team ${teams.length + 1}`;
       const blank = {
         name: teamName,
+        individualException: false,
         teeTime: null,
         startingHole: null,
         cart: null,
@@ -1394,15 +1557,22 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       return ah - bh;
     });
 
-    const teamCount = Math.max(1, Math.ceil(ranked.length / size));
-    const buckets: string[][] = Array.from({ length: teamCount }, () => []);
+    const completeTeamCount = Math.floor(ranked.length / size);
+    const completePlayerCount = completeTeamCount * size;
+    const buckets: string[][] = Array.from({ length: completeTeamCount }, () => []);
 
-    ranked.forEach((player, i) => {
-      const round = Math.floor(i / teamCount);
-      const slot = i % teamCount;
+    ranked.slice(0, completePlayerCount).forEach((player, i) => {
+      const round = Math.floor(i / Math.max(1, completeTeamCount));
+      const slot = i % Math.max(1, completeTeamCount);
       // Reverse direction on odd rounds for the snake.
-      const target = round % 2 === 0 ? slot : teamCount - 1 - slot;
+      const target =
+        round % 2 === 0 ? slot : Math.max(0, completeTeamCount - 1 - slot);
       buckets[target].push(player.id);
+    });
+    // A remainder cannot become a partly filled scramble team: each golfer is
+    // an explicit one-member, team-owned exception instead.
+    ranked.slice(completePlayerCount).forEach((player) => {
+      buckets.push([player.id]);
     });
 
     // Existing teams are reused position by position so their tee times, carts
@@ -1413,6 +1583,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       return {
         id: existing?.id ?? null,
         name: existing?.name ?? `Team ${i + 1}`,
+        individualException:
+          memberIds.length === 1 && event.gameStyle !== 'solo',
         teeTime: existing?.teeTime ?? null,
         startingHole: existing?.startingHole ?? null,
         cart: existing?.cart ?? null,
@@ -1609,6 +1781,15 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         prev.map((team) => ({
           ...team,
           memberIds: team.memberIds.filter((memberId) => memberId !== id),
+          individualException:
+            team.individualException &&
+            team.memberIds.filter((memberId) => memberId !== id).length === 1,
+        })),
+      );
+      setPlayingGroups((prev) =>
+        prev.map((group) => ({
+          ...group,
+          memberIds: group.memberIds.filter((memberId) => memberId !== id),
         })),
       );
     },
@@ -1659,10 +1840,12 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     event,
     participants,
     teams,
+    playingGroups,
     announcements,
     invites,
     me,
     myTeam,
+    myPlayingGroup,
     myEntrantId,
     myScores,
     currentHoleIndex,
@@ -1674,6 +1857,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     eventLoadError,
     participantById,
     teamOf,
+    playingGroupOf,
     refresh: refreshFocusedEvent,
     focusDefaultHome,
     dismissHomeNotice,
@@ -1688,6 +1872,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     postAnnouncement,
     assignToTeam,
     updateTeam,
+    savePlayingGroups,
     createTeam,
     deleteTeam,
     autoBalanceTeams,

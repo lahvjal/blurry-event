@@ -17,7 +17,14 @@ type Tab = 'players' | 'teams';
 export default function Directory() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { participants, teams, me, participantById, teamOf } = useEvent();
+  const {
+    participants,
+    teams,
+    me,
+    participantById,
+    teamOf,
+    playingGroupOf,
+  } = useEvent();
 
   const [tab, setTab] = useState<Tab>('players');
   const [query, setQuery] = useState('');
@@ -87,7 +94,9 @@ export default function Directory() {
                     </Text>
                     <Text style={styles.playerMeta}>
                       {player.handicap === null ? '—' : `${player.handicap} HCP`}
-                      {team ? ` · ${team.name}` : ' · Unassigned'}
+                      {team
+                        ? ` · ${team.name}${team.individualException ? ' (Individual)' : ''}`
+                        : ' · Unassigned'}
                     </Text>
                   </View>
                   {!isMe ? (
@@ -116,6 +125,9 @@ export default function Directory() {
                 .map((id) => participantById(id))
                 .filter((p): p is NonNullable<typeof p> => Boolean(p));
               const mine = team.memberIds.includes(me.id);
+              const physical = team.memberIds
+                .map((participantId) => playingGroupOf(participantId))
+                .find(Boolean);
               return (
                 <Pressable
                   key={team.id}
@@ -124,9 +136,10 @@ export default function Directory() {
                   <View style={styles.teamHeader}>
                     <Text style={[styles.teamName, mine && { color: colors.highlight }]}>
                       {team.name}
+                      {team.individualException ? ' · INDIVIDUAL' : ''}
                       {mine ? '  ·  YOUR TEAM' : ''}
                     </Text>
-                    <Text style={styles.teamTee}>{team.teeTime ?? 'TBD'}</Text>
+                    <Text style={styles.teamTee}>{physical?.teeTime ?? 'TBD'}</Text>
                   </View>
                   {members.map((member) => (
                     <View key={member.id} style={styles.teamMemberRow}>
@@ -137,10 +150,10 @@ export default function Directory() {
                       </Text>
                     </View>
                   ))}
-                  {team.startingHole ? (
+                  {physical?.startingHole ? (
                     <Text style={styles.teamFooter}>
-                      STARTS HOLE {team.startingHole}
-                      {team.cart ? ` · ${team.cart.toUpperCase()}` : ''}
+                      STARTS HOLE {physical.startingHole}
+                      {physical.cart ? ` · ${physical.cart.toUpperCase()}` : ''}
                     </Text>
                   ) : null}
                 </Pressable>

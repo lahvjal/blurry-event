@@ -33,6 +33,9 @@ import {
   generateTeeTimes,
   mapsUrl,
   parseTimeOfDay,
+  START_FORMAT_DESCRIPTIONS,
+  START_FORMAT_LABELS,
+  StartFormat,
   TEE_PRESETS,
 } from '@/state/types';
 
@@ -54,6 +57,7 @@ type EventDraft = Pick<
   | 'eventDate'
   | 'checkInTime'
   | 'startTime'
+  | 'startFormat'
   | 'teeTimes'
   | 'courseMapUrl'
   | 'teeColor'
@@ -71,6 +75,7 @@ function draftFrom(event: EventConfig): EventDraft {
     eventDate: event.eventDate,
     checkInTime: event.checkInTime,
     startTime: event.startTime,
+    startFormat: event.startFormat,
     teeTimes: event.teeTimes,
     courseMapUrl: event.courseMapUrl,
     teeColor: event.teeColor,
@@ -110,34 +115,6 @@ function showMessage(title: string, message: string) {
   Alert.alert(title, message);
 }
 
-function confirmAction({
-  title,
-  message,
-  confirmLabel,
-  destructive = false,
-  onConfirm,
-}: {
-  title: string;
-  message: string;
-  confirmLabel: string;
-  destructive?: boolean;
-  onConfirm: () => void;
-}) {
-  if (Platform.OS === 'web' && typeof window !== 'undefined') {
-    if (window.confirm(`${title}\n\n${message}`)) onConfirm();
-    return;
-  }
-
-  Alert.alert(title, message, [
-    { text: 'Cancel', style: 'cancel' },
-    {
-      text: confirmLabel,
-      style: destructive ? 'destructive' : 'default',
-      onPress: onConfirm,
-    },
-  ]);
-}
-
 type Picker = 'date' | 'checkIn' | 'start' | 'firstTee' | null;
 
 const LIFECYCLE_OPTIONS: {
@@ -151,10 +128,12 @@ const LIFECYCLE_OPTIONS: {
   { value: 'archived', description: 'Ended and retained for club history.' },
 ];
 
+const START_FORMATS: StartFormat[] = ['staggered', 'shotgun', 'split_tee'];
+
 export default function AdminEvent() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { event, me, teams, updateEvent, updateTeam } = useEvent();
+  const { event, me, playingGroups, updateEvent } = useEvent();
   const offline = useBrowserDefinitelyOffline();
 
   const [draft, setDraft] = useState<EventDraft>(() => draftFrom(event));
@@ -164,17 +143,13 @@ export default function AdminEvent() {
   // Tee time generator inputs (not part of the draft — they're just controls).
   const [firstTee, setFirstTee] = useState(event.teeTimes[0] ?? '8:00 AM');
   const [interval, setInterval] = useState('10');
-  const [slotCount, setSlotCount] = useState(String(Math.max(4, teams.length)));
+  const [slotCount, setSlotCount] = useState(
+    String(Math.max(4, playingGroups.length)),
+  );
 
   const dirty = useMemo(
     () => JSON.stringify(draft) !== JSON.stringify(draftFrom(event)),
     [draft, event],
-  );
-
-  /** Teams whose tee time wouldn't exist under the draft's slot list. */
-  const orphanedTeams = useMemo(
-    () => teams.filter((t) => t.teeTime && !draft.teeTimes.includes(t.teeTime)),
-    [teams, draft.teeTimes],
   );
 
   if (!me.isAdmin) {
@@ -224,22 +199,9 @@ export default function AdminEvent() {
         return;
       }
 
-      // Clearing happens here, not while editing, so discarding leaves teams alone.
-      orphanedTeams.forEach((t) => updateTeam(t.id, { teeTime: null }));
       router.back();
     };
-
-    if (orphanedTeams.length > 0) {
-      confirmAction({
-        title: 'Some tee times will be cleared',
-        message: `${orphanedTeams.map((t) => t.name).join(', ')} ${orphanedTeams.length === 1 ? 'is' : 'are'} on a slot that's no longer in the list. Their tee time will be cleared so you can reassign it.`,
-        confirmLabel: 'Save',
-        destructive: true,
-        onConfirm: () => void commit(),
-      });
-    } else {
-      void commit();
-    }
+    void commit();
   };
 
   const discard = () => {
@@ -502,6 +464,37 @@ export default function AdminEvent() {
         {/* When */}
         <View style={{ gap: 10 }}>
           <SectionLabel color={colors.link} size={10}>
+            start format
+          </SectionLabel>
+          <Text style={styles.hint}>
+            Start format controls the physical schedule. It does not change how scores are kept.
+          </Text>
+          {START_FORMATS.map((format) => {
+            const active = draft.startFormat === format;
+            return (
+              <Pressable
+                key={format}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: active }}
+                style={[styles.lifecycleOption, active && styles.lifecycleOptionActive]}
+                onPress={() => patch({ startFormat: format })}>
+                <View style={styles.lifecycleCopy}>
+                  <Text style={[styles.lifecycleName, active && styles.lifecycleNameActive]}>
+                    {START_FORMAT_LABELS[format]}
+                  </Text>
+                  <Text style={styles.lifecycleDescription}>
+                    {START_FORMAT_DESCRIPTIONS[format]}
+                  </Text>
+                </View>
+                <View style={[styles.lifecycleRadio, active && styles.lifecycleRadioActive]} />
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {/* When */}
+        <View style={{ gap: 10 }}>
+          <SectionLabel color={colors.link} size={10}>
             when
           </SectionLabel>
           <Pressable style={styles.pickerRow} onPress={() => setPicker('date')}>
@@ -513,7 +506,9 @@ export default function AdminEvent() {
             <Text style={styles.pickerValue}>{draft.checkInTime}</Text>
           </Pressable>
           <Pressable style={styles.pickerRow} onPress={() => setPicker('start')}>
-            <Text style={styles.pickerLabel}>FIRST TEE</Text>
+            <Text style={styles.pickerLabel}>
+              {draft.startFormat === 'shotgun' ? 'SHOTGUN START' : 'FIRST TEE'}
+            </Text>
             <Text style={styles.pickerValue}>{draft.startTime}</Text>
           </Pressable>
 
@@ -533,12 +528,14 @@ export default function AdminEvent() {
         </View>
 
         {/* Tee times */}
-        <View style={{ gap: 10 }}>
+        {draft.startFormat !== 'shotgun' ? <View style={{ gap: 10 }}>
           <SectionLabel color={colors.link} size={10}>
             tee times available
           </SectionLabel>
           <Text style={styles.hint}>
-            Teams are assigned to these slots on the Teams page.
+            {draft.startFormat === 'split_tee'
+              ? 'Each time creates one Hole 1 and one Hole 10 playing-group slot.'
+              : 'Each time creates one Hole 1 playing-group slot.'}
           </Text>
 
           <View style={styles.generatorRow}>
@@ -563,7 +560,9 @@ export default function AdminEvent() {
               />
             </View>
             <View style={styles.generatorField}>
-              <Text style={styles.fieldLabel}>SLOTS</Text>
+                  <Text style={styles.fieldLabel}>
+                    {draft.startFormat === 'split_tee' ? 'WAVES' : 'SLOTS'}
+                  </Text>
               <TextInput
                 value={slotCount}
                 onChangeText={setSlotCount}
@@ -582,11 +581,12 @@ export default function AdminEvent() {
           ) : (
             <View style={styles.slotList}>
               {draft.teeTimes.map((slot) => {
-                const team = teams.find((t) => t.teeTime === slot);
                 return (
                   <View key={slot} style={styles.slotRow}>
                     <Text style={styles.slotTime}>{slot}</Text>
-                    <Text style={styles.slotTeam}>{team ? team.name : 'open'}</Text>
+                    <Text style={styles.slotTeam}>
+                      {draft.startFormat === 'split_tee' ? 'holes 1 & 10' : 'hole 1'}
+                    </Text>
                     <Pressable onPress={() => removeSlot(slot)} hitSlop={10}>
                       <Text style={styles.slotRemove}>REMOVE</Text>
                     </Pressable>
@@ -595,16 +595,19 @@ export default function AdminEvent() {
               })}
             </View>
           )}
-          {orphanedTeams.length > 0 ? (
-            <Text style={styles.warn}>
-              {orphanedTeams.map((t) => t.name).join(', ')} will lose their tee time
-              when you save.
-            </Text>
-          ) : null}
           <Pressable style={styles.secondaryButton} onPress={addSlot}>
             <Text style={styles.secondaryButtonText}>ADD ONE SLOT</Text>
           </Pressable>
-        </View>
+        </View> : (
+          <View style={{ gap: 10 }}>
+            <SectionLabel color={colors.link} size={10}>
+              shotgun schedule
+            </SectionLabel>
+            <Text style={styles.hint}>
+              Offers up to 18 starting holes at {draft.startTime}. Create playing groups and assign their opening holes in the Teams tab.
+            </Text>
+          </View>
+        )}
 
         {/* Course map */}
         <View style={{ gap: 10 }}>

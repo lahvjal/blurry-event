@@ -17,6 +17,8 @@ import { cacheStore } from '@/lib/offline/store';
 const SNAPSHOT_KEY = 'eventSnapshot.v1';
 
 export type EventSnapshot = {
+  /** Absent on legacy snapshots. */
+  schemaVersion?: 1 | 2;
   savedAt: string;
   /** Whose device this was cached for; a different login must not read it. */
   userId: string | null;
@@ -28,6 +30,7 @@ export async function saveSnapshot(
   userId: string | null,
 ): Promise<void> {
   await cacheStore.set<EventSnapshot>(SNAPSHOT_KEY, {
+    schemaVersion: 2,
     savedAt: new Date().toISOString(),
     userId,
     bundle,

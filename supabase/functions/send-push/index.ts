@@ -268,6 +268,47 @@ async function forTeamUpdate(id: string): Promise<Fanout> {
   };
 }
 
+async function forPlayingGroupUpdate(id: string): Promise<Fanout> {
+  const { data: group } = await admin
+    .from('playing_groups')
+    .select('name, tee_time, starting_hole, event_id, events!inner(start_format)')
+    .eq('id', id)
+    .maybeSingle();
+  if (!group) return null;
+
+  const { data: members } = await admin
+    .from('playing_group_members')
+    .select('participants!inner(claimed_by)')
+    .eq('playing_group_id', id);
+  const recipients = [
+    ...new Set(
+      (members ?? [])
+        .map(
+          (row) =>
+            (row.participants as { claimed_by: string | null }).claimed_by,
+        )
+        .filter((uid): uid is string => Boolean(uid)),
+    ),
+  ];
+  const format = (group.events as unknown as { start_format: string }).start_format;
+  const detail =
+    group.tee_time && group.starting_hole
+      ? format === 'shotgun'
+        ? `Shotgun start ${group.tee_time} · Hole ${group.starting_hole}`
+        : `${format === 'split_tee' ? 'Start' : 'Tee time'} ${group.tee_time} · Hole ${group.starting_hole}`
+      : 'Your start slot is not assigned yet.';
+
+  return {
+    recipients,
+    payload: {
+      title: group.name,
+      body: detail,
+      url: `/events/${group.event_id}/event`,
+      tag: `playing-group-${id}`,
+    },
+  };
+}
+
 async function forTeamAssignment(
   teamId: string,
   participantId: string,
@@ -415,6 +456,9 @@ Deno.serve(async (request) => {
         break;
       case 'team_update':
         fanout = event.id ? await forTeamUpdate(event.id) : null;
+        break;
+      case 'playing_group_update':
+        fanout = event.id ? await forPlayingGroupUpdate(event.id) : null;
         break;
       case 'team_assignment':
         fanout =
