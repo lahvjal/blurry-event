@@ -452,6 +452,13 @@ function FocusedEventHome() {
   const holesPlayed = myScores.filter((score) => score !== null).length;
   const roundStarted = holesPlayed > 0;
   const complete = holesPlayed === 18;
+  const isRegisteredPlayer = Boolean(
+    accountAccess?.events.some(
+      (accessibleEvent) =>
+        accessibleEvent.id === event.id &&
+        accessibleEvent.registration?.participantId === me.id,
+    ),
+  );
   const dayCount = daysUntil(event.eventDate);
   const isEventDay = localIsoDate() === event.eventDate;
   const eventEnded =
@@ -521,13 +528,13 @@ function FocusedEventHome() {
   const openTeamChat = async () => {
     if (!myTeam || openingTeamChat) return;
     if (!isLive) {
-      router.push('/my-team');
+      router.push(eventPath(event.id, 'my-team') as never);
       return;
     }
     if (offline) {
       // Team details are cached, while creating/reconciling the official team
       // conversation is a server mutation.
-      router.push('/my-team');
+      router.push(eventPath(event.id, 'my-team') as never);
       return;
     }
     setOpeningTeamChat(true);
@@ -582,6 +589,21 @@ function FocusedEventHome() {
           ? `THRU ${holesPlayed}`
           : `THRU ${holesPlayed} · ${gapToLead} STROKE${gapToLead === 1 ? '' : 'S'} OFF THE LEAD`
     : `START HOLE ${myPlayingGroup?.startingHole ?? 'TBD'}`;
+  const myTeamTitle =
+    myTeam?.name ?? myPlayingGroup?.name ?? 'Assignment pending';
+  const myTeamDetail = myTeam
+    ? `${myTeam.individualException ? 'ONE-PLAYER SCORING TEAM' : 'SCORING TEAM'} · ${
+        myPlayingGroup
+          ? `${myPlayingGroup.name.toUpperCase()} · HOLE ${myPlayingGroup.startingHole ?? 'TBD'}`
+          : 'PLAYING GROUP PENDING'
+      }`
+    : myPlayingGroup
+      ? `PLAYING GROUP · INDIVIDUAL SCORECARD · HOLE ${myPlayingGroup.startingHole ?? 'TBD'}`
+      : isTeamFormat(event.gameStyle)
+        ? 'No scoring team or playing group has been assigned yet.'
+        : 'No playing group has been assigned yet. Your scorecard remains individual.';
+  const openMyTeam = () =>
+    router.push(eventPath(event.id, 'my-team') as never);
 
   return (
     <View style={styles.root}>
@@ -772,6 +794,36 @@ function FocusedEventHome() {
           </Pressable>
         </View>
 
+        {isRegisteredPlayer ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <SectionLabel>my team</SectionLabel>
+              <LinkAction label="open" onPress={openMyTeam} />
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Open My Team"
+              accessibilityHint={
+                myTeam || myPlayingGroup
+                  ? 'View your scoring team and playing group assignment.'
+                  : 'View your pending team and playing group assignment.'
+              }
+              onPress={openMyTeam}
+              style={({ pressed }) => [
+                styles.myTeamCard,
+                pressed && styles.myTeamCardPressed,
+              ]}>
+              <View style={styles.myTeamCardCopy}>
+                <Text numberOfLines={1} style={styles.myTeamCardTitle}>
+                  {myTeamTitle}
+                </Text>
+                <Text style={styles.myTeamCardDetail}>{myTeamDetail}</Text>
+              </View>
+              <Chevron color={colors.highlight} />
+            </Pressable>
+          </View>
+        ) : null}
+
         {roundStarted ? (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
@@ -814,7 +866,7 @@ function FocusedEventHome() {
                 onPress={
                   myTeam
                     ? () => void openTeamChat()
-                    : () => router.push('/my-team')
+                    : openMyTeam
                 }
               />
             </View>
@@ -1304,6 +1356,36 @@ const styles = StyleSheet.create({
     height: 2,
     borderRadius: 1,
     backgroundColor: colors.link,
+  },
+  myTeamCard: {
+    minHeight: 72,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    borderWidth: 1,
+    borderColor: 'rgba(123,255,178,0.14)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+  },
+  myTeamCardPressed: {
+    opacity: 0.72,
+  },
+  myTeamCardCopy: {
+    flex: 1,
+    gap: 5,
+  },
+  myTeamCardTitle: {
+    fontFamily: fonts.bold,
+    fontSize: 14,
+    color: '#ffffff',
+  },
+  myTeamCardDetail: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    lineHeight: 16,
+    color: 'rgba(255,255,255,0.52)',
   },
   playerList: {
     gap: 4,

@@ -33,16 +33,20 @@ export default function MyTeam() {
   const [showRoster, setShowRoster] = useState(false);
 
   if (!myTeam && !myPlayingGroup) {
+    const teamScoring = isTeamFormat(event.gameStyle);
     return (
       <View style={styles.root}>
         <LinearGradient colors={['#203329', '#1b2a22']} style={StyleSheet.absoluteFill} />
         <Noise />
         <PageHeader title="my team" />
         <View style={[styles.empty, { paddingTop: insets.top + 54 + 60 }]}>
-          <Text style={styles.emptyTitle}>No playing group yet</Text>
+          <Text style={styles.emptyTitle}>
+            {teamScoring ? 'No team or playing group yet' : 'No playing group yet'}
+          </Text>
           <Text style={styles.emptyBody}>
-            An admin will place you into a four-player start slot. Check back before
-            pairings close.
+            {teamScoring
+              ? 'An event admin will assign your scoring team and four-player start slot. Check back before pairings close.'
+              : 'An event admin will place you into a four-player start slot. Your scorecard will remain individual.'}
           </Text>
         </View>
         <FloatingNav />
