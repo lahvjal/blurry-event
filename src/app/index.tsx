@@ -85,12 +85,6 @@ export default function Login() {
     <LoginShell
       footer={
         <>
-          {__DEV__ ? (
-            <Pressable onPress={() => router.replace('/event')}>
-              <Text style={styles.devSkip}>DEV · SKIP SIGN-IN</Text>
-            </Pressable>
-          ) : null}
-
           <Pressable
             accessibilityRole="button"
             accessibilityState={{ disabled: busy || offline, busy }}

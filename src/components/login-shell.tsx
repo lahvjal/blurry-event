@@ -87,12 +87,6 @@ export const loginStyles = StyleSheet.create({
     textAlign: 'center',
     letterSpacing: 0.5,
   },
-  devSkip: {
-    fontFamily: fonts.bold,
-    fontSize: 10,
-    color: 'rgba(255,255,255,0.35)',
-    textAlign: 'center',
-  },
   loginButton: {
     backgroundColor: '#121d17',
     height: 78,
