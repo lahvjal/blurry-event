@@ -61,6 +61,7 @@
     "test:club-admin": "node --test scripts/club-admin.test.mjs",
     "test:auth-entry": "node --test scripts/auth-entry.test.mjs",
     "test:my-team-discoverability": "node --test scripts/my-team-discoverability.test.mjs",
+    "test:member-team-rename": "node --test scripts/member-team-rename.test.mjs",
     "test:event-scheduling": "node --test scripts/event-scheduling.test.mjs",
     "test:offline-shell": "npm run build:web && node --test scripts/offline-precache.test.mjs scripts/offline-score-revisions.test.mjs scripts/offline-cold-start.test.mjs",
     "serve:web": "npx serve dist -p 8090 -s"

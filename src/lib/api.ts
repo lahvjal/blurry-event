@@ -584,6 +584,21 @@ export async function apiUpdateTeam(
   if (error) throw error;
 }
 
+/** Member-only rename. The RPC proves event-scoped team membership server-side. */
+export async function apiRenameOwnScoringTeam(
+  eventId: string,
+  teamId: string,
+  name: string,
+): Promise<string> {
+  const { data, error } = await supabase.rpc('rename_own_scoring_team', {
+    p_event_id: eventId,
+    p_team_id: teamId,
+    p_name: name,
+  });
+  if (error) throw error;
+  return data as string;
+}
+
 export async function apiAssignToTeam(
   eventId: string,
   participantId: string,

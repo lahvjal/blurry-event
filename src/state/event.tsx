@@ -21,6 +21,7 @@ import {
   apiDeleteTeam,
   apiInviteToTeam,
   apiPostAnnouncement,
+  apiRenameOwnScoringTeam,
   apiRegenerateInviteCode,
   apiRemoveParticipant,
   apiResetRound,
@@ -301,6 +302,8 @@ type EventState = {
   setScore: (holeIndex: number, strokes: number) => Promise<void>;
   resetRound: () => void;
   inviteToTeam: (participantId: string) => void;
+  /** Renames only the signed-in participant's event-scoped scoring team. */
+  renameMyTeam: (name: string) => Promise<boolean>;
   updateMyProfile: (patch: Partial<Pick<Participant, 'fullName' | 'handicap' | 'avatarUrl'>>) => void;
 
   // Admin actions
@@ -1498,6 +1501,26 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     [persistTeamPatch],
   );
 
+  const renameMyTeam = useCallback<EventState['renameMyTeam']>(
+    async (name) => {
+      if (!myTeam) return false;
+
+      let savedName = name.trim();
+      const saved = await persist('the team name', async () => {
+        savedName = await apiRenameOwnScoringTeam(event.id, myTeam.id, savedName);
+      });
+      if (saved) {
+        setTeams((current) =>
+          current.map((team) =>
+            team.id === myTeam.id ? { ...team, name: savedName } : team,
+          ),
+        );
+      }
+      return saved;
+    },
+    [event.id, myTeam, persist],
+  );
+
   const createTeam = useCallback<EventState['createTeam']>(
     async (name) => {
       const teamName = name?.trim() || `Team ${teams.length + 1}`;
@@ -1865,6 +1888,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     setScore,
     resetRound,
     inviteToTeam,
+    renameMyTeam,
     updateMyProfile,
     setGameStyle,
     updateEvent,

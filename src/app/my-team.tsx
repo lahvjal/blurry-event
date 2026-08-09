@@ -1,7 +1,14 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FloatingNav } from '@/components/floating-nav';
@@ -11,6 +18,7 @@ import { ParticipantAvatar } from '@/components/participant-avatar';
 import { ActionButton, Badge, InfoRow, Noise, SectionLabel } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
 import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
+import { normalizeTeamName, teamNameError } from '@/lib/team-name';
 import { useEvent } from '@/state/event';
 import { GAME_STYLE_LABELS, isTeamFormat, teamSize } from '@/state/types';
 
@@ -27,10 +35,14 @@ export default function MyTeam() {
     participantById,
     teamOf,
     inviteToTeam,
+    renameMyTeam,
   } = useEvent();
   const offline = useBrowserDefinitelyOffline();
 
   const [showRoster, setShowRoster] = useState(false);
+  const [editingTeamName, setEditingTeamName] = useState(false);
+  const [teamNameDraft, setTeamNameDraft] = useState('');
+  const [savingTeamName, setSavingTeamName] = useState(false);
 
   if (!myTeam && !myPlayingGroup) {
     const teamScoring = isTeamFormat(event.gameStyle);
@@ -75,6 +87,24 @@ export default function MyTeam() {
       !teamOf(p.id) &&
       !pendingInvites.some((inv) => inv.invitedParticipantId === p.id),
   );
+  const renameError = teamNameError(teamNameDraft);
+
+  const startTeamRename = () => {
+    if (!myTeam || offline) return;
+    setTeamNameDraft(myTeam.name);
+    setEditingTeamName(true);
+  };
+
+  const saveTeamRename = async () => {
+    if (!myTeam || offline || renameError || savingTeamName) return;
+    setSavingTeamName(true);
+    try {
+      const saved = await renameMyTeam(normalizeTeamName(teamNameDraft));
+      if (saved) setEditingTeamName(false);
+    } finally {
+      setSavingTeamName(false);
+    }
+  };
 
   return (
     <View style={styles.root}>
@@ -114,6 +144,86 @@ export default function MyTeam() {
         </View>
 
         <View style={styles.body}>
+          {myTeam ? (
+            <View style={styles.renameCard}>
+              <SectionLabel color={colors.link} size={10}>
+                team name
+              </SectionLabel>
+              {editingTeamName ? (
+                <View style={styles.renameEditor}>
+                  <TextInput
+                    accessibilityLabel="Team name"
+                    value={teamNameDraft}
+                    onChangeText={setTeamNameDraft}
+                    onSubmitEditing={() => void saveTeamRename()}
+                    autoCapitalize="words"
+                    autoCorrect={false}
+                    autoFocus
+                    returnKeyType="done"
+                    selectionColor={colors.highlight}
+                    style={styles.renameInput}
+                  />
+                  {renameError ? (
+                    <Text style={styles.renameError}>{renameError}</Text>
+                  ) : null}
+                  <View style={styles.renameActions}>
+                    <Pressable
+                      accessibilityRole="button"
+                      disabled={savingTeamName}
+                      onPress={() => setEditingTeamName(false)}
+                      style={styles.renameSecondaryAction}>
+                      <Text style={styles.renameSecondaryText}>CANCEL</Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityState={{
+                        disabled: Boolean(renameError) || savingTeamName || offline,
+                      }}
+                      disabled={Boolean(renameError) || savingTeamName || offline}
+                      onPress={() => void saveTeamRename()}
+                      style={[
+                        styles.renamePrimaryAction,
+                        (renameError || savingTeamName || offline) &&
+                          styles.renameActionDisabled,
+                      ]}>
+                      <Text style={styles.renamePrimaryText}>
+                        {savingTeamName ? 'SAVING…' : 'SAVE'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.renameSummary}>
+                  <Text numberOfLines={1} style={styles.renameCurrentName}>
+                    {myTeam.name}
+                  </Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Rename Team"
+                    accessibilityState={{ disabled: offline }}
+                    accessibilityHint={
+                      offline
+                        ? 'Reconnect before renaming your team.'
+                        : 'Edit the name of your scoring team.'
+                    }
+                    disabled={offline}
+                    onPress={startTeamRename}
+                    style={[
+                      styles.renameButton,
+                      offline && styles.renameActionDisabled,
+                    ]}>
+                    <Text style={styles.renameButtonText}>RENAME TEAM</Text>
+                  </Pressable>
+                </View>
+              )}
+              {offline ? (
+                <Text style={styles.renameOffline}>
+                  Reconnect to rename your team.
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+
           {offline && openSlots > 0 ? (
             <OfflineNotice
               compact
@@ -321,6 +431,90 @@ const styles = StyleSheet.create({
   body: {
     paddingHorizontal: 20,
     gap: 16,
+  },
+  renameCard: {
+    gap: 10,
+    padding: 14,
+    backgroundColor: 'rgba(15,17,16,0.4)',
+  },
+  renameSummary: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  renameCurrentName: {
+    flex: 1,
+    fontFamily: fonts.bold,
+    fontSize: 15,
+    color: '#ffffff',
+  },
+  renameButton: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(123,255,178,0.35)',
+  },
+  renameButtonText: {
+    fontFamily: fonts.bold,
+    fontSize: 10,
+    color: colors.highlight,
+  },
+  renameEditor: {
+    gap: 8,
+  },
+  renameInput: {
+    minHeight: 48,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(0,0,0,0.28)',
+    borderWidth: 1,
+    borderColor: colors.highlight,
+    fontFamily: fonts.bold,
+    fontSize: 15,
+    color: '#ffffff',
+  },
+  renameError: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: '#ffb8ae',
+  },
+  renameActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  renameSecondaryAction: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+  },
+  renameSecondaryText: {
+    fontFamily: fonts.bold,
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.55)',
+  },
+  renamePrimaryAction: {
+    minHeight: 44,
+    minWidth: 76,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    backgroundColor: colors.highlight,
+  },
+  renamePrimaryText: {
+    fontFamily: fonts.bold,
+    fontSize: 10,
+    color: '#132019',
+  },
+  renameActionDisabled: {
+    opacity: 0.4,
+  },
+  renameOffline: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.48)',
   },
   sectionHeader: {
     flexDirection: 'row',
