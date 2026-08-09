@@ -206,16 +206,30 @@ export type Announcement = {
  */
 export type ConversationKind = 'event_group' | 'group' | 'direct';
 
+/** Durable chat identity. Account ids survive event-registration deletion. */
+export type ConversationMember = {
+  accountId: string | null;
+  participantId: string | null;
+  fullName: string;
+  avatarUrl: string | null;
+};
+
 export type Conversation = {
   id: string;
   kind: ConversationKind;
   /** Null on direct threads, which are titled after the other person. */
   name: string | null;
   createdBy: string | null;
+  createdByAccountId?: string | null;
+  createdByName?: string | null;
   /** Present for the official group thread that follows one event team. */
   teamId?: string | null;
-  /** Participant ids, including yours. */
+  /** Account actor ids when available, with participant ids as a legacy fallback. */
   memberIds: string[];
+  members?: ConversationMember[];
+  originEventId?: string | null;
+  eventActive?: boolean;
+  eventOwned?: boolean;
 };
 
 /** An inbox row: the conversation plus its preview line and unread count. */
@@ -223,8 +237,11 @@ export type ConversationSummary = Conversation & {
   /** Immutable event of origin. It labels and opens the thread; it does not filter the inbox. */
   eventId: string;
   eventName: string;
+  eventActive: boolean;
+  eventOwned: boolean;
   /** This account's event-specific participant identity for the conversation. */
-  myParticipantId: string;
+  myParticipantId: string | null;
+  myAccountId: string;
   /** Inbox-ready identity for the other person in a direct conversation. */
   directParticipantId: string | null;
   directParticipantName: string | null;
@@ -248,6 +265,7 @@ export type ConversationSummary = Conversation & {
 export type ChatMessageReaction = {
   participantId: string;
   emoji: string;
+  participantName?: string | null;
 };
 
 export type ChatMessageMedia = {
@@ -274,6 +292,10 @@ export type ChatMessage = {
   eventId: string;
   conversationId: string;
   senderId: string;
+  /** Event participant id retained for old offline snapshots and event UI. */
+  senderParticipantId?: string | null;
+  senderName?: string | null;
+  senderAvatarUrl?: string | null;
   body: string;
   /** The message this one replies to, if any. */
   replyToId: string | null;

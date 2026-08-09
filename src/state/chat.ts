@@ -16,10 +16,14 @@ import {
 } from '@/lib/chat';
 import {
   loadOfflineConversation,
+  loadOfflineAccountConversation,
+  loadOfflineAccountMessages,
   loadOfflineConversationSummaries,
   loadOfflineClubConversationSummaries,
   loadOfflineMessages,
   saveOfflineConversation,
+  saveOfflineAccountConversation,
+  saveOfflineAccountMessages,
   saveOfflineConversationSummaries,
   saveOfflineClubConversationSummaries,
   saveOfflineMessages,
@@ -169,10 +173,10 @@ export function useConversations() {
   // Any incoming message restacks the list and lights an unread badge.
   useEffect(() => {
     if (browserOffline) return;
-    const stops = registeredEventIds.flatMap((eventId) => [
-      subscribeToMessages(eventId, null, () => void reload()),
-      subscribeToMessageReactions(eventId, () => void reload()),
-    ]);
+    const stops = [
+      subscribeToMessages(null, null, () => void reload()),
+      subscribeToMessageReactions(null, () => void reload()),
+    ];
     return () => stops.forEach((stop) => stop());
   }, [browserOffline, registeredEventIds, registeredEventKey, reload]);
 
@@ -197,7 +201,8 @@ export function useConversationDetail(conversationId: string | null) {
     try {
       if (browserOffline) {
         const cached = accountId
-          ? await loadOfflineConversation(accountId, event.id, conversationId)
+          ? (await loadOfflineAccountConversation(accountId, conversationId)) ??
+            (await loadOfflineConversation(accountId, event.id, conversationId))
           : null;
         if (!cached) {
           throw new Error('This conversation was not included in offline setup.');
@@ -206,19 +211,25 @@ export function useConversationDetail(conversationId: string | null) {
         setError(null);
         return;
       }
-      const next = await fetchConversation(event.id, conversationId);
+      const next = await fetchConversation(conversationId);
       setConversation(next);
       if (accountId && next) {
-        await saveOfflineConversation(accountId, event.id, next);
+        await Promise.all([
+          saveOfflineAccountConversation(accountId, next),
+          saveOfflineConversation(accountId, event.id, next),
+        ]);
       }
       setError(null);
     } catch (caught) {
       const cached = accountId
-        ? await loadOfflineConversation(
+        ? (await loadOfflineAccountConversation(accountId, conversationId).catch(
+            () => null,
+          )) ??
+          (await loadOfflineConversation(
             accountId,
             event.id,
             conversationId,
-          ).catch(() => null)
+          ).catch(() => null))
         : null;
       if (cached) {
         setConversation(cached);
@@ -241,10 +252,14 @@ export function useConversationDetail(conversationId: string | null) {
   return { conversation, loading, error, reload };
 }
 
-export function useConversation(conversationId: string | null) {
+export function useConversation(
+  conversationId: string | null,
+  originEventId?: string | null,
+) {
   const { event, me, accountAccess } = useEvent();
   const accountId = accountAccess?.accountId ?? null;
   const browserOffline = useBrowserDefinitelyOffline();
+  const chatEventId = originEventId ?? event.id;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -262,12 +277,16 @@ export function useConversation(conversationId: string | null) {
       if (browserOffline) {
         const [cached, overlays] = await Promise.all([
           accountId
-            ? loadOfflineMessages(accountId, event.id, conversationId)
+            ? loadOfflineAccountMessages(accountId, conversationId).then(
+                async (accountCached) =>
+                  accountCached ??
+                  loadOfflineMessages(accountId, chatEventId, conversationId),
+              )
             : Promise.resolve(null),
           accountId
             ? loadMessageOverlays({
                 userId: accountId,
-                eventId: event.id,
+                eventId: chatEventId,
                 conversationId,
               })
             : Promise.resolve([]),
@@ -280,11 +299,11 @@ export function useConversation(conversationId: string | null) {
         setError(null);
         return;
       }
-      const page = await fetchMessages(event.id, conversationId);
+      const page = await fetchMessages(conversationId);
       const overlays = accountId
         ? await loadMessageOverlays({
             userId: accountId,
-            eventId: event.id,
+            eventId: chatEventId,
             conversationId,
             authoritativeMessages: page.messages,
           })
@@ -293,19 +312,25 @@ export function useConversation(conversationId: string | null) {
       setMessages(merged);
       setHasOlder(page.hasOlder);
       if (accountId) {
-        await saveOfflineMessages(accountId, event.id, conversationId, merged);
+        await Promise.all([
+          saveOfflineAccountMessages(accountId, conversationId, merged),
+          saveOfflineMessages(accountId, chatEventId, conversationId, merged),
+        ]);
       }
       setError(null);
     } catch (caught) {
       const cached = accountId
-        ? await loadOfflineMessages(accountId, event.id, conversationId).catch(
+        ? (await loadOfflineAccountMessages(accountId, conversationId).catch(
             () => null,
-          )
+          )) ??
+          (await loadOfflineMessages(accountId, chatEventId, conversationId).catch(
+            () => null,
+          ))
         : null;
       const overlays = accountId
         ? await loadMessageOverlays({
             userId: accountId,
-            eventId: event.id,
+            eventId: chatEventId,
             conversationId,
           }).catch(() => [])
         : [];
@@ -319,12 +344,15 @@ export function useConversation(conversationId: string | null) {
     } finally {
       setLoading(false);
     }
-  }, [accountId, browserOffline, conversationId, event.id]);
+  }, [accountId, browserOffline, chatEventId, conversationId]);
 
   useEffect(() => {
     if (!accountId || !conversationId || loading) return;
-    void saveOfflineMessages(accountId, event.id, conversationId, messages);
-  }, [accountId, conversationId, event.id, loading, messages]);
+    void Promise.all([
+      saveOfflineAccountMessages(accountId, conversationId, messages),
+      saveOfflineMessages(accountId, chatEventId, conversationId, messages),
+    ]);
+  }, [accountId, chatEventId, conversationId, loading, messages]);
 
   // Queue state can change without a Realtime event (for example, a permanent
   // rejection or an acknowledgement whose response arrives before the message
@@ -339,7 +367,7 @@ export function useConversation(conversationId: string | null) {
       const currentRevision = ++revision;
       const overlays = await loadMessageOverlays({
         userId: accountId,
-        eventId: event.id,
+        eventId: chatEventId,
         conversationId,
       }).catch(() => []);
       if (disposed || currentRevision !== revision || overlays.length === 0) return;
@@ -351,7 +379,7 @@ export function useConversation(conversationId: string | null) {
       disposed = true;
       unsubscribe();
     };
-  }, [accountId, conversationId, event.id]);
+  }, [accountId, chatEventId, conversationId]);
 
   useEffect(() => {
     setLoading(true);
@@ -363,7 +391,7 @@ export function useConversation(conversationId: string | null) {
 
   useEffect(() => {
     if (!conversationId || browserOffline) return;
-    return subscribeToMessages(event.id, conversationId, (change) =>
+    return subscribeToMessages(null, conversationId, (change) =>
       setMessages((prev) => {
         if (change.event === 'DELETE') {
           return prev.filter((message) => message.id !== change.messageId);
@@ -379,16 +407,16 @@ export function useConversation(conversationId: string | null) {
         return mergeMessage(prev, change.message);
       }),
     );
-  }, [browserOffline, conversationId, event.id]);
+  }, [browserOffline, conversationId]);
 
   useEffect(() => {
     if (!conversationId || browserOffline) return;
-    return subscribeToMessageReactions(event.id, (change) =>
+    return subscribeToMessageReactions(null, (change) =>
       setMessages((prev) =>
         mergeReaction(prev, change.messageId, change.reaction, change.event),
       ),
     );
-  }, [browserOffline, conversationId, event.id]);
+  }, [browserOffline, conversationId]);
 
   const reactionCount = messages.reduce(
     (total, message) => total + message.reactions.length,
@@ -402,7 +430,7 @@ export function useConversation(conversationId: string | null) {
       browserOffline ||
       !conversationId ||
       messages.length === 0 ||
-      !me.claimed
+      (!accountId && !me.claimed)
     ) {
       return;
     }
@@ -414,11 +442,12 @@ export function useConversation(conversationId: string | null) {
       });
   }, [
     conversationId,
+    accountId,
     me.claimed,
     me.id,
     messages.length,
     reactionCount,
-    event.id,
+    chatEventId,
     browserOffline,
   ]);
 
@@ -436,7 +465,7 @@ export function useConversation(conversationId: string | null) {
     loadingOlderRef.current = true;
     setLoadingOlder(true);
     try {
-      const page = await fetchMessages(event.id, conversationId, {
+      const page = await fetchMessages(conversationId, {
         createdAt: oldest.createdAt,
       });
       setMessages((current) => mergeMessagePages(page.messages, current));
@@ -448,7 +477,7 @@ export function useConversation(conversationId: string | null) {
       loadingOlderRef.current = false;
       setLoadingOlder(false);
     }
-  }, [conversationId, event.id, hasOlder, messages]);
+  }, [conversationId, hasOlder, messages]);
 
   const send = useCallback(
     async (
@@ -460,9 +489,9 @@ export function useConversation(conversationId: string | null) {
       if (!conversationId || (!text && !attachment)) return false;
       try {
         const sent = await sendMessage({
-          eventId: event.id,
+          eventId: chatEventId,
           conversationId,
-          senderId: me.id,
+          senderId: accountId ?? me.id,
           body: text,
           replyToId: replyToId ?? null,
           attachment: attachment ?? null,
@@ -475,7 +504,7 @@ export function useConversation(conversationId: string | null) {
         throw caught;
       }
     },
-    [conversationId, event.id, me.id],
+    [accountId, chatEventId, conversationId, me.id],
   );
 
   const edit = useCallback(
@@ -484,7 +513,7 @@ export function useConversation(conversationId: string | null) {
       const message = messages.find((candidate) => candidate.id === messageId);
       if (
         !message ||
-        message.senderId !== me.id ||
+        ![accountId, me.id].filter(Boolean).includes(message.senderId) ||
         message.pending ||
         message.id.startsWith('local-') ||
         !text
@@ -502,14 +531,14 @@ export function useConversation(conversationId: string | null) {
       );
 
       try {
-        await editMessageBody(event.id, messageId, text);
+        await editMessageBody(chatEventId, messageId, text);
         setError(null);
       } catch (caught) {
         setError(errorText(caught));
         void reload();
       }
     },
-    [event.id, me.id, messages, reload],
+    [accountId, chatEventId, me.id, messages, reload],
   );
 
   const unsend = useCallback(
@@ -517,7 +546,7 @@ export function useConversation(conversationId: string | null) {
       const message = messages.find((candidate) => candidate.id === messageId);
       if (
         !message ||
-        message.senderId !== me.id ||
+        ![accountId, me.id].filter(Boolean).includes(message.senderId) ||
         message.pending ||
         message.id.startsWith('local-')
       ) {
@@ -529,14 +558,14 @@ export function useConversation(conversationId: string | null) {
       );
 
       try {
-        await unsendMessage(event.id, messageId);
+        await unsendMessage(chatEventId, messageId);
         setError(null);
       } catch (caught) {
         setError(errorText(caught));
         void reload();
       }
     },
-    [event.id, me.id, messages, reload],
+    [accountId, chatEventId, me.id, messages, reload],
   );
 
   const react = useCallback(
@@ -553,7 +582,7 @@ export function useConversation(conversationId: string | null) {
       }
 
       const reaction: ChatMessageReaction = {
-        participantId: me.id,
+        participantId: accountId ?? me.id,
         emoji: cleaned,
       };
       const remove = message.reactions.some(
@@ -573,9 +602,9 @@ export function useConversation(conversationId: string | null) {
 
       try {
         await toggleMessageReaction({
-          eventId: event.id,
+          eventId: chatEventId,
           messageId,
-          participantId: me.id,
+          participantId: accountId ?? me.id,
           emoji: cleaned,
           remove,
         });
@@ -586,7 +615,7 @@ export function useConversation(conversationId: string | null) {
         void reload();
       }
     },
-    [event.id, me.id, messages, reload],
+    [accountId, chatEventId, me.id, messages, reload],
   );
 
   return {

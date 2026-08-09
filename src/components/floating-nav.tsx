@@ -40,7 +40,7 @@ export function FloatingNav() {
   const router = useRouter();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
-  const { event, accountAccess } = useEvent();
+  const { event, activeEventId, accountAccess } = useEvent();
   const messageEventIds =
     accountAccess?.events
       .filter((item) => item.registration)
@@ -76,13 +76,21 @@ export function FloatingNav() {
             <View style={styles.items}>
               {tabs.map((tab) => {
                 const active =
-                  pathname === `/${tab.screen}` || pathname.endsWith(`/${tab.screen}`);
+                  (tab.key === 'messages' && pathname === '/inbox') ||
+                  pathname === `/${tab.screen}` ||
+                  pathname.endsWith(`/${tab.screen}`);
                 return (
                   <Pressable
                     key={tab.key}
                     style={styles.tab}
                     onPress={() =>
-                      router.navigate(eventPath(event.id, tab.screen) as never)
+                      router.navigate(
+                        tab.key === 'messages'
+                          ? '/inbox'
+                          : activeEventId
+                            ? (eventPath(event.id, tab.screen) as never)
+                            : '/event',
+                      )
                     }>
                     <View style={[styles.tabPill, active && styles.tabPillActive]}>
                       <View style={styles.iconWrap}>

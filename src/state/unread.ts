@@ -114,14 +114,14 @@ function activateUnreadEvents(
   // value and do not start a doomed HTTP/WebSocket connection.
   if (browserOffline || !accountId) return;
 
-  const stops = normalizedEventIds.flatMap((eventId) => [
-    subscribeToMessages(eventId, null, () =>
+  const stops = [
+    subscribeToMessages(null, null, () =>
       void refreshUnread(eventScope, accountId),
     ),
-    subscribeToMessageReactions(eventId, () =>
+    subscribeToMessageReactions(null, () =>
       void refreshUnread(eventScope, accountId),
     ),
-  ]);
+  ];
   stopRealtime = () => {
     stops.forEach((stop) => stop());
   };

@@ -51,7 +51,7 @@ export default function ParticipantProfile() {
               <InfoRow label="TEAM" value={team?.name ?? 'Unassigned'} />
             </View>
 
-            {!isMe ? (
+            {!isMe && participant.claimed ? (
               <Pressable
                 style={styles.messageButton}
                 onPress={() =>
@@ -62,13 +62,13 @@ export default function ParticipantProfile() {
                 }>
                 <Text style={styles.messageButtonText}>MESSAGE</Text>
               </Pressable>
-            ) : (
+            ) : isMe ? (
               <Pressable
                 style={styles.messageButton}
                 onPress={() => router.push('/profile')}>
                 <Text style={styles.messageButtonText}>OPEN MY PROFILE</Text>
               </Pressable>
-            )}
+            ) : null}
           </>
         ) : (
           <View style={styles.empty}>

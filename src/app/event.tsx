@@ -382,6 +382,12 @@ function HomeWithoutFocusedEvent({ unavailable = false }: { unavailable?: boolea
         )}
         <Pressable
           accessibilityRole="button"
+          style={styles.emptyHomeSecondary}
+          onPress={() => router.push('/inbox')}>
+          <Text style={styles.emptyHomeSecondaryText}>VIEW MESSAGES</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
           accessibilityState={{ disabled: offline }}
           accessibilityHint={
             offline ? 'Reconnect before signing out of this device.' : undefined

@@ -76,10 +76,15 @@ function InitialsAvatar({
 export default function GroupConversation() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { event, me, participantById } = useEvent();
+  const { event, me, participantById, accountAccess } = useEvent();
   const offline = useBrowserDefinitelyOffline();
-  const params = useLocalSearchParams<{ id?: string }>();
+  const params = useLocalSearchParams<{
+    id?: string;
+    originEventId?: string;
+    account?: string;
+  }>();
   const conversationId = params.id ?? null;
+  const myActorId = accountAccess?.accountId ?? me.id;
 
   const { conversation } = useConversationDetail(conversationId);
   const {
@@ -93,7 +98,10 @@ export default function GroupConversation() {
     edit,
     unsend,
     loadOlder,
-  } = useConversation(conversationId);
+  } = useConversation(
+    conversationId,
+    params.originEventId ?? conversation?.originEventId,
+  );
   const [composerContext, setComposerContext] =
     React.useState<MessageComposerContext | null>(null);
 
@@ -160,8 +168,12 @@ export default function GroupConversation() {
   const openSettings = () => {
     if (!conversationId) return;
     router.push({
-      pathname: '/conversation-settings',
-      params: { id: conversationId },
+      pathname: params.account ? '/chat-settings' : '/conversation-settings',
+      params: {
+        id: conversationId,
+        account: params.account,
+        originEventId: params.originEventId,
+      },
     });
   };
   const openDetails = () => {
@@ -248,9 +260,26 @@ export default function GroupConversation() {
           ) : null}
 
           {runs.map((run) => {
-            const mine = run.senderId === me.id;
-            const sender = mine ? me : participantById(run.senderId);
-            const senderName = mine ? 'Me' : (sender?.fullName ?? 'Someone');
+            const mine = run.senderId === myActorId || run.senderId === me.id;
+            const actor = conversation?.members?.find(
+              (member) =>
+                member.accountId === run.senderId ||
+                member.participantId === run.senderId,
+            );
+            const rosterSender = participantById(run.senderId);
+            const senderName = mine
+              ? 'Me'
+              : actor?.fullName ?? rosterSender?.fullName ?? run.messages[0]?.senderName ?? 'Someone';
+            const sender = mine
+              ? me
+              : actor
+                ? {
+                    id: actor.accountId ?? actor.participantId ?? 'deleted-account',
+                    fullName: actor.fullName,
+                    initials: initialsOf(actor.fullName),
+                    avatarUrl: actor.avatarUrl,
+                  }
+                : rosterSender;
             return (
               <View key={run.key} style={{ gap: 6 }}>
                 {run.dayLabel ? (
@@ -273,9 +302,15 @@ export default function GroupConversation() {
                             : undefined
                         }
                         mine={mine}
-                        myParticipantId={me.id}
+                        myParticipantId={myActorId}
                         participantNameById={(participantId) =>
-                          participantById(participantId)?.fullName ?? 'Player'
+                          conversation?.members?.find(
+                            (member) =>
+                              member.accountId === participantId ||
+                              member.participantId === participantId,
+                          )?.fullName ??
+                          participantById(participantId)?.fullName ??
+                          'Player'
                         }
                         onReact={(emoji) => react(message.id, emoji)}
                         onReply={() =>

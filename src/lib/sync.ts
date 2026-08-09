@@ -160,7 +160,8 @@ function mutationMatchesScope(
 ): boolean {
   return (
     mutation.userId === scope.userId &&
-    scope.accessibleEventIds.has(mutation.eventId)
+    (mutation.payload.kind === 'message' ||
+      scope.accessibleEventIds.has(mutation.eventId))
   );
 }
 
@@ -419,7 +420,7 @@ export async function enqueue(payload: EnqueuePayload): Promise<void> {
     throw new Error('No signed-in event is selected for offline writes.');
   }
   if (
-    (payload.kind === 'score' || payload.kind === 'message') &&
+    payload.kind === 'score' &&
     payload.eventId !== activeScope.eventId
   ) {
     throw new Error('Refusing to queue a write for a different event.');
@@ -448,7 +449,7 @@ export async function enqueue(payload: EnqueuePayload): Promise<void> {
   const mutation: QueuedMutation = {
     id: uuid(),
     userId: activeScope.userId,
-    eventId: activeScope.eventId,
+    eventId: payload.kind === 'message' ? payload.eventId : activeScope.eventId,
     dedupeKey,
     generation,
     payload: normalizedPayload,
@@ -725,10 +726,13 @@ export function setSyncScope(
 ): void {
   const nextEventIds = new Set(accessibleEventIds);
   if (eventId) nextEventIds.add(eventId);
-  const next =
-    userId && eventId
-      ? { userId, eventId, accessibleEventIds: nextEventIds }
-      : null;
+  const next = userId
+    ? {
+        userId,
+        eventId: eventId ?? 'account',
+        accessibleEventIds: nextEventIds,
+      }
+    : null;
   const sameEvents = Boolean(
     activeScope &&
       next &&

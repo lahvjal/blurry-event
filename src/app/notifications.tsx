@@ -112,13 +112,20 @@ export default function Notifications() {
               const conversation = row.conversation;
               if (!conversation) return;
               router.push({
-                pathname: eventPath(
-                  conversation.eventId,
-                  conversation.kind === 'direct'
-                    ? 'direct-message'
-                    : 'group-conversation',
-                ) as never,
-                params: { id: conversation.id },
+                pathname: conversation.eventOwned
+                  ? (eventPath(
+                      conversation.eventId,
+                      conversation.kind === 'direct'
+                        ? 'direct-message'
+                        : 'group-conversation',
+                    ) as never)
+                  : '/chat',
+                params: {
+                  id: conversation.id,
+                  kind: conversation.kind,
+                  account: conversation.eventOwned ? undefined : '1',
+                  originEventId: conversation.eventId,
+                },
               });
             }}>
             <View style={[styles.icon, row.unread && styles.iconUnread]}>

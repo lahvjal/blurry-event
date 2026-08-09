@@ -66,35 +66,40 @@ const mediaName = (mimeType: string | null | undefined) =>
 async function forMessage(id: string): Promise<Fanout> {
   const { data: message } = await admin
     .from('messages')
-    .select('body, sender_id, conversation_id, media_mime_type')
+    .select('body, sender_id, sender_account_id, sender_name, conversation_id, media_mime_type')
     .eq('id', id)
     .maybeSingle();
   if (!message) return null;
 
   const { data: conversation } = await admin
     .from('conversations')
-    .select('id, kind, name, event_id')
+    .select('id, kind, name, event_id, origin_event_id, origin_event_name, team_id')
     .eq('id', message.conversation_id)
     .maybeSingle();
   if (!conversation) return null;
-
-  const { data: sender } = await admin
-    .from('participants')
-    .select('full_name')
-    .eq('id', message.sender_id)
-    .maybeSingle();
-
-  // Everyone in the thread except whoever just spoke.
-  const { data: members } = await admin
-    .from('conversation_members')
-    .select('participant_id, participants!inner(claimed_by)')
+  const eventOwned =
+    conversation.kind === 'event_group' || Boolean(conversation.team_id);
+  const { data: accountMembers } = await admin
+    .from('conversation_account_members')
+    .select('account_id')
     .eq('conversation_id', conversation.id)
     .eq('notifications_enabled', true)
-    .neq('participant_id', message.sender_id);
+    .neq('account_id', message.sender_account_id);
 
-  const recipients = (members ?? [])
-    .map((row) => (row.participants as { claimed_by: string | null }).claimed_by)
-    .filter((uid): uid is string => Boolean(uid));
+  const { data: legacyMembers } = eventOwned
+    ? await admin
+        .from('conversation_members')
+        .select('participants!inner(claimed_by)')
+        .eq('conversation_id', conversation.id)
+        .eq('notifications_enabled', true)
+    : { data: [] };
+
+  const recipients = [...new Set([
+    ...(accountMembers ?? []).map((row) => row.account_id),
+    ...(legacyMembers ?? []).map(
+      (row) => (row.participants as { claimed_by: string | null }).claimed_by,
+    ),
+  ].filter((uid): uid is string => Boolean(uid) && uid !== message.sender_account_id))];
 
   const direct = conversation.kind === 'direct';
   const messageBody =
@@ -109,18 +114,20 @@ async function forMessage(id: string): Promise<Fanout> {
       .select('name')
       .eq('id', conversation.event_id)
       .maybeSingle();
-    groupTitle = event?.name ?? 'Event chat';
+    groupTitle = event?.name ?? conversation.origin_event_name ?? 'Event chat';
   }
 
   return {
     recipients,
     payload: {
-      title: direct ? (sender?.full_name ?? 'New message') : groupTitle!,
+      title: direct ? (message.sender_name ?? 'New message') : groupTitle!,
       // In a group the sender needs naming; in a DM the title already does it.
       body: direct
         ? messageBody
-        : `${firstName(sender?.full_name)}: ${messageBody}`,
-      url: `/events/${conversation.event_id}/${direct ? 'direct-message' : 'group-conversation'}?id=${conversation.id}`,
+        : `${firstName(message.sender_name)}: ${messageBody}`,
+      url: eventOwned
+        ? `/events/${conversation.event_id}/${direct ? 'direct-message' : 'group-conversation'}?id=${conversation.id}`
+        : `/chat?id=${conversation.id}&kind=${conversation.kind}&account=1&originEventId=${conversation.origin_event_id}`,
       tag: `conversation-${conversation.id}`,
     },
   };
@@ -128,42 +135,57 @@ async function forMessage(id: string): Promise<Fanout> {
 
 async function forReaction(
   messageId: string,
-  participantId: string,
+  accountId: string | undefined,
+  participantId: string | undefined,
   emoji: string,
 ): Promise<Fanout> {
   const { data: message } = await admin
     .from('messages')
-    .select('body, sender_id, conversation_id, media_mime_type')
+    .select('body, sender_id, sender_account_id, conversation_id, media_mime_type')
     .eq('id', messageId)
     .maybeSingle();
-  if (!message || message.sender_id === participantId) return null;
+  if (!message || message.sender_account_id === accountId) return null;
 
   const { data: conversation } = await admin
     .from('conversations')
-    .select('id, kind, name, event_id')
+    .select('id, kind, name, event_id, origin_event_id, origin_event_name, team_id')
     .eq('id', message.conversation_id)
     .maybeSingle();
   if (!conversation) return null;
+  const eventOwned =
+    conversation.kind === 'event_group' || Boolean(conversation.team_id);
 
-  const { data: reactor } = await admin
-    .from('participants')
-    .select('full_name')
-    .eq('id', participantId)
+  const { data: reaction } = await admin
+    .from('message_reactions')
+    .select('reactor_account_id, reactor_name')
+    .eq('message_id', messageId)
+    .eq('emoji', emoji)
+    .eq(accountId ? 'reactor_account_id' : 'participant_id', accountId ?? participantId!)
     .maybeSingle();
 
   // A reaction is personal activity for the message author, not a broadcast
   // to everyone else in a group conversation.
-  const { data: recipient } = await admin
-    .from('conversation_members')
-    .select('participants!inner(claimed_by)')
+  const { data: accountRecipient } = await admin
+    .from('conversation_account_members')
+    .select('account_id')
     .eq('conversation_id', conversation.id)
-    .eq('participant_id', message.sender_id)
+    .eq('account_id', message.sender_account_id)
     .eq('notifications_enabled', true)
     .maybeSingle();
 
-  const userId = (
-    recipient?.participants as { claimed_by: string | null } | undefined
-  )?.claimed_by;
+  const { data: legacyRecipient } = !accountRecipient && eventOwned && message.sender_id
+    ? await admin
+        .from('conversation_members')
+        .select('participants!inner(claimed_by)')
+        .eq('conversation_id', conversation.id)
+        .eq('participant_id', message.sender_id)
+        .eq('notifications_enabled', true)
+        .maybeSingle()
+    : { data: null };
+
+  const userId = accountRecipient?.account_id ??
+    ((legacyRecipient?.participants as { claimed_by: string | null } | undefined)
+      ?.claimed_by ?? null);
   if (!userId) return null;
 
   const direct = conversation.kind === 'direct';
@@ -174,7 +196,7 @@ async function forReaction(
       .select('name')
       .eq('id', conversation.event_id)
       .maybeSingle();
-    groupTitle = event?.name ?? 'Event chat';
+    groupTitle = event?.name ?? conversation.origin_event_name ?? 'Event chat';
   }
 
   const trimmed = message.body.trim();
@@ -183,8 +205,7 @@ async function forReaction(
   const reactionTarget = excerpt
     ? `“${excerpt}”`
     : `a ${mediaName(message.media_mime_type)}`;
-  const reactorName = reactor?.full_name ?? 'Someone';
-
+  const reactorName = reaction?.reactor_name ?? 'Someone';
   return {
     recipients: [userId],
     payload: {
@@ -192,7 +213,9 @@ async function forReaction(
       body: direct
         ? `${emoji} reacted to ${reactionTarget}`
         : `${firstName(reactorName)} reacted ${emoji} to ${reactionTarget}`,
-      url: `/events/${conversation.event_id}/${direct ? 'direct-message' : 'group-conversation'}?id=${conversation.id}`,
+      url: eventOwned
+        ? `/events/${conversation.event_id}/${direct ? 'direct-message' : 'group-conversation'}?id=${conversation.id}`
+        : `/chat?id=${conversation.id}&kind=${conversation.kind}&account=1&originEventId=${conversation.origin_event_id}`,
       tag: `conversation-${conversation.id}`,
     },
   };
@@ -428,6 +451,7 @@ Deno.serve(async (request) => {
     emoji?: string;
     team_id?: string;
     participant_id?: string;
+    account_id?: string;
   };
   try {
     event = await request.json();
@@ -443,9 +467,10 @@ Deno.serve(async (request) => {
         break;
       case 'reaction':
         fanout =
-          event.message_id && event.participant_id && event.emoji
+          event.message_id && (event.account_id || event.participant_id) && event.emoji
             ? await forReaction(
                 event.message_id,
+                event.account_id,
                 event.participant_id,
                 event.emoji,
               )

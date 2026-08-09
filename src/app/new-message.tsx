@@ -21,7 +21,9 @@ export default function NewMessage() {
   const [query, setQuery] = React.useState('');
 
   const term = query.trim().toLowerCase();
-  const others = participants.filter((player) => player.id !== me.id);
+  const others = participants.filter(
+    (player) => player.id !== me.id && player.claimed,
+  );
   const filtered = term
     ? others.filter((player) => player.fullName.toLowerCase().includes(term))
     : others;

@@ -31,10 +31,16 @@ export default function CreateGroup() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const alreadyIn = conversation?.memberIds ?? [];
+  const alreadyIn =
+    conversation?.members
+      ?.map((member) => member.participantId)
+      .filter((id): id is string => Boolean(id)) ??
+    conversation?.memberIds ??
+    [];
   const term = query.trim().toLowerCase();
   const candidates = participants.filter(
-    (player) => player.id !== me.id && !alreadyIn.includes(player.id),
+    (player) =>
+      player.claimed && player.id !== me.id && !alreadyIn.includes(player.id),
   );
   const filtered = term
     ? candidates.filter((player) => player.fullName.toLowerCase().includes(term))

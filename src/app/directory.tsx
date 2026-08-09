@@ -99,7 +99,7 @@ export default function Directory() {
                         : ' · Unassigned'}
                     </Text>
                   </View>
-                  {!isMe ? (
+                  {!isMe && player.claimed ? (
                     <Pressable
                       style={styles.messageButton}
                       onPress={() =>

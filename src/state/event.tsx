@@ -736,7 +736,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     const usingDefaultFocus = requestedEvent === null;
 
     if (!eventId) {
-      setSyncScope(null, null);
+      setSyncScope(userId, null, []);
       clearFocusedEvent();
       return null;
     }

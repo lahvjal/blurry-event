@@ -31,9 +31,15 @@ import { useEvent } from '@/state/event';
 export default function ConversationSettings() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { event, me, participantById } = useEvent();
-  const params = useLocalSearchParams<{ id?: string }>();
+  const { event, me, participantById, accountAccess } = useEvent();
+  const params = useLocalSearchParams<{
+    id?: string;
+    account?: string;
+    originEventId?: string;
+  }>();
   const conversationId = params.id ?? null;
+  const myActorId = accountAccess?.accountId ?? me.id;
+  const signedIn = Boolean(accountAccess?.accountId) || me.claimed;
   const browserOffline = useBrowserDefinitelyOffline();
 
   const { conversation, loading, error } = useConversationDetail(conversationId);
@@ -44,28 +50,43 @@ export default function ConversationSettings() {
   const [leaveError, setLeaveError] = useState<string | null>(null);
   const [leaving, setLeaving] = useState(false);
 
-  const title = conversation
-    ? conversationTitle(conversation, me.id, participantById, event.name)
-    : 'Conversation';
-  const members = useMemo(
-    () =>
-      (conversation?.memberIds ?? [])
-        .map((id) => participantById(id))
-        .filter((player): player is NonNullable<typeof player> => Boolean(player)),
-    [conversation?.memberIds, participantById],
-  );
-  const creatorName = conversation?.createdBy
-    ? participantById(conversation.createdBy)?.fullName.split(' ')[0]
-    : null;
+  const members = useMemo(() => {
+    if (conversation?.members?.length) {
+      return conversation.members.map((member) => ({
+        id: member.accountId ?? member.participantId ?? 'deleted-account',
+        participantId: member.participantId,
+        fullName: member.fullName,
+        initials: initialsOf(member.fullName),
+        avatarUrl: member.avatarUrl,
+      }));
+    }
+    return (conversation?.memberIds ?? [])
+      .map((id) => participantById(id))
+      .filter((player): player is NonNullable<typeof player> => Boolean(player));
+  }, [conversation?.memberIds, conversation?.members, participantById]);
+  const creatorName =
+    conversation?.createdByName?.split(' ')[0] ??
+    (conversation?.createdBy
+      ? participantById(conversation.createdBy)?.fullName.split(' ')[0]
+      : null);
   const direct = conversation?.kind === 'direct';
   const directParticipant = direct
-    ? members.find((member) => member.id !== me.id)
+    ? members.find(
+        (member) => member.id !== myActorId && member.id !== me.id,
+      )
     : undefined;
+  const title = directParticipant?.fullName ?? (conversation
+    ? conversationTitle(conversation, me.id, participantById, event.name)
+    : 'Conversation');
   const isEventGroup = conversation?.kind === 'event_group';
   const isTeamChat = Boolean(conversation?.teamId);
+  const canManageOriginMembers =
+    conversation?.eventActive !== false &&
+    Boolean(conversation?.originEventId) &&
+    conversation?.originEventId === event.id;
 
   useEffect(() => {
-    if (!conversationId || !me.claimed) {
+    if (!conversationId || !signedIn) {
       setNotificationsLoading(false);
       return;
     }
@@ -97,7 +118,7 @@ export default function ConversationSettings() {
     return () => {
       active = false;
     };
-  }, [browserOffline, conversationId, me.claimed, me.id]);
+  }, [browserOffline, conversationId, me.id, signedIn]);
 
   const toggleNotifications = async () => {
     if (
@@ -105,7 +126,7 @@ export default function ConversationSettings() {
       browserOffline ||
       notificationsLoading ||
       notificationsBusy ||
-      !me.claimed
+      !signedIn
     ) {
       return;
     }
@@ -134,7 +155,7 @@ export default function ConversationSettings() {
     setLeaveError(null);
     try {
       await leaveConversation(conversationId);
-      router.replace('/messages');
+      router.replace(params.account ? '/inbox' : '/messages');
     } catch (caught) {
       setLeaveError(
         (caught as { message?: string })?.message ?? 'Could not leave.',
@@ -213,7 +234,7 @@ export default function ConversationSettings() {
                 browserOffline ||
                 notificationsLoading ||
                 notificationsBusy ||
-                !me.claimed
+                !signedIn
               }
               onPress={toggleNotifications}
               style={[
@@ -237,7 +258,7 @@ export default function ConversationSettings() {
           <View>
             <View style={styles.sectionHeading}>
               <Text style={styles.sectionLabel}>MEMBERS · {members.length}</Text>
-              {isEventGroup || isTeamChat ? null : (
+              {isEventGroup || isTeamChat || !canManageOriginMembers ? null : (
                 <Pressable
                   accessibilityRole="button"
                   accessibilityState={{ disabled: browserOffline }}
@@ -250,8 +271,12 @@ export default function ConversationSettings() {
                   onPress={() =>
                     conversationId
                       ? router.push({
-                          pathname: '/create-group',
-                          params: { add: conversationId },
+                          pathname: params.account ? '/chat-members' : '/create-group',
+                          params: {
+                            add: conversationId,
+                            account: params.account,
+                            originEventId: params.originEventId,
+                          },
                         })
                       : undefined
                   }>
@@ -272,12 +297,15 @@ export default function ConversationSettings() {
                 <View style={styles.memberText}>
                   <Text style={styles.memberName}>
                     {member.fullName}
-                    {member.id === me.id ? '  ·  YOU' : ''}
+                    {member.id === myActorId || member.id === me.id
+                      ? '  ·  YOU'
+                      : ''}
                   </Text>
                   <Text style={styles.memberRole}>
                     {isTeamChat
                       ? 'TEAM MEMBER'
-                      : member.id === conversation.createdBy
+                      : member.id === conversation.createdByAccountId ||
+                          member.id === conversation.createdBy
                       ? 'CREATED THIS GROUP'
                       : 'MEMBER'}
                   </Text>
@@ -323,7 +351,7 @@ export default function ConversationSettings() {
         ) : null}
       </ScrollView>
 
-      <FloatingNav />
+      {params.account ? null : <FloatingNav />}
     </View>
   );
 }

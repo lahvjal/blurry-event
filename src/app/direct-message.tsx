@@ -83,10 +83,16 @@ function InitialsAvatar({
 export default function DirectMessage() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { event, me, participantById } = useEvent();
+  const { event, me, participantById, accountAccess } = useEvent();
   const offline = useBrowserDefinitelyOffline();
   // Arrives either as an existing thread, or as the person to open one with.
-  const params = useLocalSearchParams<{ id?: string; participant?: string }>();
+  const params = useLocalSearchParams<{
+    id?: string;
+    participant?: string;
+    originEventId?: string;
+    account?: string;
+  }>();
+  const myActorId = accountAccess?.accountId ?? me.id;
 
   const [conversationId, setConversationId] = React.useState<string | null>(
     params.id ?? null,
@@ -127,7 +133,10 @@ export default function DirectMessage() {
     edit,
     unsend,
     loadOlder,
-  } = useConversation(conversationId);
+  } = useConversation(
+    conversationId,
+    params.originEventId ?? conversation?.originEventId,
+  );
   const [composerContext, setComposerContext] =
     React.useState<MessageComposerContext | null>(null);
 
@@ -176,9 +185,25 @@ export default function DirectMessage() {
     }
   };
 
+  const otherMember = conversation?.members?.find(
+    (member) =>
+      member.accountId !== myActorId && member.participantId !== me.id,
+  );
   const otherId =
-    conversation?.memberIds.find((id) => id !== me.id) ?? params.participant ?? null;
-  const other = otherId ? participantById(otherId) : undefined;
+    otherMember?.accountId ??
+    otherMember?.participantId ??
+    conversation?.memberIds.find((id) => id !== myActorId && id !== me.id) ??
+    params.participant ??
+    null;
+  const rosterOther = otherId ? participantById(otherId) : undefined;
+  const other = otherMember
+    ? {
+        id: otherId ?? 'deleted-account',
+        fullName: otherMember.fullName,
+        initials: initialsOf(otherMember.fullName),
+        avatarUrl: otherMember.avatarUrl,
+      }
+    : rosterOther;
   const otherName = other?.fullName ?? 'Direct message';
   const otherInitials = initialsOf(otherName);
 
@@ -220,8 +245,12 @@ export default function DirectMessage() {
   const openSettings = () => {
     if (!conversationId) return;
     router.push({
-      pathname: '/conversation-settings',
-      params: { id: conversationId },
+      pathname: params.account ? '/chat-settings' : '/conversation-settings',
+      params: {
+        id: conversationId,
+        account: params.account,
+        originEventId: params.originEventId,
+      },
     });
   };
 
@@ -262,9 +291,9 @@ export default function DirectMessage() {
                 <View style={{ gap: 3 }}>
                   <Text style={styles.headerName}>{otherName}</Text>
                   <Text style={styles.headerStatus}>
-                    {other?.handicap === null || other?.handicap === undefined
+                    {rosterOther?.handicap === null || rosterOther?.handicap === undefined
                       ? 'PLAYER'
-                      : `${other.handicap} HCP`}
+                      : `${rosterOther.handicap} HCP`}
                   </Text>
                 </View>
               </View>
@@ -316,7 +345,7 @@ export default function DirectMessage() {
           ) : null}
 
           {runs.map((run) => {
-            const mine = run.senderId === me.id;
+            const mine = run.senderId === myActorId || run.senderId === me.id;
             const sender = mine ? me : other;
             const initials = mine ? initialsOf(me.fullName) : otherInitials;
             return (
@@ -339,9 +368,15 @@ export default function DirectMessage() {
                           : undefined
                       }
                       mine={mine}
-                      myParticipantId={me.id}
+                      myParticipantId={myActorId}
                       participantNameById={(participantId) =>
-                        participantById(participantId)?.fullName ?? 'Player'
+                        conversation?.members?.find(
+                          (member) =>
+                            member.accountId === participantId ||
+                            member.participantId === participantId,
+                        )?.fullName ??
+                        participantById(participantId)?.fullName ??
+                        'Player'
                       }
                       onReact={(emoji) => react(message.id, emoji)}
                       onReply={() =>

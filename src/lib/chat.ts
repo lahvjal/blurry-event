@@ -14,6 +14,7 @@ import {
   ChatMessageReaction,
   Conversation,
   ConversationKind,
+  ConversationMember,
   ConversationSummary,
 } from '@/state/types';
 
@@ -35,34 +36,43 @@ type SummaryRow = {
   id: string;
   event_id: string;
   event_name: string;
+  event_active?: boolean;
+  event_owned?: boolean;
   kind: ConversationKind;
   name: string | null;
   created_by: string | null;
-  my_participant_id: string;
+  my_participant_id: string | null;
+  my_account_id?: string;
   member_ids: string[] | null;
+  member_account_ids?: string[] | null;
   direct_participant_id: string | null;
   direct_participant_name: string | null;
   direct_participant_avatar_url: string | null;
   last_message_body: string | null;
   last_message_at: string | null;
   last_sender_id: string | null;
+  last_sender_account_id?: string | null;
   last_sender_name: string | null;
   last_message_media_mime_type?: string | null;
   last_activity_at?: string | null;
   last_activity_kind?: 'message' | 'reaction' | null;
   last_reaction_emoji?: string | null;
   last_reactor_id?: string | null;
+  last_reactor_account_id?: string | null;
   last_reactor_name?: string | null;
   last_reaction_message_body?: string | null;
   last_reaction_message_media_mime_type?: string | null;
   unread_count: number;
 };
 
-type MessageRow = {
+export type MessageRow = {
   id: string;
-  event_id: string;
+  event_id: string | null;
   conversation_id: string;
-  sender_id: string;
+  sender_id: string | null;
+  sender_account_id?: string | null;
+  sender_name?: string | null;
+  sender_avatar_url?: string | null;
   body: string;
   reply_to_id?: string | null;
   client_id: string;
@@ -77,7 +87,9 @@ type MessageRow = {
 
 type ReactionRow = {
   message_id?: string;
-  participant_id: string;
+  participant_id: string | null;
+  reactor_account_id?: string | null;
+  reactor_name?: string | null;
   emoji: string;
 };
 
@@ -111,9 +123,12 @@ export function newClientId(): string {
 function toMessage(row: MessageRow): ChatMessage {
   return {
     id: row.id,
-    eventId: row.event_id,
+    eventId: row.event_id ?? '',
     conversationId: row.conversation_id,
-    senderId: row.sender_id,
+    senderId: row.sender_account_id ?? row.sender_id ?? 'deleted-account',
+    senderParticipantId: row.sender_id,
+    senderName: row.sender_name ?? null,
+    senderAvatarUrl: row.sender_avatar_url ?? null,
     body: row.body,
     replyToId: row.reply_to_id ?? null,
     clientId: row.client_id,
@@ -129,7 +144,11 @@ function toMessage(row: MessageRow): ChatMessage {
           }
         : null,
     reactions: (row.message_reactions ?? []).map((reaction) => ({
-      participantId: reaction.participant_id,
+      participantId:
+        reaction.reactor_account_id ??
+        reaction.participant_id ??
+        'deleted-account',
+      participantName: reaction.reactor_name ?? null,
       emoji: reaction.emoji,
     })),
   };
@@ -143,17 +162,20 @@ export async function fetchConversationSummaries(): Promise<ConversationSummary[
     id: row.id,
     eventId: row.event_id,
     eventName: row.event_name,
+    eventActive: row.event_active ?? true,
+    eventOwned: row.event_owned ?? row.kind === 'event_group',
     kind: row.kind,
     name: row.name,
     createdBy: row.created_by,
     myParticipantId: row.my_participant_id,
-    memberIds: row.member_ids ?? [],
+    myAccountId: row.my_account_id ?? row.my_participant_id ?? '',
+    memberIds: row.member_account_ids ?? row.member_ids ?? [],
     directParticipantId: row.direct_participant_id,
     directParticipantName: row.direct_participant_name,
     directParticipantAvatarUrl: row.direct_participant_avatar_url,
     lastMessageBody: row.last_message_body,
     lastMessageAt: row.last_message_at,
-    lastSenderId: row.last_sender_id,
+    lastSenderId: row.last_sender_account_id ?? row.last_sender_id,
     lastSenderName: row.last_sender_name,
     lastMessageMediaMimeType: row.last_message_media_mime_type ?? null,
     // These fields arrive with migration 0019. Falling back to the newest
@@ -163,7 +185,8 @@ export async function fetchConversationSummaries(): Promise<ConversationSummary[
       row.last_activity_kind ??
       (row.last_message_at ? 'message' : null),
     lastReactionEmoji: row.last_reaction_emoji ?? null,
-    lastReactorId: row.last_reactor_id ?? null,
+    lastReactorId:
+      row.last_reactor_account_id ?? row.last_reactor_id ?? null,
     lastReactorName: row.last_reactor_name ?? null,
     lastReactionMessageBody: row.last_reaction_message_body ?? null,
     lastReactionMessageMediaMimeType:
@@ -174,56 +197,58 @@ export async function fetchConversationSummaries(): Promise<ConversationSummary[
 
 /** The conversation itself and who is in it, for a thread header or settings. */
 export async function fetchConversation(
-  eventId: string,
   id: string,
 ): Promise<Conversation | null> {
-  let { data, error } = await supabase
-    .from('conversations')
-    .select(
-      'id, kind, name, created_by, team_id, conversation_members(participant_id)',
-    )
-    .eq('event_id', eventId)
-    .eq('id', id)
-    .maybeSingle();
-
-  // Keep ordinary chats readable while migration 0021 rolls out.
-  if (
-    error &&
-    ['42703', 'PGRST200', 'PGRST204', 'PGRST205'].includes(error.code ?? '')
-  ) {
-    ({ data, error } = await supabase
-      .from('conversations')
-      .select('id, kind, name, created_by, conversation_members(participant_id)')
-      .eq('event_id', eventId)
-      .eq('id', id)
-      .maybeSingle());
-  }
-
+  const { data, error } = await supabase.rpc('account_conversation_detail', {
+    p_conversation_id: id,
+  });
   if (error) throw error;
   if (!data) return null;
-
-  const row = data as {
+  const row = data as unknown as {
     id: string;
     kind: ConversationKind;
     name: string | null;
     created_by: string | null;
+    created_by_account_id?: string | null;
+    created_by_name?: string | null;
     team_id?: string | null;
-    conversation_members: { participant_id: string }[] | null;
+    event_id?: string | null;
+    event_active?: boolean;
+    event_owned?: boolean;
+    members?: Array<{
+      account_id: string | null;
+      participant_id: string | null;
+      display_name: string;
+      avatar_url: string | null;
+    }>;
   };
+  const members: ConversationMember[] = (row.members ?? []).map((member) => ({
+    accountId: member.account_id,
+    participantId: member.participant_id,
+    fullName: member.display_name,
+    avatarUrl: member.avatar_url,
+  }));
 
   return {
     id: row.id,
     kind: row.kind,
     name: row.name,
     createdBy: row.created_by,
+    createdByAccountId: row.created_by_account_id ?? null,
+    createdByName: row.created_by_name ?? null,
     teamId: row.team_id ?? null,
-    memberIds: (row.conversation_members ?? []).map((m) => m.participant_id),
+    memberIds: members
+      .map((member) => member.accountId ?? member.participantId)
+      .filter((memberId): memberId is string => Boolean(memberId)),
+    members,
+    originEventId: row.event_id ?? null,
+    eventActive: row.event_active ?? true,
+    eventOwned: row.event_owned ?? row.kind === 'event_group',
   };
 }
 
 /** Newest page first from Postgres, returned oldest-first for the thread. */
 export async function fetchMessages(
-  eventId: string,
   conversationId: string,
   before?: MessageCursor,
 ): Promise<MessagePage> {
@@ -234,7 +259,6 @@ export async function fetchMessages(
     let request = supabase
       .from('messages')
       .select(selection)
-      .eq('event_id', eventId)
       .eq('conversation_id', conversationId)
       .order('created_at', { ascending: false });
     if (before) request = request.lt('created_at', before.createdAt);
@@ -242,6 +266,7 @@ export async function fetchMessages(
   };
 
   const selections = [
+    'id, event_id, conversation_id, sender_id, sender_account_id, sender_name, sender_avatar_url, body, reply_to_id, client_id, created_at, edited_at, media_url, media_mime_type, media_width, media_height, message_reactions(participant_id, reactor_account_id, reactor_name, emoji)',
     'id, event_id, conversation_id, sender_id, body, reply_to_id, client_id, created_at, edited_at, media_url, media_mime_type, media_width, media_height, message_reactions(participant_id, emoji)',
     'id, event_id, conversation_id, sender_id, body, reply_to_id, client_id, created_at, edited_at, message_reactions(participant_id, emoji)',
     'id, event_id, conversation_id, sender_id, body, client_id, created_at, message_reactions(participant_id, emoji)',
@@ -592,27 +617,25 @@ async function uploadMessageMedia(
 /** Changes one of the caller's own messages. The database trigger records the
  * edit time and rejects attempts to change message ownership or threading. */
 export async function editMessageBody(
-  eventId: string,
+  _eventId: string,
   messageId: string,
   body: string,
 ): Promise<void> {
   const { error } = await supabase
     .from('messages')
     .update({ body })
-    .eq('event_id', eventId)
     .eq('id', messageId);
   if (error) throw error;
 }
 
 /** Removes one of the caller's own messages for everyone in the thread. */
 export async function unsendMessage(
-  eventId: string,
+  _eventId: string,
   messageId: string,
 ): Promise<void> {
   const { error } = await supabase
     .from('messages')
     .delete()
-    .eq('event_id', eventId)
     .eq('id', messageId);
   if (error) throw error;
 }
@@ -633,9 +656,8 @@ export async function toggleMessageReaction(params: {
     const { error } = await supabase
       .from('message_reactions')
       .delete()
-      .eq('event_id', params.eventId)
       .eq('message_id', params.messageId)
-      .eq('participant_id', params.participantId)
+      .eq('reactor_account_id', params.participantId)
       .eq('emoji', params.emoji);
     if (error) throw error;
     return;
@@ -655,30 +677,26 @@ export async function toggleMessageReaction(params: {
 /** Clears the unread badge. Failures are the caller's to ignore. */
 export async function markConversationRead(
   conversationId: string,
-  participantId: string,
+  _participantId?: string,
 ): Promise<void> {
-  const { error } = await supabase
-    .from('conversation_members')
-    .update({ last_read_at: new Date().toISOString() })
-    .eq('conversation_id', conversationId)
-    .eq('participant_id', participantId);
+  const { error } = await supabase.rpc('mark_conversation_read', {
+    convo: conversationId,
+  });
   if (error) throw error;
 }
 
 /** Whether this member wants push alerts for one conversation. */
 export async function fetchConversationNotifications(
   conversationId: string,
-  participantId: string,
+  _participantId?: string,
 ): Promise<boolean> {
-  const { data, error } = await supabase
-    .from('conversation_members')
-    .select('notifications_enabled')
-    .eq('conversation_id', conversationId)
-    .eq('participant_id', participantId)
-    .maybeSingle();
+  const { data, error } = await supabase.rpc(
+    'conversation_notifications_enabled',
+    { convo: conversationId },
+  );
 
   if (error) throw error;
-  return data?.notifications_enabled ?? true;
+  return (data as boolean | null) ?? true;
 }
 
 /**
@@ -688,14 +706,13 @@ export async function fetchConversationNotifications(
  */
 export async function setConversationNotifications(
   conversationId: string,
-  participantId: string,
+  _participantId: string,
   enabled: boolean,
 ): Promise<void> {
-  const { error } = await supabase
-    .from('conversation_members')
-    .update({ notifications_enabled: enabled })
-    .eq('conversation_id', conversationId)
-    .eq('participant_id', participantId);
+  const { error } = await supabase.rpc('set_conversation_notifications', {
+    convo: conversationId,
+    enabled,
+  });
 
   if (error) throw error;
 }
@@ -793,21 +810,22 @@ export type MessageChange =
     };
 
 export function subscribeToMessages(
-  eventId: string,
+  _eventId: string | null,
   conversationId: string | null,
   onChange: (change: MessageChange) => void,
 ): () => void {
+  const filter = conversationId
+    ? { filter: `conversation_id=eq.${conversationId}` }
+    : {};
   const channel = supabase
-    .channel(
-      `messages:${eventId}:${conversationId ?? 'inbox'}:${realtimeChannelToken()}`,
-    )
+    .channel(`messages:${conversationId ?? 'inbox'}:${realtimeChannelToken()}`)
     .on(
       'postgres_changes',
       {
         event: '*',
         schema: 'public',
         table: 'messages',
-        filter: `event_id=eq.${eventId}`,
+        ...filter,
       },
       (payload) => {
         if (payload.eventType === 'DELETE') {
@@ -851,18 +869,17 @@ export type MessageReactionChange = {
 /** Live reaction changes for any readable message; the open thread ignores
  * rows whose message id is not currently on screen. */
 export function subscribeToMessageReactions(
-  eventId: string,
+  _eventId: string | null,
   onChange: (change: MessageReactionChange) => void,
 ): () => void {
   const channel = supabase
-    .channel(`message-reactions:${eventId}:${realtimeChannelToken()}`)
+    .channel(`message-reactions:${realtimeChannelToken()}`)
     .on(
       'postgres_changes',
       {
         event: '*',
         schema: 'public',
         table: 'message_reactions',
-        filter: `event_id=eq.${eventId}`,
       },
       (payload) => {
         if (payload.eventType !== 'INSERT' && payload.eventType !== 'DELETE') {
@@ -871,12 +888,14 @@ export function subscribeToMessageReactions(
         const row = (
           payload.eventType === 'DELETE' ? payload.old : payload.new
         ) as ReactionRow;
-        if (!row.message_id || !row.participant_id || !row.emoji) return;
+        const actorId = row.reactor_account_id ?? row.participant_id;
+        if (!row.message_id || !actorId || !row.emoji) return;
         onChange({
           event: payload.eventType,
           messageId: row.message_id,
           reaction: {
-            participantId: row.participant_id,
+            participantId: actorId,
+            participantName: row.reactor_name ?? null,
             emoji: row.emoji,
           },
         });

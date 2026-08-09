@@ -121,10 +121,14 @@ export function ChatMessageBubble({
   const summaries = summarizeReactions(message, myParticipantId);
   const reactionUsers = React.useMemo(() => {
     const byParticipant = new Map<string, string[]>();
+    const participantNames = new Map<string, string>();
     for (const reaction of message.reactions) {
       const emojis = byParticipant.get(reaction.participantId) ?? [];
       if (!emojis.includes(reaction.emoji)) emojis.push(reaction.emoji);
       byParticipant.set(reaction.participantId, emojis);
+      if (reaction.participantName) {
+        participantNames.set(reaction.participantId, reaction.participantName);
+      }
     }
     return [...byParticipant.entries()]
       .map(([participantId, emojis]) => ({
@@ -132,7 +136,8 @@ export function ChatMessageBubble({
         name:
           participantId === myParticipantId
             ? 'You'
-            : participantNameById(participantId),
+            : participantNames.get(participantId) ??
+              participantNameById(participantId),
         emojis,
       }))
       .sort((a, b) => {

@@ -235,11 +235,14 @@ export default function Profile() {
                 return (
                   <Pressable
                     key={mate.id}
+                    disabled={!mate.claimed}
                     onPress={() =>
-                      router.push({
-                        pathname: '/direct-message',
-                        params: { participant: mate.id },
-                      })
+                      mate.claimed
+                        ? router.push({
+                            pathname: '/direct-message',
+                            params: { participant: mate.id },
+                          })
+                        : undefined
                     }
                     style={[
                       styles.mateRow,

@@ -26,10 +26,14 @@ import { useEvent } from '@/state/event';
 export default function Messages() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { me } = useEvent();
+  const { me, activeEventId, accountAccess } = useEvent();
   const offline = useBrowserDefinitelyOffline();
   const { conversations, loading, error } = useConversations();
   const [query, setQuery] = React.useState('');
+  const canStartConversation = Boolean(
+    activeEventId &&
+      accountAccess?.events.find((event) => event.id === activeEventId)?.registration,
+  );
 
   const rows = React.useMemo(
     () =>
@@ -75,12 +79,23 @@ export default function Messages() {
             accessibilityRole="button"
             accessibilityLabel="Start a new conversation"
             accessibilityHint={
-              offline ? 'Starting a conversation requires a connection.' : undefined
+              offline
+                ? 'Starting a conversation requires a connection.'
+                : !canStartConversation
+                  ? 'Join an active event to start a new conversation.'
+                  : undefined
             }
-            accessibilityState={{ disabled: offline }}
-            disabled={offline}
-            style={[styles.newButton, offline && styles.newButtonDisabled]}
-            onPress={() => router.push('/new-message')}>
+            accessibilityState={{ disabled: offline || !canStartConversation }}
+            disabled={offline || !canStartConversation}
+            style={[
+              styles.newButton,
+              (offline || !canStartConversation) && styles.newButtonDisabled,
+            ]}
+            onPress={() =>
+              activeEventId
+                ? router.push(eventPath(activeEventId, 'new-message') as never)
+                : undefined
+            }>
             <Text style={styles.newButtonText}>+</Text>
           </Pressable>
         </View>
@@ -100,7 +115,9 @@ export default function Messages() {
           />
         ) : null}
 
-        {me.claimed && !offline ? <PushPrompt /> : null}
+        {(accountAccess?.accountId || me.claimed) && !offline ? (
+          <PushPrompt />
+        ) : null}
 
         {error ? <Text style={styles.notice}>{error}</Text> : null}
 
@@ -113,13 +130,20 @@ export default function Messages() {
               style={styles.row}
               onPress={() =>
                 router.push({
-                  pathname: eventPath(
-                    conversation.eventId,
-                    conversation.kind === 'direct'
-                      ? 'direct-message'
-                      : 'group-conversation',
-                  ) as never,
-                  params: { id: conversation.id },
+                  pathname: conversation.eventOwned
+                    ? (eventPath(
+                        conversation.eventId,
+                        conversation.kind === 'direct'
+                          ? 'direct-message'
+                          : 'group-conversation',
+                      ) as never)
+                    : '/chat',
+                  params: {
+                    id: conversation.id,
+                    kind: conversation.kind,
+                    account: conversation.eventOwned ? undefined : '1',
+                    originEventId: conversation.eventId,
+                  },
                 })
               }>
               {directParticipant ? (
@@ -154,7 +178,7 @@ export default function Messages() {
           <Text style={styles.notice}>
             {term
               ? `No conversations match “${query}”.`
-              : me.claimed
+              : accountAccess?.accountId || me.claimed
                 ? 'No conversations yet. Tap + to start one.'
                 : 'Sign in with your invite code to message the field.'}
           </Text>

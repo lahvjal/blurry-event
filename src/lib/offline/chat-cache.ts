@@ -9,6 +9,8 @@ const SUMMARY_PREFIX = 'offlineChat.summaries.v1';
 const CLUB_SUMMARY_PREFIX = 'offlineChat.clubSummaries.v2';
 const DETAIL_PREFIX = 'offlineChat.detail.v1';
 const MESSAGE_PREFIX = 'offlineChat.messages.v1';
+const ACCOUNT_DETAIL_PREFIX = 'offlineChat.accountDetail.v2';
+const ACCOUNT_MESSAGE_PREFIX = 'offlineChat.accountMessages.v2';
 
 type ScopedRecord<T> = {
   userId: string;
@@ -149,5 +151,61 @@ export async function loadOfflineMessages(
   return record.value.filter(
     (message) =>
       message.eventId === eventId && message.conversationId === conversationId,
+  );
+}
+
+/** Durable chats cannot use event ids as cache ownership: their origin event
+ * may be deleted while the signed-in account and conversation remain. */
+export async function saveOfflineAccountConversation(
+  userId: string,
+  conversation: Conversation,
+): Promise<void> {
+  await cacheStore.set(
+    `${ACCOUNT_DETAIL_PREFIX}:${encodeURIComponent(userId)}:${conversation.id}`,
+    {
+      userId,
+      savedAt: new Date().toISOString(),
+      value: conversation,
+    } satisfies AccountRecord<Conversation>,
+  );
+}
+
+export async function loadOfflineAccountConversation(
+  userId: string,
+  conversationId: string,
+): Promise<Conversation | null> {
+  const record = await cacheStore.get<AccountRecord<Conversation>>(
+    `${ACCOUNT_DETAIL_PREFIX}:${encodeURIComponent(userId)}:${conversationId}`,
+  );
+  return record?.userId === userId && record.value.id === conversationId
+    ? record.value
+    : null;
+}
+
+export async function saveOfflineAccountMessages(
+  userId: string,
+  conversationId: string,
+  messages: ChatMessage[],
+): Promise<void> {
+  await cacheStore.set(
+    `${ACCOUNT_MESSAGE_PREFIX}:${encodeURIComponent(userId)}:${conversationId}`,
+    {
+      userId,
+      savedAt: new Date().toISOString(),
+      value: messages,
+    } satisfies AccountRecord<ChatMessage[]>,
+  );
+}
+
+export async function loadOfflineAccountMessages(
+  userId: string,
+  conversationId: string,
+): Promise<ChatMessage[] | null> {
+  const record = await cacheStore.get<AccountRecord<ChatMessage[]>>(
+    `${ACCOUNT_MESSAGE_PREFIX}:${encodeURIComponent(userId)}:${conversationId}`,
+  );
+  if (record?.userId !== userId || !Array.isArray(record.value)) return null;
+  return record.value.filter(
+    (message) => message.conversationId === conversationId,
   );
 }

@@ -10,6 +10,8 @@ import {
 } from '@/lib/chat';
 import {
   saveOfflineConversation,
+  saveOfflineAccountConversation,
+  saveOfflineAccountMessages,
   saveOfflineClubConversationSummaries,
   saveOfflineConversationSummaries,
   saveOfflineMessages,
@@ -393,6 +395,31 @@ export async function runAutomaticOfflinePreparation(
   const messageMediaByEvent = new Map<string, string[]>();
   const clubSummaries = await fetchConversationSummaries();
   await saveOfflineClubConversationSummaries(accountId, clubSummaries);
+  const persistentChats = new Map<
+    string,
+    {
+      conversation: Awaited<ReturnType<typeof fetchConversation>>;
+      page: Awaited<ReturnType<typeof fetchMessages>>;
+    }
+  >();
+  const persistentChatMedia: string[] = [];
+  // Persistent chats are account resources, so prepare them even when their
+  // origin event was deleted and there is no event snapshot left to select.
+  for (const summary of clubSummaries.filter((item) => !item.eventOwned)) {
+    throwIfAborted(signal);
+    const [conversation, page] = await Promise.all([
+      fetchConversation(summary.id),
+      fetchMessages(summary.id),
+    ]);
+    if (conversation) {
+      await saveOfflineAccountConversation(accountId, conversation);
+    }
+    await saveOfflineAccountMessages(accountId, summary.id, page.messages);
+    persistentChats.set(summary.id, { conversation, page });
+    page.messages.forEach((message) => {
+      if (message.media?.url) persistentChatMedia.push(message.media.url);
+    });
+  }
   for (let index = 0; index < selected.length; index += 1) {
     throwIfAborted(signal);
     const event = selected[index];
@@ -422,19 +449,23 @@ export async function runAutomaticOfflinePreparation(
       conversationCount = summaries.length;
       const eventMessageMedia: string[] = [];
       for (const summary of summaries) {
-        const [conversation, page] = await Promise.all([
-          fetchConversation(event.id, summary.id),
-          fetchMessages(event.id, summary.id),
-        ]);
+        const preparedChat = persistentChats.get(summary.id);
+        const [conversation, page] = preparedChat
+          ? [preparedChat.conversation, preparedChat.page]
+          : await Promise.all([
+              fetchConversation(summary.id),
+              fetchMessages(summary.id),
+            ]);
         if (conversation) {
-          await saveOfflineConversation(accountId, event.id, conversation);
+          await Promise.all([
+            saveOfflineConversation(accountId, event.id, conversation),
+            saveOfflineAccountConversation(accountId, conversation),
+          ]);
         }
-        await saveOfflineMessages(
-          accountId,
-          event.id,
-          summary.id,
-          page.messages,
-        );
+        await Promise.all([
+          saveOfflineMessages(accountId, event.id, summary.id, page.messages),
+          saveOfflineAccountMessages(accountId, summary.id, page.messages),
+        ]);
         page.messages.forEach((message) => {
           if (message.media?.url) eventMessageMedia.push(message.media.url);
         });
@@ -474,6 +505,11 @@ export async function runAutomaticOfflinePreparation(
       (candidate) => ({ ...candidate, eventId }),
     ),
   );
+  const eventMediaUrls = new Set(media.map((item) => item.url));
+  const accountMedia = [...new Set(persistentChatMedia)]
+    .filter((url) => !eventMediaUrls.has(url))
+    .map((url) => ({ url, required: false } satisfies MediaCandidate));
+  const totalMedia = media.length + accountMedia.length;
   const unavailableRequired: string[] = [];
   const unavailableOptional: string[] = [];
   for (let index = 0; index < media.length; index += 1) {
@@ -514,8 +550,28 @@ export async function runAutomaticOfflinePreparation(
       'caching-media',
       'Saving event images',
       index + 1,
-      media.length,
-      75 + (media.length > 0 ? ((index + 1) / media.length) * 20 : 20),
+      totalMedia,
+      75 + (totalMedia > 0 ? ((index + 1) / totalMedia) * 20 : 20),
+    );
+  }
+  for (let index = 0; index < accountMedia.length; index += 1) {
+    throwIfAborted(signal);
+    const item = accountMedia[index];
+    let cached = false;
+    try {
+      cached = await cacheMedia(item, signal);
+    } catch (error) {
+      if (signal?.aborted) throw error;
+    }
+    if (!cached) unavailableOptional.push(item.url);
+    const completed = media.length + index + 1;
+    progress(
+      onProgress,
+      'caching-media',
+      'Saving message images',
+      completed,
+      totalMedia,
+      75 + (totalMedia > 0 ? (completed / totalMedia) * 20 : 20),
     );
   }
 

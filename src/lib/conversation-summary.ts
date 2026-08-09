@@ -43,6 +43,7 @@ export function conversationSummaryPreview(
 
   if (!conversation.lastSenderId) return message;
   const sender =
+    conversation.lastSenderId === conversation.myAccountId ||
     conversation.lastSenderId === conversation.myParticipantId
       ? 'You'
       : conversation.lastSenderName?.split(' ')[0] || 'Someone';
