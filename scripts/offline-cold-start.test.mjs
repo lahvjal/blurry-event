@@ -70,7 +70,7 @@ test('startup source orders local data before server refresh and keeps ready ref
     'releaseStartupNetworkAfterRender();',
     localRead,
   );
-  const serverRead = eventState.indexOf('access = await fetchAccountEventAccess', localRead);
+  const serverRead = eventState.indexOf('fetchAccountEventAccess(userId)', localRead);
   assert.ok(
     localRead >= 0 && networkRelease > localRead && serverRead > networkRelease,
   );
