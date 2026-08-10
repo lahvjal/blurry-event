@@ -2,7 +2,7 @@
  * Extracts a course scorecard into a review-only draft.
  *
  * Required secret: OPENAI_API_KEY
- * Optional secret: SCORECARD_OCR_MODEL (defaults to gpt-5-mini)
+ * Optional secret: SCORECARD_OCR_MODEL (defaults to gpt-5.6)
  *
  * The image is supplied as a base64 data URL for this one request. It is not
  * written to Storage or the database. An event admin must review and save the
@@ -80,7 +80,9 @@ Extract all visible tee/color columns. Yardages must appear in hole order 1 thro
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: Deno.env.get('SCORECARD_OCR_MODEL') || 'gpt-5-mini',
+      // Current OpenAI vision documentation uses GPT-5.6 for Responses image
+      // input. Keep this overrideable for an organization-approved model.
+      model: Deno.env.get('SCORECARD_OCR_MODEL') || 'gpt-5.6',
       temperature: 0,
       input: [{ role: 'user', content: [
         { type: 'input_text', text: prompt },
