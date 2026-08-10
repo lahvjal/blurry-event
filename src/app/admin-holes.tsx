@@ -1,4 +1,5 @@
 import { LinearGradient } from 'expo-linear-gradient';
+import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -24,6 +25,33 @@ import { useEvent } from '@/state/event';
 import { Hole, TEE_PRESETS, TeeYardageSet } from '@/state/types';
 
 type HoleDraft = { hole: number; par: string };
+
+const MAX_SCAN_BYTES = 5 * 1024 * 1024;
+const encodedBytes = (base64: string) => Math.floor((base64.length * 3) / 4);
+
+/**
+ * Course scorecards need enough resolution for small yardage cells, but should
+ * never make a giant mobile upload. JPEG is iteratively resized/compressed to
+ * a hard 5 MiB ceiling before it ever leaves the device.
+ */
+async function compressScorecardPhoto(input: { uri: string; width: number; height: number }) {
+  let longest = Math.min(Math.max(input.width, input.height), 2_400);
+  let compression = 0.9;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const scale = longest / Math.max(input.width, input.height);
+    const result = await ImageManipulator.manipulateAsync(
+      input.uri,
+      [{ resize: input.width >= input.height ? { width: Math.round(input.width * scale) } : { height: Math.round(input.height * scale) } }],
+      { compress: compression, format: ImageManipulator.SaveFormat.JPEG, base64: true },
+    );
+    if (result.base64 && encodedBytes(result.base64) <= MAX_SCAN_BYTES) {
+      return result.base64;
+    }
+    longest = Math.max(1_200, Math.floor(longest * 0.8));
+    compression = Math.max(0.45, compression - 0.12);
+  }
+  throw new Error('This photo could not be compressed below 5 MB. Crop closer to the scorecard, then try again.');
+}
 
 const cloneTeeSets = (tees: TeeYardageSet[]) =>
   tees.map((tee) => ({ ...tee, yardages: [...tee.yardages] }));
@@ -56,6 +84,7 @@ export default function AdminHoles() {
   const [newTee, setNewTee] = useState('');
   const [saving, setSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [scanStatus, setScanStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
   const eventIdRef = useRef(event.id);
   const eventHolesRef = useRef(event.holes);
@@ -122,20 +151,22 @@ export default function AdminHoles() {
         if (!permission.granted) throw new Error('Camera access is needed to photograph the course scorecard.');
       }
       const result = source === 'camera'
-        ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.9, base64: true, cameraType: ImagePicker.CameraType.back })
-        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.9, base64: true });
+        ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 1, cameraType: ImagePicker.CameraType.back })
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
       if (result.canceled || !result.assets?.[0]) return;
       const image = result.assets[0];
-      if (!image.base64) throw new Error('That image could not be prepared for scanning. Please choose a JPG or PNG scorecard photo.');
       setScanning(true);
-      const extracted = await apiExtractScorecard({ eventId: event.id, imageBase64: image.base64, mimeType: image.mimeType === 'image/png' ? 'image/png' : 'image/jpeg' });
+      setScanStatus('PREPARING PHOTO…');
+      const imageBase64 = await compressScorecardPhoto(image);
+      setScanStatus('READING SCORECARD…');
+      const extracted = await apiExtractScorecard({ eventId: event.id, imageBase64, mimeType: 'image/jpeg' });
       if (extracted.holes.length !== 18 || extracted.teeSets.length === 0) throw new Error('The scan did not find a complete 18-hole scorecard. Try a brighter, straight-on photo.');
       setDraft(extracted.holes.sort((a, b) => a.hole - b.hole).map((hole) => ({ hole: hole.hole, par: String(hole.par) })));
       setTeeSets(cloneTeeSets(extracted.teeSets));
       setSelectedTee(extracted.teeSets[0].name);
       setError(extracted.notes.length ? `Review the highlighted scan results: ${extracted.notes.join(' ')}` : 'Scan complete — review every par and tee yardage, then save.');
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'The scorecard scan could not be completed.'); }
-    finally { setScanning(false); }
+    finally { setScanning(false); setScanStatus(''); }
   };
   const chooseScanSource = () => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') { void scan('library'); return; }
@@ -172,7 +203,7 @@ export default function AdminHoles() {
   return <View style={styles.root}><LinearGradient colors={['#203329', '#1b2a22']} style={StyleSheet.absoluteFill} /><Noise /><PageHeader title="scorecard" subtitle={dirty ? 'UNSAVED CHANGES' : event.courseName} onBack={handleBack} />
     <ScrollView contentContainerStyle={{ paddingTop: insets.top + 76, paddingHorizontal: 20, paddingBottom: dirty ? 140 : 60 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
       <Text style={styles.hint}>Add a course scorecard photo to read pars and tee yardages, then review the result before saving. Each tee color keeps its own 18-hole yardage card.</Text>
-      <Pressable accessibilityRole="button" accessibilityLabel="Scan course scorecard" onPress={chooseScanSource} disabled={scanning} style={[styles.scanButton, scanning && styles.buttonDisabled]}><Text style={styles.scanLabel}>{scanning ? 'SCANNING SCORECARD…' : 'SCAN / UPLOAD SCORECARD'}</Text><Text style={styles.scanHint}>{scanning ? 'Reading pars and tee-color yardages' : 'Take a photo or choose one from your library'}</Text></Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel="Scan course scorecard" onPress={chooseScanSource} disabled={scanning} style={[styles.scanButton, scanning && styles.buttonDisabled]}><Text style={styles.scanLabel}>{scanning ? scanStatus || 'SCANNING SCORECARD…' : 'SCAN / UPLOAD SCORECARD'}</Text><Text style={styles.scanHint}>{scanning ? 'Compressing to a 5 MB maximum, then reading pars and tee yardages' : 'Take a photo or choose one from your library'}</Text></Pressable>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <Text style={styles.teeLabel}>TEE YARDAGES</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.teeChips}>{teeSets.map((tee) => <Pressable key={tee.name} accessibilityRole="button" accessibilityState={{ selected: tee.name === activeTee?.name }} onPress={() => setSelectedTee(tee.name)} style={[styles.teeChip, tee.name === activeTee?.name && styles.teeChipActive]}><Text style={[styles.teeChipText, tee.name === activeTee?.name && styles.teeChipTextActive]}>{tee.name.toUpperCase()}</Text></Pressable>)}</ScrollView>

@@ -9,6 +9,9 @@ test('scorecard editor offers a reviewed scan and multi-tee yardage tabs', async
   const screen = await read('src/app/admin-holes.tsx');
   assert.match(screen, /SCAN \/ UPLOAD SCORECARD/);
   assert.match(screen, /apiExtractScorecard/);
+  assert.match(screen, /MAX_SCAN_BYTES = 5 \* 1024 \* 1024/);
+  assert.match(screen, /compressScorecardPhoto/);
+  assert.match(screen, /ImageManipulator\.SaveFormat\.JPEG/);
   assert.match(screen, /setTeeSets\(cloneTeeSets\(extracted\.teeSets\)\)/);
   assert.match(screen, /TEE YARDAGES/);
   assert.match(screen, /SAVE SCORECARD/);
