@@ -39,6 +39,16 @@ import {
 type Filter = 'all' | 'pending' | 'claimed';
 type AddMode = 'new' | 'existing';
 
+function inviteStatus(participant: Participant): 'SIGNED UP' | 'SENT' | 'INVITE READY' | 'NO EMAIL' {
+  if (participant.claimed) return 'SIGNED UP';
+  // This timestamp is only saved after the email provider accepts the request.
+  if (participant.inviteSentAt) return 'SENT';
+  if (participant.inviteEnabled && !isSyntheticEmail(participant.authEmail)) {
+    return 'INVITE READY';
+  }
+  return 'NO EMAIL';
+}
+
 function initialsOf(name: string): string {
   return name
     .split(/\s+/)
@@ -805,6 +815,7 @@ export default function AdminRoster() {
           {visible.map((p) => {
             const expanded = expandedId === p.id;
             const team = teamOf(p.id);
+            const status = inviteStatus(p);
             return (
               <View key={p.id}>
                 <ReanimatedSwipeable
@@ -838,13 +849,18 @@ export default function AdminRoster() {
                       </Text>
                     </View>
                     <View
-                      style={[styles.statusPill, p.claimed && styles.statusPillClaimed]}>
+                      style={[
+                        styles.statusPill,
+                        status === 'SIGNED UP' && styles.statusPillClaimed,
+                        status === 'SENT' && styles.statusPillSent,
+                      ]}>
                       <Text
                         style={[
                           styles.statusText,
-                          p.claimed && { color: colors.highlight },
+                          status === 'SIGNED UP' && { color: colors.highlight },
+                          status === 'SENT' && styles.statusTextSent,
                         ]}>
-                        {p.claimed ? 'SIGNED UP' : 'PENDING'}
+                        {status}
                       </Text>
                     </View>
                   </Pressable>
@@ -1367,10 +1383,16 @@ const styles = StyleSheet.create({
   statusPillClaimed: {
     backgroundColor: 'rgba(123,255,178,0.12)',
   },
+  statusPillSent: {
+    backgroundColor: 'rgba(255,199,119,0.08)',
+  },
   statusText: {
     fontFamily: fonts.bold,
     fontSize: 8,
     color: 'rgba(255,255,255,0.5)',
+  },
+  statusTextSent: {
+    color: '#ffc777',
   },
   expandedPanel: {
     paddingHorizontal: 20,
