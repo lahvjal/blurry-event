@@ -207,6 +207,8 @@ export type Hole = {
 /** One complete course tee card. Every tee carries its own 18 hole yardages. */
 export type TeeYardageSet = {
   name: string;
+  /** Display color selected by the organizer, independent of the tee's name. */
+  color: string;
   yardages: number[];
 };
 

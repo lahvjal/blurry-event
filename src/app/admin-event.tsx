@@ -660,10 +660,10 @@ export default function AdminEvent() {
             <Text style={styles.linkArrow}>›</Text>
           </Pressable>
 
-          {/* Which tees the yardages above belong to. */}
+          {/* Scorecard is the source of truth for tee names and colours. */}
           <Text style={styles.fieldLabel}>TEES</Text>
           <View style={styles.teeColorRow}>
-            {TEE_PRESETS.map((tee) => {
+            {event.teeYardageSets.map((tee) => {
               const active =
                 draft.teeColor.trim().toLowerCase() === tee.name.toLowerCase();
               return (
@@ -671,7 +671,7 @@ export default function AdminEvent() {
                   key={tee.name}
                   onPress={() => patch({ teeColor: tee.name })}
                   style={[styles.teeChip, active && styles.teeChipActive]}>
-                  <View style={[styles.teeSwatch, { backgroundColor: tee.swatch }]} />
+                  <View style={[styles.teeSwatch, { backgroundColor: TEE_PRESETS.find((preset) => preset.name.toLowerCase() === tee.color.toLowerCase())?.swatch ?? '#f2f4f2' }]} />
                   <Text style={[styles.teeChipText, active && styles.teeChipTextActive]}>
                     {tee.name}
                   </Text>
@@ -679,16 +679,8 @@ export default function AdminEvent() {
               );
             })}
           </View>
-          <TextInput
-            value={draft.teeColor}
-            onChangeText={(teeColor) => patch({ teeColor })}
-            style={styles.input}
-            placeholder="Or type the name your course uses"
-            placeholderTextColor="rgba(255,255,255,0.3)"
-            selectionColor={colors.highlight}
-          />
           <Text style={styles.hint}>
-            Shown on the score entry screen, under the yardage.
+            Tee names, colors, and yardage cards come from Scorecard. Select the tee used for event play here.
           </Text>
         </View>
       </ScrollView>

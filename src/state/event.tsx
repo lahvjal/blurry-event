@@ -132,7 +132,7 @@ const SEED_EVENT: EventConfig = {
   teeTimes: ['8:20 AM', '8:30 AM', '8:40 AM', '8:50 AM'],
   courseMapUrl: null,
   teeColor: 'White',
-  teeYardageSets: [{ name: 'White', yardages: [...YARDS] }],
+  teeYardageSets: [{ name: 'White', color: 'White', yardages: [...YARDS] }],
   gameStyle: 'scramble_4',
   holes: HOLES,
 };

@@ -12,9 +12,19 @@ test('scorecard editor offers a reviewed scan and multi-tee yardage tabs', async
   assert.match(screen, /MAX_SCAN_BYTES = 5 \* 1024 \* 1024/);
   assert.match(screen, /compressScorecardPhoto/);
   assert.match(screen, /ImageManipulator\.SaveFormat\.JPEG/);
-  assert.match(screen, /setTeeSets\(cloneTeeSets\(extracted\.teeSets\)\)/);
+  assert.match(screen, /const reviewedTees = extracted\.teeSets\.map/);
+  assert.match(screen, /TEE COLOR/);
   assert.match(screen, /TEE YARDAGES/);
   assert.match(screen, /SAVE SCORECARD/);
+});
+
+test('tee names and colors stay sourced from the scorecard in event details', async () => {
+  const details = await read('src/app/admin-event.tsx');
+  const migration = await read('supabase/migrations/20260810045237_tee_set_colors.sql');
+  assert.match(details, /event\.teeYardageSets\.map/);
+  assert.match(details, /tee\.color/);
+  assert.match(migration, /add column if not exists color/);
+  assert.match(migration, /btrim\(item->>'color'\)/);
 });
 
 test('client keeps legacy scorecards readable and only falls back for one tee', async () => {

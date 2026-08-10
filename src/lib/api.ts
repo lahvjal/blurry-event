@@ -337,7 +337,7 @@ export async function fetchEventBundle(eventId: string): Promise<EventBundle> {
       teeYardageSets: (() => {
         const legacy = (holesRes.data ?? []).map((h: any) => Number(h.yards));
         if (!teeSchemaAvailable || !(teeSetsRes.data ?? []).length) {
-          return [{ name: row.tee_color || 'White', yardages: legacy }];
+          return [{ name: row.tee_color || 'White', color: row.tee_color || 'White', yardages: legacy }];
         }
         const byTee = new Map<string, Map<number, number>>();
         (teeYardagesRes.data ?? []).forEach((yardage: any) => {
@@ -347,6 +347,7 @@ export async function fetchEventBundle(eventId: string): Promise<EventBundle> {
         });
         return (teeSetsRes.data ?? []).map((tee: any): TeeYardageSet => ({
           name: tee.name,
+          color: tee.color || tee.name,
           yardages: Array.from({ length: 18 }, (_, index) =>
             byTee.get(tee.name)?.get(index + 1) ?? legacy[index] ?? 0,
           ),
@@ -546,6 +547,7 @@ export async function apiUpdateScorecard(
     p_holes: holes.map(({ hole, par }) => ({ hole, par })),
     p_tee_sets: teeYardageSets.map((tee) => ({
       name: tee.name,
+      color: tee.color,
       yardages: tee.yardages.map((yards, index) => ({ hole: index + 1, yards })),
     })),
   });

@@ -62,7 +62,7 @@ function draftFrom(holes: Hole[]): HoleDraft[] {
 
 function setsEqual(left: TeeYardageSet[], right: TeeYardageSet[]) {
   return left.length === right.length && left.every((tee, index) =>
-    tee.name === right[index]?.name && tee.yardages.every((yards, hole) => yards === right[index]?.yardages[hole]),
+    tee.name === right[index]?.name && tee.color === right[index]?.color && tee.yardages.every((yards, hole) => yards === right[index]?.yardages[hole]),
   );
 }
 
@@ -135,7 +135,16 @@ export default function AdminHoles() {
     if (!name) return;
     if (teeSets.some((tee) => tee.name.toLowerCase() === name.toLowerCase())) { setError(`${name} is already on this scorecard.`); return; }
     const base = activeTee?.yardages ?? event.holes.map((hole) => hole.yards);
-    setTeeSets((current) => [...current, { name, yardages: [...base] }]); setSelectedTee(name); setNewTee('');
+    setTeeSets((current) => [...current, { name, color: 'White', yardages: [...base] }]); setSelectedTee(name); setNewTee('');
+  };
+  const patchActiveTee = (patch: Partial<Pick<TeeYardageSet, 'name' | 'color'>>) => {
+    if (!activeTee) return;
+    const nextName = (patch.name ?? activeTee.name).trim();
+    if (!nextName) return setError('Every tee set needs a name.');
+    if (nextName.toLowerCase() !== activeTee.name.toLowerCase() && teeSets.some((tee) => tee.name.toLowerCase() === nextName.toLowerCase())) return setError(`${nextName} is already on this scorecard.`);
+    setError(null);
+    setTeeSets((current) => current.map((tee) => tee.name === activeTee.name ? { ...tee, ...patch, name: nextName } : tee));
+    if (nextName !== activeTee.name) setSelectedTee(nextName);
   };
   const removeSelectedTee = () => {
     if (teeSets.length <= 1 || !activeTee) return;
@@ -162,8 +171,12 @@ export default function AdminHoles() {
       const extracted = await apiExtractScorecard({ eventId: event.id, imageBase64, mimeType: 'image/jpeg' });
       if (extracted.holes.length !== 18 || extracted.teeSets.length === 0) throw new Error('The scan did not find a complete 18-hole scorecard. Try a brighter, straight-on photo.');
       setDraft(extracted.holes.sort((a, b) => a.hole - b.hole).map((hole) => ({ hole: hole.hole, par: String(hole.par) })));
-      setTeeSets(cloneTeeSets(extracted.teeSets));
-      setSelectedTee(extracted.teeSets[0].name);
+      const reviewedTees = extracted.teeSets.map((tee) => ({
+        ...tee,
+        color: TEE_PRESETS.find((preset) => preset.name.toLowerCase() === tee.name.toLowerCase())?.name ?? 'White',
+      }));
+      setTeeSets(cloneTeeSets(reviewedTees));
+      setSelectedTee(reviewedTees[0].name);
       setError(extracted.notes.length ? `Review the highlighted scan results: ${extracted.notes.join(' ')}` : 'Scan complete — review every par and tee yardage, then save.');
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'The scorecard scan could not be completed.'); }
     finally { setScanning(false); setScanStatus(''); }
@@ -208,6 +221,7 @@ export default function AdminHoles() {
       <Text style={styles.teeLabel}>TEE YARDAGES</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.teeChips}>{teeSets.map((tee) => <Pressable key={tee.name} accessibilityRole="button" accessibilityState={{ selected: tee.name === activeTee?.name }} onPress={() => setSelectedTee(tee.name)} style={[styles.teeChip, tee.name === activeTee?.name && styles.teeChipActive]}><Text style={[styles.teeChipText, tee.name === activeTee?.name && styles.teeChipTextActive]}>{tee.name.toUpperCase()}</Text></Pressable>)}</ScrollView>
       <View style={styles.addTeeRow}><TextInput value={newTee} onChangeText={setNewTee} placeholder="Add tee color" placeholderTextColor="rgba(255,255,255,0.36)" style={styles.teeInput} /><Pressable onPress={addTee} style={styles.addTeeButton}><Text style={styles.addTeeText}>ADD</Text></Pressable>{teeSets.length > 1 ? <Pressable onPress={removeSelectedTee} style={styles.removeTeeButton}><Text style={styles.removeTeeText}>REMOVE {activeTee?.name?.toUpperCase()}</Text></Pressable> : null}</View>
+      {activeTee ? <View style={styles.teeEditor}><TextInput value={activeTee.name} onChangeText={(name) => patchActiveTee({ name })} style={styles.teeInput} placeholder="Tee name" placeholderTextColor="rgba(255,255,255,0.36)" selectionColor={colors.highlight} /><Text style={styles.colorLabel}>TEE COLOR</Text><View style={styles.colorChoices}>{TEE_PRESETS.map((preset) => <Pressable key={preset.name} accessibilityRole="button" accessibilityLabel={`Set ${activeTee.name} color to ${preset.name}`} accessibilityState={{ selected: activeTee.color.toLowerCase() === preset.name.toLowerCase() }} onPress={() => patchActiveTee({ color: preset.name })} style={[styles.colorChoice, activeTee.color.toLowerCase() === preset.name.toLowerCase() && styles.colorChoiceActive]}><View style={[styles.colorSwatch, { backgroundColor: preset.swatch }]} /><Text style={styles.colorChoiceText}>{preset.name}</Text></Pressable>)}</View></View> : null}
       <Text style={styles.presetHint}>Quick add: {TEE_PRESETS.filter((preset) => !teeSets.some((tee) => tee.name.toLowerCase() === preset.name.toLowerCase())).map((preset) => preset.name).join(' · ') || 'all common tees added'}</Text>
       <View style={styles.headerRow}><Text style={styles.headerHole}>HOLE</Text><Text style={styles.headerPar}>PAR</Text><Text style={styles.headerYards}>{activeTee?.name?.toUpperCase() || 'YARDS'}</Text></View>
       <View style={styles.table}>{holeRows(front)}{totalRow('OUT', front)}{holeRows(back)}{totalRow('IN', back)}{totalRow('TOTAL', draft)}</View>
@@ -219,7 +233,7 @@ export default function AdminHoles() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#1b2a22' }, muted: { fontFamily: fonts.regular, fontSize: 13, color: 'rgba(255,255,255,0.45)' }, hint: { fontFamily: fonts.regular, fontSize: 12, lineHeight: 18, color: 'rgba(255,255,255,0.55)', marginBottom: 14 }, error: { fontFamily: fonts.medium, fontSize: 12, lineHeight: 17, color: '#ffcf8b', marginTop: 14 },
   scanButton: { backgroundColor: 'rgba(123,255,178,0.13)', borderWidth: 1, borderColor: 'rgba(123,255,178,0.45)', padding: 17, marginBottom: 18 }, scanLabel: { fontFamily: fonts.bold, fontSize: 12, letterSpacing: 1.3, color: colors.highlight }, scanHint: { fontFamily: fonts.regular, fontSize: 11, color: 'rgba(255,255,255,0.57)', marginTop: 5 },
-  teeLabel: { marginTop: 18, fontFamily: fonts.bold, fontSize: 10, letterSpacing: 1.2, color: 'rgba(255,255,255,0.43)' }, teeChips: { gap: 8, paddingVertical: 10 }, teeChip: { minHeight: 38, paddingHorizontal: 14, justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.24)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }, teeChipActive: { backgroundColor: 'rgba(123,255,178,0.17)', borderColor: colors.highlight }, teeChipText: { fontFamily: fonts.bold, fontSize: 10, color: 'rgba(255,255,255,0.58)' }, teeChipTextActive: { color: colors.highlight },
+  teeLabel: { marginTop: 18, fontFamily: fonts.bold, fontSize: 10, letterSpacing: 1.2, color: 'rgba(255,255,255,0.43)' }, teeChips: { gap: 8, paddingVertical: 10 }, teeChip: { minHeight: 38, paddingHorizontal: 14, justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.24)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }, teeChipActive: { backgroundColor: 'rgba(123,255,178,0.17)', borderColor: colors.highlight }, teeChipText: { fontFamily: fonts.bold, fontSize: 10, color: 'rgba(255,255,255,0.58)' }, teeChipTextActive: { color: colors.highlight }, teeEditor: { gap: 10, paddingTop: 4, paddingBottom: 8 }, colorLabel: { fontFamily: fonts.bold, fontSize: 9, letterSpacing: 1.1, color: 'rgba(255,255,255,0.43)' }, colorChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 }, colorChoice: { minHeight: 36, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', backgroundColor: 'rgba(0,0,0,0.18)' }, colorChoiceActive: { borderColor: colors.highlight, backgroundColor: 'rgba(123,255,178,0.12)' }, colorSwatch: { width: 12, height: 12, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)' }, colorChoiceText: { fontFamily: fonts.bold, fontSize: 9, color: 'rgba(255,255,255,0.78)' },
   addTeeRow: { flexDirection: 'row', gap: 8, alignItems: 'center' }, teeInput: { flex: 1, height: 42, paddingHorizontal: 12, color: '#fff', backgroundColor: 'rgba(0,0,0,0.22)', fontFamily: fonts.medium, fontSize: 13 }, addTeeButton: { height: 42, paddingHorizontal: 17, justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.12)' }, addTeeText: { fontFamily: fonts.bold, fontSize: 10, color: '#fff' }, removeTeeButton: { minHeight: 42, justifyContent: 'center', paddingHorizontal: 8 }, removeTeeText: { fontFamily: fonts.bold, fontSize: 9, color: '#ffcf8b' }, presetHint: { fontFamily: fonts.regular, fontSize: 10, lineHeight: 15, color: 'rgba(255,255,255,0.34)', marginTop: 8, marginBottom: 16 },
   headerRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingBottom: 8 }, headerHole: { flex: 1, fontFamily: fonts.bold, fontSize: 9, color: 'rgba(255,255,255,0.4)' }, headerPar: { width: 64, textAlign: 'center', fontFamily: fonts.bold, fontSize: 9, color: 'rgba(255,255,255,0.4)' }, headerYards: { width: 80, textAlign: 'center', fontFamily: fonts.bold, fontSize: 9, color: 'rgba(255,255,255,0.4)' },
   table: { backgroundColor: 'rgba(15,17,16,0.4)' }, holeRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 6, gap: 8, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.04)' }, holeNumber: { flex: 1, fontFamily: fonts.serif, fontSize: 22, color: '#fff' }, parInput: { width: 64, height: 40, backgroundColor: 'rgba(0,0,0,0.3)', textAlign: 'center', fontFamily: fonts.bold, fontSize: 15, color: '#fff' }, yardsInput: { width: 80, height: 40, backgroundColor: 'rgba(0,0,0,0.3)', textAlign: 'center', fontFamily: fonts.bold, fontSize: 15, color: '#fff' },
