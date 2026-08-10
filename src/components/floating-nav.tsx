@@ -82,16 +82,35 @@ export function FloatingNav() {
                 return (
                   <Pressable
                     key={tab.key}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      tab.key === 'event'
+                        ? 'Home'
+                        : tab.key === 'messages'
+                          ? 'Messages'
+                          : tab.key === 'leaderboard'
+                            ? 'Leaderboard'
+                            : 'Profile'
+                    }
+                    accessibilityState={{ selected: active }}
                     style={styles.tab}
-                    onPress={() =>
-                      router.navigate(
-                        tab.key === 'messages'
-                          ? '/inbox'
-                          : activeEventId
-                            ? (eventPath(event.id, tab.screen) as never)
-                            : '/event',
-                      )
-                    }>
+                    onPress={() => {
+                      if (tab.key === 'messages') {
+                        router.push('/inbox');
+                        return;
+                      }
+                      if (!activeEventId) {
+                        router.push(
+                          tab.key === 'leaderboard'
+                            ? '/leaderboard'
+                            : tab.key === 'profile'
+                              ? '/profile'
+                              : '/event',
+                        );
+                        return;
+                      }
+                      router.push(eventPath(event.id, tab.screen) as never);
+                    }}>
                     <View style={[styles.tabPill, active && styles.tabPillActive]}>
                       <View style={styles.iconWrap}>
                         <Image
