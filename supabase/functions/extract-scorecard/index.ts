@@ -88,7 +88,24 @@ Extract all visible tee/color columns. Yardages must appear in hole order 1 thro
       ] }],
     }),
   });
-  if (!response.ok) return fail('The scorecard extraction service did not complete. Try a clearer photo or try again shortly.', 502);
+  if (!response.ok) {
+    // Keep the provider body in protected Function Logs, while returning only
+    // the actionable category to the signed-in event admin.
+    const providerDetail = (await response.text()).slice(0, 1_000);
+    console.error(JSON.stringify({
+      event: 'scorecard_openai_rejection',
+      status: response.status,
+      detail: providerDetail,
+    }));
+    const message = response.status === 401 || response.status === 403
+      ? 'OpenAI rejected the configured API key. Check that this is an API-platform key with project access.'
+      : response.status === 429
+        ? 'OpenAI has no available quota for this project. Check API billing or rate limits, then try again.'
+        : response.status === 400
+          ? 'OpenAI rejected this image request. Try a JPG or PNG scorecard photo smaller than 6 MB.'
+          : `The scorecard extraction service was rejected by OpenAI (HTTP ${response.status}). Check Edge Function Logs for the provider detail.`;
+    return fail(message, 502);
+  }
   const raw = textFromResponse(await response.json());
   const json = raw.match(/\{[\s\S]*\}/)?.[0] ?? '';
   try {
