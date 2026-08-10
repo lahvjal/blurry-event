@@ -2,7 +2,7 @@
  * Extracts a course scorecard into a review-only draft.
  *
  * Required secret: OPENAI_API_KEY
- * Optional secret: SCORECARD_OCR_MODEL (defaults to gpt-5.6)
+ * Optional secret: SCORECARD_OCR_MODEL (defaults to gpt-5)
  *
  * The image is supplied as a base64 data URL for this one request. It is not
  * written to Storage or the database. An event admin must review and save the
@@ -80,10 +80,11 @@ Extract all visible tee/color columns. Yardages must appear in hole order 1 thro
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      // Current OpenAI vision documentation uses GPT-5.6 for Responses image
-      // input. Keep this overrideable for an organization-approved model.
-      model: Deno.env.get('SCORECARD_OCR_MODEL') || 'gpt-5.6',
-      temperature: 0,
+      // Keep this on the documented, vision-capable Responses model.  Do not
+      // set sampling controls here: model support differs and a rejected
+      // parameter returns a pre-inference 400 (and therefore zero usage).
+      model: Deno.env.get('SCORECARD_OCR_MODEL') || 'gpt-5',
+      store: false,
       input: [{ role: 'user', content: [
         { type: 'input_text', text: prompt },
         { type: 'input_image', image_url: `data:${mimeType};base64,${base64}`, detail: 'high' },
@@ -104,7 +105,7 @@ Extract all visible tee/color columns. Yardages must appear in hole order 1 thro
       : response.status === 429
         ? 'OpenAI has no available quota for this project. Check API billing or rate limits, then try again.'
         : response.status === 400
-          ? 'OpenAI rejected this image request. Try a JPG or PNG scorecard photo smaller than 6 MB.'
+          ? 'OpenAI rejected the scorecard scan request before processing it. Check Edge Function Logs for the exact provider reason.'
           : `The scorecard extraction service was rejected by OpenAI (HTTP ${response.status}). Check Edge Function Logs for the provider detail.`;
     return fail(message, 502);
   }
