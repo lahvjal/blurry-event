@@ -590,7 +590,22 @@ export async function apiExtractScorecard(input: {
   const { data, error } = await supabase.functions.invoke<ExtractedScorecard>('extract-scorecard', {
     body: input,
   });
-  if (error) throw new Error(error.message || 'The scorecard scan could not be completed.');
+  if (error) {
+    // functions.invoke intentionally uses a generic HTTP error. Preserve the
+    // function's safe, user-facing reason (never the provider response/key) so
+    // an admin can correct a blurry image or access issue without a console.
+    let detail = '';
+    const response = (error as { context?: unknown }).context;
+    if (response && typeof (response as Response).json === 'function') {
+      try {
+        const payload = await (response as Response).json() as { error?: unknown };
+        detail = typeof payload.error === 'string' ? payload.error : '';
+      } catch {
+        // Fall back to the SDK message when the gateway response has no JSON.
+      }
+    }
+    throw new Error(detail || error.message || 'The scorecard scan could not be completed.');
+  }
   if (!data || !Array.isArray(data.holes) || !Array.isArray(data.teeSets)) {
     throw new Error('The scorecard scan returned an incomplete result.');
   }
