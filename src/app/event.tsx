@@ -380,6 +380,22 @@ function HomeWithoutFocusedEvent({ unavailable = false }: { unavailable?: boolea
             <Text style={styles.emptyHomePrimaryText}>REDEEM AN EVENT INVITE</Text>
           </Pressable>
         )}
+        {!unavailable && accountAccess?.profile?.isClubAdmin ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: offline }}
+            accessibilityHint={
+              offline ? 'Creating an event requires a connection.' : undefined
+            }
+            disabled={offline}
+            style={[
+              styles.emptyHomeSecondary,
+              offline && styles.emptyHomeActionDisabled,
+            ]}
+            onPress={() => router.push('/admin-events')}>
+            <Text style={styles.emptyHomeSecondaryText}>CREATE OR MANAGE EVENTS</Text>
+          </Pressable>
+        ) : null}
         <Pressable
           accessibilityRole="button"
           style={styles.emptyHomeSecondary}
