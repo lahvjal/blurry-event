@@ -24,6 +24,8 @@ React / Expo Web PWA
 | Cached conversations/messages | `src/lib/offline/chat-cache.ts` |
 | Browser offline read signal | `src/lib/offline/network.ts` |
 | Queue, retries, connection state | `src/lib/sync.ts` |
+| QR scorecard receipt contract | `src/lib/scorecard-receipt.ts` |
+| Collected-card receipts | `src/lib/offline/scorecard-collection.ts` |
 | Service worker + manifest wiring | `src/lib/offline/pwa.web.ts`, `public/` |
 | Status UI and Sync Now | `src/components/sync-status.tsx` |
 
@@ -54,6 +56,31 @@ doomed Supabase or Realtime request.
 
 Nothing in steps 1–2 touches the network, so moving between holes never waits.
 Step 3 failing is normal and invisible apart from the status line.
+
+## End-of-round score collection
+
+The installed PWA has a proximity handoff that does not depend on Bluetooth,
+Web Bluetooth, AirDrop, or an internet connection:
+
+1. A completed card can open **Show Score QR**. The QR contains the exact event,
+   entrant, 18 scores, source revision, and a checksum.
+2. An event admin opens **Offline Score Collection** and scans each missing
+   team's code with the PWA camera.
+3. The collector verifies the checksum, event, format, and entrant against its
+   prepared roster. It then commits all 18 score mutations to IndexedDB as one
+   batch and updates the local tally immediately.
+4. When any connection returns, the ordinary idempotent score sync sends those
+   mutations through the same authenticated Supabase path as scores entered on
+   the collecting device.
+
+The collection receipt is kept under the exact account and event, so rescanning
+the same card is harmless and an older card cannot replace a newer collected
+revision. The checksum catches damaged or edited payloads; it is not a digital
+signature, so the roster and admin checks remain the authorization boundary.
+
+QR was chosen because camera scanning works across iPhone and Android installed
+PWAs. Browser Bluetooth support is not consistent enough for an event-day
+critical path, especially across iOS devices.
 
 ## Why nothing is lost
 

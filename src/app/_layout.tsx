@@ -32,7 +32,7 @@ import {
 
 SplashScreen.preventAutoHideAsync();
 
-const PULL_TO_REFRESH_EXCLUDED_PATHNAMES = ['/score-input'];
+const PULL_TO_REFRESH_EXCLUDED_PATHNAMES = ['/score-input', '/collect-scores'];
 
 function AppNavigator() {
   const router = useRouter();

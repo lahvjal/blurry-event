@@ -49,10 +49,20 @@ import {
   saveEventSnapshot,
 } from '@/lib/offline/event-snapshot';
 import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
+import {
+  CollectedScorecard,
+  loadCollectedScorecards,
+  saveCollectedScorecard,
+} from '@/lib/offline/scorecard-collection';
+import {
+  ScorecardReceipt,
+  scorecardSourceRevision,
+} from '@/lib/scorecard-receipt';
 import { releaseStartupNetworkAfterRender, supabase } from '@/lib/supabase';
 import { useOfflinePreparation } from '@/state/offline-preparation';
 import {
   enqueue,
+  enqueueCollectedScorecard,
   loadScoreOverlays,
   setSyncScope,
   subscribeToScoreConflicts,
@@ -308,6 +318,8 @@ type EventState = {
   myScores: Scores;
   currentHoleIndex: number;
   leaderboard: LeaderboardRow[];
+  /** Scorecards physically scanned by this account for the focused event. */
+  collectedScorecards: CollectedScorecard[];
   /** Latest score entries across the field, used for event achievements. */
   scoreUpdates: ScoreUpdate[];
   /**
@@ -335,6 +347,14 @@ type EventState = {
   // Player actions
   /** Resolves only after the score is durably saved on this device. */
   setScore: (holeIndex: number, strokes: number) => Promise<void>;
+  /** Admin-only offline handoff from another entrant's complete score QR. */
+  collectScorecard: (
+    receipt: ScorecardReceipt,
+  ) => Promise<{
+    status: 'accepted' | 'duplicate' | 'stale';
+    entrantName: string;
+    replaced: boolean;
+  }>;
   resetRound: () => void;
   inviteToTeam: (participantId: string) => void;
   /** Renames only the signed-in participant's event-scoped scoring team. */
@@ -470,6 +490,9 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const [invites, setInvites] = useState<TeamInvite[]>([]);
   const [rounds, setRounds] = useState<Record<string, Scores>>(SEED_ROUNDS);
   const [scoreUpdates, setScoreUpdates] = useState<ScoreUpdate[]>([]);
+  const [collectedScorecards, setCollectedScorecards] = useState<
+    CollectedScorecard[]
+  >([]);
   const [myId, setMyId] = useState<string | null>('p1');
   /** rounds.id per entrant key, needed to clear a card. */
   const [roundIds, setRoundIds] = useState<Record<string, string>>({});
@@ -488,6 +511,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     setAnnouncements([]);
     setRounds({});
     setScoreUpdates([]);
+    setCollectedScorecards([]);
     setRoundIds({});
     setMyId(null);
     setIsLive(false);
@@ -531,6 +555,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     setAnnouncements(SEED_ANNOUNCEMENTS);
     setRounds(SEED_ROUNDS);
     setScoreUpdates([]);
+    setCollectedScorecards([]);
     setRoundIds({});
     setMyId('p1');
     setIsLive(false);
@@ -538,6 +563,25 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     setHomeNotice(null);
     setEventLoadError(null);
   }, []);
+
+  useEffect(() => {
+    const accountId = accountAccess?.accountId;
+    if (!accountId || !event.id) {
+      setCollectedScorecards([]);
+      return;
+    }
+    let cancelled = false;
+    void loadCollectedScorecards(accountId, event.id)
+      .then((cards) => {
+        if (!cancelled) setCollectedScorecards(cards);
+      })
+      .catch(() => {
+        if (!cancelled) setCollectedScorecards([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accountAccess?.accountId, event.id]);
 
   const applyBundle = useCallback(async (
     bundle: EventBundle,
@@ -1209,6 +1253,136 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       ]);
     },
     [myEntrantId, isLive, myId, event.id, event.gameStyle, myRoundOwner],
+  );
+
+  const collectScorecard = useCallback<EventState['collectScorecard']>(
+    async (receipt) => {
+      if (!me.isAdmin) {
+        throw new Error('Only an event admin can collect scorecards.');
+      }
+      if (receipt.eventId !== event.id) {
+        throw new Error('That scorecard belongs to a different event.');
+      }
+
+      const teamFormat = isTeamFormat(event.gameStyle);
+      const expectedKind = teamFormat ? 'team' : 'player';
+      if (receipt.entrantKind !== expectedKind) {
+        throw new Error('That scorecard does not match this event format.');
+      }
+      const entrant = teamFormat
+        ? teams.find((team) => team.id === receipt.entrantId)
+        : participants.find((participant) => participant.id === receipt.entrantId);
+      if (!entrant) {
+        throw new Error('That team or player is not on this event roster.');
+      }
+      const entrantName = 'fullName' in entrant ? entrant.fullName : entrant.name;
+      const existingCollection = collectedScorecards.find(
+        (card) => card.receipt.entrantId === receipt.entrantId,
+      );
+      if (existingCollection?.receipt.receiptId === receipt.receiptId) {
+        return { status: 'duplicate', entrantName, replaced: false };
+      }
+      if (
+        existingCollection &&
+        receipt.sourceRevision <= existingCollection.receipt.sourceRevision
+      ) {
+        return { status: 'stale', entrantName, replaced: false };
+      }
+
+      const currentScores = rounds[receipt.entrantId] ?? emptyScores();
+      const sameCard = currentScores.every(
+        (score, index) => score === receipt.scores[index],
+      );
+      const currentRevision = scorecardSourceRevision(
+        receipt.entrantId,
+        scoreUpdates,
+        new Date(0),
+      ).sourceRevision;
+      if (!sameCard && receipt.sourceRevision < currentRevision) {
+        return { status: 'stale', entrantName, replaced: false };
+      }
+
+      const accountId = accountAccess?.accountId;
+      if (!accountId) {
+        throw new Error('The collector account is not available offline.');
+      }
+      if (isLive && (!myId || me.id === 'unlinked')) {
+        throw new Error(
+          'This admin must also be registered for the event before collecting scores.',
+        );
+      }
+
+      // A scan that already matches the locally authoritative card is still
+      // recorded as collected, but does not create 18 redundant queue rows.
+      if (sameCard && currentScores.every((score) => score !== null)) {
+        const saved = await saveCollectedScorecard(accountId, event.id, {
+          receipt,
+          collectedAt: new Date().toISOString(),
+          collectedBy: me.id,
+        });
+        setCollectedScorecards(saved);
+        return { status: 'duplicate', entrantName, replaced: false };
+      }
+
+      const queued = isLive
+        ? await enqueueCollectedScorecard({
+            eventId: event.id,
+            teamId: teamFormat ? receipt.entrantId : null,
+            participantId: teamFormat ? null : receipt.entrantId,
+            scores: receipt.scores,
+            enteredBy: myId!,
+            clientUpdatedAt: receipt.sourceUpdatedAt,
+            clientVersion: receipt.sourceRevision,
+          })
+        : receipt.scores.map((_, index) => ({
+            mutationId: null,
+            hole: index + 1,
+            clientVersion: receipt.sourceRevision + index,
+          }));
+
+      const saved = await saveCollectedScorecard(accountId, event.id, {
+        receipt,
+        collectedAt: new Date().toISOString(),
+        collectedBy: me.id,
+      });
+      setCollectedScorecards(saved);
+      setRounds((current) => ({
+        ...current,
+        [receipt.entrantId]: [...receipt.scores],
+      }));
+      setScoreUpdates((current) => [
+        ...queued.map((revision, index) => ({
+          entrantId: receipt.entrantId,
+          hole: revision.hole,
+          strokes: receipt.scores[index],
+          updatedAt: receipt.sourceUpdatedAt,
+          enteredBy: myId,
+          clientVersion: revision.clientVersion,
+          mutationId: revision.mutationId,
+        })),
+        ...current.filter((update) => update.entrantId !== receipt.entrantId),
+      ]);
+
+      return {
+        status: 'accepted',
+        entrantName,
+        replaced: Boolean(existingCollection),
+      };
+    },
+    [
+      accountAccess?.accountId,
+      collectedScorecards,
+      event.gameStyle,
+      event.id,
+      isLive,
+      me.id,
+      me.isAdmin,
+      myId,
+      participants,
+      rounds,
+      scoreUpdates,
+      teams,
+    ],
   );
 
   // If another device already holds a newer score, the RPC returns that
@@ -2084,6 +2258,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     myScores,
     currentHoleIndex,
     leaderboard,
+    collectedScorecards,
     scoreUpdates,
     isLive,
     snapshotAt,
@@ -2097,6 +2272,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     dismissHomeNotice,
     reportUnavailableEventLink,
     setScore,
+    collectScorecard,
     resetRound,
     inviteToTeam,
     renameMyTeam,

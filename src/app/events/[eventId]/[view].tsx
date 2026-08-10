@@ -9,6 +9,7 @@ import AdminRoster from '@/app/admin-roster';
 import AdminTeams from '@/app/admin-teams';
 import Announcements from '@/app/announcements';
 import CompleteRound from '@/app/complete-round';
+import CollectScores from '@/app/collect-scores';
 import ConversationSettings from '@/app/conversation-settings';
 import CourseMap from '@/app/course-map';
 import CreateGroup from '@/app/create-group';
@@ -38,6 +39,7 @@ const SCREENS: Record<EventScreenName, React.ComponentType> = {
   'admin-teams': AdminTeams,
   announcements: Announcements,
   'complete-round': CompleteRound,
+  'collect-scores': CollectScores,
   'conversation-settings': ConversationSettings,
   'course-map': CourseMap,
   'create-group': CreateGroup,

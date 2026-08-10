@@ -85,6 +85,8 @@ export interface MutationStore {
   outstanding(): Promise<QueuedMutation[]>;
   get(id: string): Promise<QueuedMutation | undefined>;
   put(mutation: QueuedMutation): Promise<void>;
+  /** Commits a complete group of related writes in one durable transaction. */
+  putMany(mutations: QueuedMutation[]): Promise<void>;
   /** Delete only when both the id and immutable generation still match. */
   remove(id: string, generation?: number): Promise<boolean>;
   count(): Promise<number>;

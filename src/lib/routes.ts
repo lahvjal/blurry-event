@@ -7,6 +7,7 @@ export const EVENT_SCREENS = [
   'admin-teams',
   'announcements',
   'complete-round',
+  'collect-scores',
   'conversation-settings',
   'course-map',
   'create-group',

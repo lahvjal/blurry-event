@@ -121,6 +121,25 @@ export default function Admin() {
           </Pressable>
         </View>
 
+        <View style={{ gap: 10 }}>
+          <SectionLabel color={colors.link} size={10}>
+            scoring
+          </SectionLabel>
+          <Pressable
+            style={styles.rosterLink}
+            onPress={() =>
+              router.push(eventPath(event.id, 'collect-scores') as never)
+            }>
+            <View style={{ flex: 1, gap: 5 }}>
+              <Text style={styles.rosterLinkTitle}>OFFLINE SCORE COLLECTION</Text>
+              <Text style={styles.rosterLinkSub}>
+                Scan completed cards and tally the final leaderboard without signal
+              </Text>
+            </View>
+            <Text style={styles.rosterLinkArrow}>›</Text>
+          </Pressable>
+        </View>
+
         {/* Game style */}
         <View style={{ gap: 10 }}>
           <SectionLabel color={colors.link} size={10}>

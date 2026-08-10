@@ -73,6 +73,17 @@ export const mutationStore: MutationStore = {
       await writeAll(next);
     });
   },
+  async putMany(mutations) {
+    await serializeWrite(async () => {
+      const next = [...(await readAll())];
+      mutations.forEach((mutation) => {
+        const index = next.findIndex((row) => row.id === mutation.id);
+        if (index === -1) next.push(mutation);
+        else next[index] = mutation;
+      });
+      await writeAll(next);
+    });
+  },
   async remove(id, generation) {
     return serializeWrite(async () => {
       const rows = await readAll();

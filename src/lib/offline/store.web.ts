@@ -61,6 +61,11 @@ export const mutationStore: MutationStore = {
   async put(mutation) {
     await db.mutations.put(mutation);
   },
+  async putMany(mutations) {
+    await db.transaction('rw', db.mutations, () =>
+      db.mutations.bulkPut(mutations),
+    );
+  },
   async remove(id, generation) {
     return db.transaction('rw', db.mutations, async () => {
       const current = await db.mutations.get(id);

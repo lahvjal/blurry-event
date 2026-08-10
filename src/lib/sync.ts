@@ -467,6 +467,104 @@ export async function enqueue(payload: EnqueuePayload): Promise<void> {
   void flush();
 }
 
+export type CollectedScoreRevision = {
+  mutationId: string;
+  hole: number;
+  clientVersion: number;
+};
+
+/**
+ * Atomically queues a collector's complete 18-hole card. The receipt remains
+ * one user action in the UI, while the existing per-hole RPC retains its
+ * conflict and idempotency behavior on the server.
+ */
+export async function enqueueCollectedScorecard(input: {
+  eventId: string;
+  teamId: string | null;
+  participantId: string | null;
+  scores: readonly number[];
+  enteredBy: string;
+  clientUpdatedAt: string;
+  clientVersion: number;
+}): Promise<CollectedScoreRevision[]> {
+  if (!activeScope) {
+    throw new Error('No signed-in event is selected for offline writes.');
+  }
+  if (input.eventId !== activeScope.eventId) {
+    throw new Error('Refusing to collect a scorecard for a different event.');
+  }
+  if (Number(Boolean(input.teamId)) + Number(Boolean(input.participantId)) !== 1) {
+    throw new Error('A collected scorecard must belong to one team or player.');
+  }
+  if (
+    input.scores.length !== 18 ||
+    !input.scores.every(
+      (score) => Number.isInteger(score) && score >= 1 && score <= 20,
+    )
+  ) {
+    throw new Error('A collected scorecard must contain 18 valid scores.');
+  }
+  if (
+    !Number.isSafeInteger(input.clientVersion) ||
+    input.clientVersion < 0 ||
+    input.clientVersion > Number.MAX_SAFE_INTEGER - input.scores.length
+  ) {
+    throw new Error('The collected scorecard has an invalid revision.');
+  }
+
+  const now = new Date().toISOString();
+  const mutations = input.scores.map((strokes, index): QueuedMutation => {
+    const payload: ScoreMutationPayload = {
+      kind: 'score',
+      eventId: input.eventId,
+      teamId: input.teamId,
+      participantId: input.participantId,
+      hole: index + 1,
+      strokes,
+      enteredBy: input.enteredBy,
+      clientUpdatedAt: input.clientUpdatedAt,
+      clientVersion: input.clientVersion + index,
+    };
+    const dedupeKey = [
+      'scope',
+      encodeURIComponent(activeScope!.userId),
+      encodeURIComponent(activeScope!.eventId),
+      dedupeKeyFor(payload),
+    ].join(':');
+    const id = uuid();
+    return {
+      id,
+      userId: activeScope!.userId,
+      eventId: activeScope!.eventId,
+      dedupeKey,
+      generation: payload.clientVersion,
+      payload,
+      syncStatus: 'pending',
+      attemptCount: 0,
+      lastError: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+  });
+
+  // One IndexedDB transaction means a dead battery cannot leave a card half
+  // collected. Native is retained for source parity even though this is a PWA.
+  await mutationStore.putMany(mutations);
+  lastClientVersion = Math.max(
+    lastClientVersion,
+    input.clientVersion + input.scores.length - 1,
+  );
+  await refreshCount();
+  emit();
+  void flush();
+
+  return mutations.map((mutation) => ({
+    mutationId: mutation.id,
+    hole: (mutation.payload as ScoreMutationPayload).hole,
+    clientVersion: mutation.generation,
+  }));
+}
+
 export type LocalScoreOverlay = {
   mutationId: string;
   entrantId: string;

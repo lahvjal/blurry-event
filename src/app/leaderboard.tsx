@@ -1,17 +1,20 @@
 import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
 import React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FloatingNav } from '@/components/floating-nav';
 import { Badge, Noise } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
+import { eventPath } from '@/lib/routes';
 import { useEvent } from '@/state/event';
 import { GAME_STYLE_LABELS, formatToPar, isTeamFormat } from '@/state/types';
 
 export default function Leaderboard() {
+  const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { activeEventId, event, leaderboard, myEntrantId } = useEvent();
+  const { activeEventId, event, leaderboard, me, myEntrantId } = useEvent();
 
   const anyScored = leaderboard.some((row) => row.thru > 0);
   const teamFormat = activeEventId ? isTeamFormat(event.gameStyle) : false;
@@ -38,6 +41,22 @@ export default function Leaderboard() {
         <Text style={styles.subtitle}>
           {activeEventId ? `${GAME_STYLE_LABELS[event.gameStyle]} · ${leaderboard.length} ${teamFormat ? 'teams' : 'players'}` : 'No event selected'}
         </Text>
+
+        {activeEventId && me.isAdmin ? (
+          <Pressable
+            style={styles.collectLink}
+            onPress={() =>
+              router.push(eventPath(event.id, 'collect-scores') as never)
+            }>
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={styles.collectLinkTitle}>COLLECT OFFLINE SCORES</Text>
+              <Text style={styles.collectLinkDetail}>
+                Scan completed team scorecards on this device
+              </Text>
+            </View>
+            <Text style={styles.collectLinkArrow}>›</Text>
+          </Pressable>
+        ) : null}
 
         <View style={styles.table}>
           <View style={styles.tableHeader}>
@@ -135,6 +154,29 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textMuted,
     marginTop: -8,
+  },
+  collectLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(123,255,178,0.22)',
+    backgroundColor: 'rgba(13,19,16,0.46)',
+  },
+  collectLinkTitle: {
+    fontFamily: fonts.bold,
+    fontSize: 11,
+    color: colors.highlight,
+  },
+  collectLinkDetail: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.45)',
+  },
+  collectLinkArrow: {
+    fontSize: 22,
+    color: 'rgba(255,255,255,0.45)',
   },
   table: {
     backgroundColor: 'rgba(15,17,16,0.35)',
