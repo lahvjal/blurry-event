@@ -37,10 +37,8 @@ const STEP_COPY = {
   ios: [
     'Open this page in Safari.',
     'Tap the More button (•••) in the Safari toolbar, then choose Share.',
-    'On the Share sheet, tap More if Add to Home Screen is not visible.',
-    'Scroll down and choose Add to Home Screen.',
-    'Tap Add, then open Blurry from the new Home Screen icon.',
-    'Sign in again in the installed app if prompted.',
+    'In the Share sheet, scroll down and choose Add to Home Screen.',
+    'Tap Add, then open Blurry from the new Home Screen icon. Sign in again if prompted.',
   ],
   android: [
     'Open the browser menu (⋮).',
@@ -57,9 +55,8 @@ const STEP_COPY = {
 } as const;
 
 const IOS_STEP_VISUALS: Partial<Record<number, number>> = {
-  1: require('@/assets/figma/install-guide/ios-safari-menu.png'),
-  2: require('@/assets/figma/install-guide/ios-share-sheet.png'),
-  3: require('@/assets/figma/install-guide/ios-add-home-screen.png'),
+  1: require('@/assets/figma/install-guide/ios-safari-more-landscape.png'),
+  2: require('@/assets/figma/install-guide/ios-add-home-screen-landscape.png'),
 };
 
 function LoadingGate({ label }: { label: string }) {
@@ -299,8 +296,8 @@ const styles = StyleSheet.create({
   },
   stepVisual: {
     width: '100%',
-    aspectRatio: 0.68,
-    maxHeight: 420,
+    aspectRatio: 16 / 9,
+    maxHeight: 240,
     borderRadius: 18,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.18)',
