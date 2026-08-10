@@ -419,8 +419,7 @@ export default function AdminTeams() {
 
             <View style={styles.actionsRow}>
               <Pressable
-                disabled={scoringLocked}
-                style={[styles.secondaryButton, scoringLocked && { opacity: 0.4 }]}
+                style={styles.secondaryButton}
                 onPress={() => createTeam()}>
                 <Text style={styles.secondaryButtonText}>ADD TEAM</Text>
               </Pressable>
@@ -439,10 +438,10 @@ export default function AdminTeams() {
               const over = members.length > capacity;
               const canDrop =
                 movingId !== null &&
-                !scoringLocked &&
                 !team.memberIds.includes(movingId) &&
                 members.length < capacity &&
-                !team.individualException;
+                !team.individualException &&
+                (!scoringLocked || (!teamOf(movingId) && holesPlayed(team.id) === 0));
               const played = holesPlayed(team.id);
               const teamScheduleGroup = directTeamScheduling
                 ? groupDrafts.find((group) => hasSameMembers(group, team))
@@ -575,7 +574,7 @@ export default function AdminTeams() {
 
                   {(members.length === 1 || team.individualException) && played === 0 ? (
                     <Pressable
-                      disabled={members.length !== 1 || scoringLocked}
+                      disabled={members.length !== 1}
                       onPress={() =>
                         updateTeam(team.id, {
                           individualException: !team.individualException,
@@ -698,8 +697,7 @@ export default function AdminTeams() {
                 const selected = movingId === player.id;
                 return (
                   <Pressable
-                    key={player.id}
-                    disabled={scoringLocked}
+                  key={player.id}
                     onPress={() => setMovingId(selected ? null : player.id)}
                     style={[styles.playerRow, selected && styles.playerRowSelected]}>
                     <Text style={styles.playerName}>{player.fullName}</Text>
@@ -728,7 +726,7 @@ export default function AdminTeams() {
               one-player exception still owns an ordinary team card; it does not
               change this event’s primary format.
               {scoringLocked
-                ? ' Membership and exception status are locked after publication or score entry.'
+                ? ' Existing teams stay locked after publication; admins can still add a new team and place newly added golfers on an unscored team.'
                 : ''}
             </Text>
           </>
