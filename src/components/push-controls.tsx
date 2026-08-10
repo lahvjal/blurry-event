@@ -11,7 +11,7 @@ import {
   pushState,
 } from '@/lib/push';
 
-const PROMPT_SEEN_KEY = 'blurry.push.promptSeen';
+const promptSeenKey = (accountId: string) => `blurry.push.promptSeen.v2:${accountId}`;
 
 /**
  * Shared push state for the Profile toggle and the Messages prompt. Both read
@@ -115,19 +115,22 @@ export function PushToggleRow({ disabled = false }: { disabled?: boolean }) {
  * genuinely once — a banner that keeps coming back reads as a nag, and the
  * Profile toggle is always there for anyone who changes their mind.
  */
-export function PushPrompt() {
+export function PushPrompt({ accountId }: { accountId: string | null }) {
   const { state, enabled, busy, enable } = usePush();
   const [dismissed, setDismissed] = useState(true);
 
   useEffect(() => {
-    AsyncStorage.getItem(PROMPT_SEEN_KEY)
+    if (!accountId) return;
+    AsyncStorage.getItem(promptSeenKey(accountId))
       .then((seen) => setDismissed(seen === 'true'))
       .catch(() => setDismissed(true));
-  }, []);
+  }, [accountId]);
 
   const close = () => {
     setDismissed(true);
-    void AsyncStorage.setItem(PROMPT_SEEN_KEY, 'true').catch(() => {});
+    if (accountId) {
+      void AsyncStorage.setItem(promptSeenKey(accountId), 'true').catch(() => {});
+    }
   };
 
   // Only worth showing where tapping it would actually achieve something.
@@ -162,6 +165,60 @@ export function PushPrompt() {
         ) : null}
         <Pressable onPress={close} hitSlop={10}>
           <Text style={styles.promptDismiss}>{installOnly ? 'GOT IT' : 'NOT NOW'}</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * First-run notification request on the installed app's Home screen. The
+ * browser prompt itself is deliberately behind the explicit ALLOW tap: Safari
+ * rejects permission requests that are not initiated by a user gesture.
+ */
+export function HomeScreenPushPrompt({ accountId }: { accountId: string | null }) {
+  const { state, enabled, busy, enable } = usePush();
+  const [dismissed, setDismissed] = useState(true);
+
+  useEffect(() => {
+    if (!accountId) return;
+    AsyncStorage.getItem(promptSeenKey(accountId))
+      .then((seen) => setDismissed(seen === 'true'))
+      .catch(() => setDismissed(true));
+  }, [accountId]);
+
+  const close = () => {
+    setDismissed(true);
+    if (accountId) {
+      void AsyncStorage.setItem(promptSeenKey(accountId), 'true').catch(() => {});
+    }
+  };
+
+  // OperationalApp only mounts inside a standalone PWA. Avoid a fallback
+  // prompt when the platform cannot ever show the system permission panel.
+  if (!accountId || dismissed || enabled || state !== 'default') return null;
+
+  return (
+    <View accessibilityRole="alert" style={styles.homePrompt}>
+      <View style={{ flex: 1, gap: 6 }}>
+        <Text style={styles.promptTitle}>TURN ON NOTIFICATIONS</Text>
+        <Text style={styles.promptBody}>
+          Get event updates, messages, and tee-time changes on this device.
+        </Text>
+      </View>
+      <View style={styles.promptActions}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Enable notifications"
+          disabled={busy}
+          onPress={async () => {
+            await enable();
+            close();
+          }}>
+          <Text style={styles.promptEnable}>{busy ? 'OPENING…' : 'ALLOW'}</Text>
+        </Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="Not now" onPress={close} hitSlop={10}>
+          <Text style={styles.promptDismiss}>NOT NOW</Text>
         </Pressable>
       </View>
     </View>
@@ -225,6 +282,15 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(123,255,178,0.07)',
     borderWidth: 1,
     borderColor: 'rgba(123,255,178,0.2)',
+  },
+  homePrompt: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    padding: 16,
+    backgroundColor: 'rgba(123,255,178,0.07)',
+    borderWidth: 1,
+    borderColor: 'rgba(123,255,178,0.25)',
   },
   promptTitle: {
     fontFamily: fonts.bold,

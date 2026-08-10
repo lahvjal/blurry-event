@@ -24,6 +24,7 @@ import {
 import { HomeEventSelector } from '@/components/home-event-selector';
 import { OfflineNotice } from '@/components/offline-state';
 import { ParticipantAvatar } from '@/components/participant-avatar';
+import { HomeScreenPushPrompt } from '@/components/push-controls';
 import {
   Badge,
   Chevron,
@@ -322,6 +323,7 @@ function HomeWithoutFocusedEvent() {
             <Text style={styles.greeting}>{greeting()}, {firstName}.</Text>
             <Text style={styles.subGreeting}>LET’S PLAY SOME GOLF.</Text>
           </View>
+          <HomeScreenPushPrompt accountId={accountAccess?.accountId ?? null} />
           {homeNotice ? <HomeNotice message={homeNotice} onDismiss={dismissHomeNotice} /> : null}
           <View style={styles.noEventSelector}>
             <Text style={styles.noEventSelectorLabel}>VIEWING EVENT</Text>
@@ -597,6 +599,8 @@ function FocusedEventHome() {
             </Text>
             <Text style={styles.subGreeting}>LET’S PLAY SOME GOLF.</Text>
           </View>
+
+          <HomeScreenPushPrompt accountId={accountAccess?.accountId ?? null} />
 
           {homeNotice ? (
             <HomeNotice message={homeNotice} onDismiss={dismissHomeNotice} />

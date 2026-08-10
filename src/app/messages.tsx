@@ -116,7 +116,7 @@ export default function Messages() {
         ) : null}
 
         {(accountAccess?.accountId || me.claimed) && !offline ? (
-          <PushPrompt />
+          <PushPrompt accountId={accountAccess?.accountId ?? null} />
         ) : null}
 
         {error ? <Text style={styles.notice}>{error}</Text> : null}
