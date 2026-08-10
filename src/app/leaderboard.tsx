@@ -11,10 +11,10 @@ import { GAME_STYLE_LABELS, formatToPar, isTeamFormat } from '@/state/types';
 
 export default function Leaderboard() {
   const insets = useSafeAreaInsets();
-  const { event, leaderboard, myEntrantId } = useEvent();
+  const { activeEventId, event, leaderboard, myEntrantId } = useEvent();
 
   const anyScored = leaderboard.some((row) => row.thru > 0);
-  const teamFormat = isTeamFormat(event.gameStyle);
+  const teamFormat = activeEventId ? isTeamFormat(event.gameStyle) : false;
   const myPosition = leaderboard.findIndex((row) => row.entrantId === myEntrantId) + 1;
   const myRow = leaderboard.find((row) => row.entrantId === myEntrantId);
 
@@ -31,13 +31,12 @@ export default function Leaderboard() {
         }}
         showsVerticalScrollIndicator={false}>
         <View style={styles.topRow}>
-          <Text style={styles.eventLabel}>{event.name.toUpperCase()}</Text>
-          <Badge label={anyScored ? 'ROUND LIVE' : 'NOT STARTED'} />
+          <Text style={styles.eventLabel}>{activeEventId ? event.name.toUpperCase() : 'NO EVENT SELECTED'}</Text>
+          <Badge label={activeEventId ? (anyScored ? 'ROUND LIVE' : 'NOT STARTED') : 'NO EVENT'} />
         </View>
         <Text style={styles.title}>Leaderboard</Text>
         <Text style={styles.subtitle}>
-          {GAME_STYLE_LABELS[event.gameStyle]} · {leaderboard.length}{' '}
-          {teamFormat ? 'teams' : 'players'}
+          {activeEventId ? `${GAME_STYLE_LABELS[event.gameStyle]} · ${leaderboard.length} ${teamFormat ? 'teams' : 'players'}` : 'No event selected'}
         </Text>
 
         <View style={styles.table}>
@@ -87,7 +86,7 @@ export default function Leaderboard() {
           </Text>
         ) : (
           <Text style={styles.footerMuted}>
-            Scores appear here as groups finish each hole.
+            {activeEventId ? 'Scores appear here as groups finish each hole.' : 'Choose or join an event to see its leaderboard.'}
           </Text>
         )}
       </ScrollView>

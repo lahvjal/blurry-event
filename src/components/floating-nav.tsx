@@ -66,8 +66,8 @@ export function FloatingNav() {
 
       <View
         style={[styles.wrapper, { paddingBottom: bottomInset }]}
-        pointerEvents="box-none">
-        <View style={styles.barFrame}>
+        pointerEvents="auto">
+        <View style={styles.barFrame} pointerEvents="auto">
           <LiquidGlassSurface
             style={styles.bar}
             tintColor={FLOATING_GLASS_TINT}
@@ -82,16 +82,35 @@ export function FloatingNav() {
                 return (
                   <Pressable
                     key={tab.key}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      tab.key === 'event'
+                        ? 'Home'
+                        : tab.key === 'messages'
+                          ? 'Messages'
+                          : tab.key === 'leaderboard'
+                            ? 'Leaderboard'
+                            : 'Profile'
+                    }
+                    accessibilityState={{ selected: active }}
                     style={styles.tab}
-                    onPress={() =>
-                      router.navigate(
-                        tab.key === 'messages'
-                          ? '/inbox'
-                          : activeEventId
-                            ? (eventPath(event.id, tab.screen) as never)
-                            : '/event',
-                      )
-                    }>
+                    onPress={() => {
+                      if (tab.key === 'messages') {
+                        router.push('/inbox');
+                        return;
+                      }
+                      if (!activeEventId) {
+                        router.push(
+                          tab.key === 'leaderboard'
+                            ? '/leaderboard'
+                            : tab.key === 'profile'
+                              ? '/profile'
+                              : '/event',
+                        );
+                        return;
+                      }
+                      router.push(eventPath(event.id, tab.screen) as never);
+                    }}>
                     <View style={[styles.tabPill, active && styles.tabPillActive]}>
                       <View style={styles.iconWrap}>
                         <Image
@@ -128,12 +147,17 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
+    // On iOS WebKit, a scrolling Home layer can otherwise win hit-testing over
+    // an absolutely positioned nav even when the bar is painted on top.
+    zIndex: 100,
+    elevation: 100,
   },
   wrapper: {
     position: 'relative',
     paddingHorizontal: 13,
     paddingTop: 5,
     paddingBottom: 20,
+    zIndex: 101,
   },
   barFrame: {
     height: BAR_HEIGHT,

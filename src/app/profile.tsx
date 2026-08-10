@@ -31,6 +31,7 @@ export default function Profile() {
   const insets = useSafeAreaInsets();
   const {
     accountAccess,
+    activeEventId,
     me,
     myTeam,
     myPlayingGroup,
@@ -168,17 +169,17 @@ export default function Profile() {
               value={me.handicap === null ? '—' : String(me.handicap)}
             />
           )}
-          <InfoRow label="EVENT" value={event.name} />
-          <InfoRow label="FORMAT" value={GAME_STYLE_LABELS[event.gameStyle]} />
-          <InfoRow label="TEAM" value={myTeam?.name ?? 'Unassigned'} />
+          <InfoRow label="EVENT" value={activeEventId ? event.name : 'No event selected'} />
+          <InfoRow label="FORMAT" value={activeEventId ? GAME_STYLE_LABELS[event.gameStyle] : '—'} />
+          <InfoRow label="TEAM" value={activeEventId ? (myTeam?.name ?? 'Unassigned') : '—'} />
           <InfoRow
-            label={event.startFormat === 'shotgun' ? 'SHOTGUN START' : 'TEE TIME'}
-            value={myPlayingGroup?.teeTime ?? '—'}
+            label={activeEventId && event.startFormat === 'shotgun' ? 'SHOTGUN START' : 'TEE TIME'}
+            value={activeEventId ? (myPlayingGroup?.teeTime ?? '—') : '—'}
           />
           <InfoRow
             label="STARTING HOLE"
             value={
-              myPlayingGroup?.startingHole
+              activeEventId && myPlayingGroup?.startingHole
                 ? String(myPlayingGroup.startingHole)
                 : '—'
             }

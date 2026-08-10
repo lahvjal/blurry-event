@@ -80,6 +80,29 @@ import {
   teamSize,
 } from '@/state/types';
 
+/**
+ * A captive or weak connection can leave a Supabase request pending forever.
+ * Home must always leave its opening state so the player can retry or use a
+ * saved local event instead of being trapped on the loading spinner.
+ */
+function withEventLoadTimeout<T>(operation: Promise<T>, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out. Check your connection and try again.`));
+    }, 15_000);
+    operation.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 const PARS = [5, 4, 3, 3, 5, 5, 4, 4, 3, 4, 5, 3, 4, 4, 3, 3, 5, 5];
 const YARDS = [
   520, 410, 175, 168, 545, 530, 428, 402, 155, 415, 538, 182, 420, 395, 160,
@@ -687,7 +710,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           throw new Error('This account was not included in offline setup.');
         }
       } else {
-        access = await fetchAccountEventAccess(userId);
+        access = await withEventLoadTimeout(
+          fetchAccountEventAccess(userId),
+          'Checking your events',
+        );
         if (!isCurrentLoad()) return activeEventIdRef.current;
         void saveAccountEventAccess(access).catch(() => {});
       }
@@ -780,7 +806,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       if (browserOffline) {
         throw new Error('The prepared event snapshot must be used offline.');
       }
-      const bundle = await fetchEventBundle(eventId);
+      const bundle = await withEventLoadTimeout(
+        fetchEventBundle(eventId),
+        'Opening this event',
+      );
       if (!isCurrentLoad()) return activeEventIdRef.current;
       setActiveEventId(eventId);
       setSyncScope(

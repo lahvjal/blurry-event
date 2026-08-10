@@ -1,4 +1,5 @@
 import { usePathname, useRouter } from 'expo-router';
+import { Image } from 'expo-image';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -35,10 +36,9 @@ function deviceKind(): 'ios' | 'android' | 'other' {
 const STEP_COPY = {
   ios: [
     'Open this page in Safari.',
-    'Tap the Share button in the Safari toolbar.',
-    'Scroll down and choose Add to Home Screen.',
-    'Tap Add, then open Blurry from the new Home Screen icon.',
-    'Sign in again in the installed app if prompted.',
+    'Tap the More button (•••) in the Safari toolbar, then choose Share.',
+    'In the Share sheet, scroll down and choose Add to Home Screen.',
+    'Tap Add, then open Blurry from the new Home Screen icon. Sign in again if prompted.',
   ],
   android: [
     'Open the browser menu (⋮).',
@@ -53,6 +53,11 @@ const STEP_COPY = {
     'Sign in again in the installed app if prompted.',
   ],
 } as const;
+
+const IOS_STEP_VISUALS: Partial<Record<number, number>> = {
+  1: require('@/assets/figma/install-guide/ios-safari-more-landscape.png'),
+  2: require('@/assets/figma/install-guide/ios-add-home-screen-landscape.png'),
+};
 
 function LoadingGate({ label }: { label: string }) {
   return (
@@ -87,14 +92,27 @@ function InstallInstructions() {
             This lets Blurry download everything needed before you reach the course.
           </Text>
           <View style={styles.steps}>
-            {steps.map((step, index) => (
-              <View key={step} style={styles.step}>
-                <View style={styles.stepNumber}>
-                  <Text style={styles.stepNumberText}>{index + 1}</Text>
+            {steps.map((step, index) => {
+              const visual = kind === 'ios' ? IOS_STEP_VISUALS[index] : undefined;
+              return (
+                <View key={step} style={styles.stepGroup}>
+                  <View style={styles.step}>
+                    <View style={styles.stepNumber}>
+                      <Text style={styles.stepNumberText}>{index + 1}</Text>
+                    </View>
+                    <Text style={styles.stepText}>{step}</Text>
+                  </View>
+                  {visual ? (
+                    <Image
+                      source={visual}
+                      contentFit="cover"
+                      accessibilityLabel={`Safari install step ${index + 1}`}
+                      style={styles.stepVisual}
+                    />
+                  ) : null}
                 </View>
-                <Text style={styles.stepText}>{step}</Text>
-              </View>
-            ))}
+              );
+            })}
           </View>
           <View style={styles.note}>
             <Text style={styles.noteText}>
@@ -245,6 +263,9 @@ const styles = StyleSheet.create({
     gap: 12,
     marginTop: 4,
   },
+  stepGroup: {
+    gap: 10,
+  },
   step: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -272,6 +293,15 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     paddingTop: 3,
+  },
+  stepVisual: {
+    width: '100%',
+    aspectRatio: 16 / 9,
+    maxHeight: 240,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: 'rgba(10,14,12,0.55)',
   },
   note: {
     marginTop: 4,
