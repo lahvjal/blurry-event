@@ -13,25 +13,8 @@ export default function Leaderboard() {
   const insets = useSafeAreaInsets();
   const { activeEventId, event, leaderboard, myEntrantId } = useEvent();
 
-  if (!activeEventId) {
-    return (
-      <View style={styles.root}>
-        <LinearGradient colors={['#203329', '#1b2a22']} style={StyleSheet.absoluteFill} />
-        <Noise />
-        <View style={[styles.empty, { paddingTop: insets.top + 20 }]}>
-          <Text style={styles.eventLabel}>NO EVENT SELECTED</Text>
-          <Text style={styles.title}>Leaderboard</Text>
-          <Text style={styles.emptyCopy}>
-            Results will appear here once you join or create an event.
-          </Text>
-        </View>
-        <FloatingNav />
-      </View>
-    );
-  }
-
   const anyScored = leaderboard.some((row) => row.thru > 0);
-  const teamFormat = isTeamFormat(event.gameStyle);
+  const teamFormat = activeEventId ? isTeamFormat(event.gameStyle) : false;
   const myPosition = leaderboard.findIndex((row) => row.entrantId === myEntrantId) + 1;
   const myRow = leaderboard.find((row) => row.entrantId === myEntrantId);
 
@@ -48,13 +31,12 @@ export default function Leaderboard() {
         }}
         showsVerticalScrollIndicator={false}>
         <View style={styles.topRow}>
-          <Text style={styles.eventLabel}>{event.name.toUpperCase()}</Text>
-          <Badge label={anyScored ? 'ROUND LIVE' : 'NOT STARTED'} />
+          <Text style={styles.eventLabel}>{activeEventId ? event.name.toUpperCase() : 'NO EVENT SELECTED'}</Text>
+          <Badge label={activeEventId ? (anyScored ? 'ROUND LIVE' : 'NOT STARTED') : 'NO EVENT'} />
         </View>
         <Text style={styles.title}>Leaderboard</Text>
         <Text style={styles.subtitle}>
-          {GAME_STYLE_LABELS[event.gameStyle]} · {leaderboard.length}{' '}
-          {teamFormat ? 'teams' : 'players'}
+          {activeEventId ? `${GAME_STYLE_LABELS[event.gameStyle]} · ${leaderboard.length} ${teamFormat ? 'teams' : 'players'}` : 'No event selected'}
         </Text>
 
         <View style={styles.table}>
@@ -104,7 +86,7 @@ export default function Leaderboard() {
           </Text>
         ) : (
           <Text style={styles.footerMuted}>
-            Scores appear here as groups finish each hole.
+            {activeEventId ? 'Scores appear here as groups finish each hole.' : 'Choose or join an event to see its leaderboard.'}
           </Text>
         )}
       </ScrollView>
@@ -218,16 +200,5 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: 'rgba(255,255,255,0.4)',
     textAlign: 'center',
-  },
-  empty: {
-    paddingHorizontal: 20,
-    gap: 16,
-  },
-  emptyCopy: {
-    fontFamily: fonts.regular,
-    fontSize: 14,
-    lineHeight: 21,
-    color: colors.textMuted,
-    maxWidth: 280,
   },
 });

@@ -87,57 +87,6 @@ export default function Profile() {
         .filter((p): p is NonNullable<typeof p> => Boolean(p))
     : [];
 
-  if (!activeEventId) {
-    return (
-      <View style={styles.root}>
-        <LinearGradient colors={['#203329', '#1b2a22']} style={StyleSheet.absoluteFill} />
-        <Noise />
-        <ScrollView
-          contentContainerStyle={{
-            paddingTop: insets.top + 20,
-            paddingHorizontal: 20,
-            paddingBottom: 130,
-            gap: 20,
-          }}
-          showsVerticalScrollIndicator={false}>
-          <View style={styles.identity}>
-            <ParticipantAvatar participant={me} size={96} />
-            <Text style={styles.name}>{me.fullName}</Text>
-            <Badge label={accountAccess?.profile?.isClubAdmin ? 'CLUB ADMIN' : 'MEMBER'} />
-          </View>
-          <View style={styles.card}>
-            <InfoRow label="EVENT" value="No event selected" />
-            <InfoRow label="STATUS" value="Your account is ready" />
-          </View>
-          {accountAccess?.profile?.isClubAdmin ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Create or manage events"
-              style={styles.editButton}
-              onPress={() => router.push('/admin-events')}>
-              <Text style={styles.editButtonText}>CREATE OR MANAGE EVENTS</Text>
-            </Pressable>
-          ) : null}
-          <PushToggleRow disabled={offline} />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ disabled: offline }}
-            disabled={offline}
-            style={[styles.signOut, offline && styles.disabledControl]}
-            onPress={async () => {
-              await clearPushForSignOut();
-              await clearBadge();
-              await signOutAndClearOfflineAccess();
-              router.replace('/');
-            }}>
-            <Text style={styles.signOutText}>SIGN OUT</Text>
-          </Pressable>
-        </ScrollView>
-        <FloatingNav />
-      </View>
-    );
-  }
-
   return (
     <View style={styles.root}>
       <LinearGradient colors={['#203329', '#1b2a22']} style={StyleSheet.absoluteFill} />
@@ -220,17 +169,17 @@ export default function Profile() {
               value={me.handicap === null ? '—' : String(me.handicap)}
             />
           )}
-          <InfoRow label="EVENT" value={event.name} />
-          <InfoRow label="FORMAT" value={GAME_STYLE_LABELS[event.gameStyle]} />
-          <InfoRow label="TEAM" value={myTeam?.name ?? 'Unassigned'} />
+          <InfoRow label="EVENT" value={activeEventId ? event.name : 'No event selected'} />
+          <InfoRow label="FORMAT" value={activeEventId ? GAME_STYLE_LABELS[event.gameStyle] : '—'} />
+          <InfoRow label="TEAM" value={activeEventId ? (myTeam?.name ?? 'Unassigned') : '—'} />
           <InfoRow
-            label={event.startFormat === 'shotgun' ? 'SHOTGUN START' : 'TEE TIME'}
-            value={myPlayingGroup?.teeTime ?? '—'}
+            label={activeEventId && event.startFormat === 'shotgun' ? 'SHOTGUN START' : 'TEE TIME'}
+            value={activeEventId ? (myPlayingGroup?.teeTime ?? '—') : '—'}
           />
           <InfoRow
             label="STARTING HOLE"
             value={
-              myPlayingGroup?.startingHole
+              activeEventId && myPlayingGroup?.startingHole
                 ? String(myPlayingGroup.startingHole)
                 : '—'
             }

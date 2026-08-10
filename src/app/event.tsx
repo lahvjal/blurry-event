@@ -33,11 +33,8 @@ import {
   SectionLabel,
 } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
-import { clearBadge } from '@/lib/badge';
-import { signOutAndClearOfflineAccess } from '@/lib/auth';
 import { openTeamConversation } from '@/lib/chat';
 import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
-import { clearPushForSignOut } from '@/lib/push';
 import { eventPath } from '@/lib/routes';
 import { useEvent } from '@/state/event';
 import { useNotificationUnread } from '@/state/notification-center';
@@ -312,92 +309,61 @@ function HomeWithoutFocusedEvent() {
   const firstName =
     accountAccess?.profile?.displayName?.trim().split(/\s+/)[0] ?? 'there';
 
-  const signOut = async () => {
-    await clearPushForSignOut();
-    await clearBadge();
-    await signOutAndClearOfflineAccess();
-    router.replace('/');
-  };
-
   return (
     <View style={styles.root}>
       <LinearGradient colors={['#203329', '#1b2a22']} style={StyleSheet.absoluteFill} />
       <Noise />
       <ScrollView
         contentContainerStyle={[
-          styles.emptyHomeContent,
-          { paddingTop: insets.top + HOME_HERO_TOP_OFFSET, paddingBottom: 130 },
+          { paddingTop: insets.top + HOME_HERO_TOP_OFFSET, paddingHorizontal: 10, paddingBottom: 130, gap: 40 },
         ]}>
-        <Text style={styles.greeting}>
-          {greeting()}, {firstName}.
-        </Text>
-        <Text style={styles.subGreeting}>LET’S PLAY SOME GOLF.</Text>
-        <Text style={styles.emptyHomeTitle}>No event selected</Text>
-        <Text style={styles.emptyHomeBody}>
-          Redeem an invite code or choose an event to see its details here.
-        </Text>
-
-        {homeNotice ? (
-          <HomeNotice message={homeNotice} onDismiss={dismissHomeNotice} />
-        ) : null}
-
-        {offline ? (
-          <OfflineNotice
-            compact
-            message="Refreshing events, redeeming an invite, and signing out require a connection. Reconnect and try again."
-          />
-        ) : null}
-
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ disabled: offline }}
-          accessibilityHint={
-            offline ? 'Redeeming an invite requires a connection.' : undefined
-          }
-          disabled={offline}
-          style={[
-            styles.emptyHomePrimary,
-            offline && styles.emptyHomeActionDisabled,
-          ]}
-          onPress={() => router.push('/invite')}>
-          <Text style={styles.emptyHomePrimaryText}>REDEEM AN EVENT INVITE</Text>
-        </Pressable>
-        {accountAccess?.profile?.isClubAdmin ? (
+        <View style={styles.primary}>
+          <View style={styles.greetingBlock}>
+            <Text style={styles.greeting}>{greeting()}, {firstName}.</Text>
+            <Text style={styles.subGreeting}>LET’S PLAY SOME GOLF.</Text>
+          </View>
+          {homeNotice ? <HomeNotice message={homeNotice} onDismiss={dismissHomeNotice} /> : null}
+          <View style={styles.noEventSelector}>
+            <Text style={styles.noEventSelectorLabel}>VIEWING EVENT</Text>
+            <Text style={styles.noEventSelectorTitle}>NO EVENT SELECTED</Text>
+          </View>
+          <GradientPanel colors={['#1d2922', '#161e1a']} style={[styles.eventCard, styles.noEventDimmed]}>
+            <View style={styles.eventTop}>
+              <View style={styles.eventTitleBlock}>
+                <Text style={styles.eventTitle}>No event selected</Text>
+                <Text style={styles.eventCourse}>Choose or create an event to begin</Text>
+              </View>
+              <Text style={styles.teamTag}>—</Text>
+            </View>
+            <View style={styles.statusWrap}><Badge label="NO EVENT" color={colors.textMuted} background={colors.bgElevated} style={styles.statusBadge} /></View>
+            <View style={styles.timeMetric}><Text style={styles.timeClock}>—</Text></View>
+            <Text style={styles.metricCaption}>EVENT DETAILS WILL APPEAR HERE</Text>
+            <View style={[styles.roundAction, styles.disabledAction]}>
+              <View style={styles.roundActionLeft}><Image source={roundFlag} style={styles.roundFlag} contentFit="contain" /><Text style={styles.roundActionText}>START ROUND</Text></View>
+              <Chevron color="#ffffff" />
+            </View>
+          </GradientPanel>
           <Pressable
             accessibilityRole="button"
             accessibilityState={{ disabled: offline }}
-            accessibilityHint={
-              offline ? 'Creating an event requires a connection.' : undefined
-            }
             disabled={offline}
-            style={[
-              styles.emptyHomeSecondary,
-              offline && styles.emptyHomeActionDisabled,
-            ]}
-            onPress={() => router.push('/admin-events')}>
-            <Text style={styles.emptyHomeSecondaryText}>CREATE OR MANAGE EVENTS</Text>
+            style={[styles.emptyHomePrimary, offline && styles.emptyHomeActionDisabled]}
+            onPress={() => router.push(accountAccess?.profile?.isClubAdmin ? '/admin-events' : '/invite')}>
+            <Text style={styles.emptyHomePrimaryText}>{accountAccess?.profile?.isClubAdmin ? 'CREATE OR MANAGE EVENTS' : 'REDEEM AN EVENT INVITE'}</Text>
           </Pressable>
-        ) : null}
-        <Pressable
-          accessibilityRole="button"
-          style={styles.emptyHomeSecondary}
-          onPress={() => router.push('/inbox')}>
-          <Text style={styles.emptyHomeSecondaryText}>VIEW MESSAGES</Text>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ disabled: offline }}
-          accessibilityHint={
-            offline ? 'Reconnect before signing out of this device.' : undefined
-          }
-          disabled={offline}
-          style={[
-            styles.emptyHomeSecondary,
-            offline && styles.emptyHomeActionDisabled,
-          ]}
-          onPress={() => void signOut()}>
-          <Text style={styles.emptyHomeSecondaryText}>SIGN OUT</Text>
-        </Pressable>
+        </View>
+        <View style={[styles.section, styles.noEventDimmed]}>
+          <View style={styles.sectionHeader}><SectionLabel>course</SectionLabel><LinkAction label="view map" onPress={() => {}} /></View>
+          <View style={styles.coursePreview}><Text style={styles.courseCaptionText}>NO COURSE SELECTED</Text></View>
+        </View>
+        <View style={[styles.section, styles.noEventDimmed]}>
+          <View style={styles.sectionHeader}><SectionLabel>my team</SectionLabel><LinkAction label="open" onPress={() => {}} /></View>
+          <View style={styles.myTeamCard}><View style={styles.myTeamCardCopy}><Text style={styles.myTeamCardTitle}>No team selected</Text><Text style={styles.myTeamCardDetail}>Join an event to see your team.</Text></View><Chevron color={colors.highlight} /></View>
+        </View>
+        <View style={[styles.section, styles.noEventDimmed]}>
+          <View style={styles.sectionHeader}><SectionLabel>event standings</SectionLabel><LinkAction label="view all" onPress={() => router.push('/leaderboard')} /></View>
+          <View style={styles.standings}><Text style={styles.metricCaption}>NO LEADERBOARD YET</Text></View>
+        </View>
       </ScrollView>
       <HomeHeader
         stuck={false}
@@ -1096,6 +1062,31 @@ const styles = StyleSheet.create({
   eventCardEnded: {
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
+  },
+  noEventDimmed: {
+    opacity: 0.42,
+  },
+  noEventSelector: {
+    gap: 7,
+    paddingVertical: 6,
+    paddingHorizontal: 2,
+  },
+  noEventSelectorLabel: {
+    fontFamily: fonts.bold,
+    fontSize: 9,
+    letterSpacing: 1.35,
+    color: 'rgba(255,255,255,0.46)',
+  },
+  noEventSelectorTitle: {
+    minHeight: 62,
+    paddingVertical: 21,
+    paddingHorizontal: 15,
+    borderWidth: 1,
+    borderColor: '#2d3832',
+    backgroundColor: 'rgba(20,29,24,0.92)',
+    fontFamily: fonts.bold,
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.48)',
   },
   eventTop: {
     minHeight: 58,
