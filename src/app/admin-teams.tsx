@@ -46,6 +46,36 @@ function averageHandicap(members: Participant[]): string {
   return mean.toFixed(1);
 }
 
+function hasSameMembers(group: PlayingGroup, team: Team): boolean {
+  return (
+    group.memberIds.length === team.memberIds.length &&
+    team.memberIds.every((memberId) => group.memberIds.includes(memberId))
+  );
+}
+
+/**
+ * A complete four-person scramble side is already a physical foursome. Keep
+ * the scheduling record behind the scenes, but spare admins from rebuilding
+ * the identical group just to select its shotgun hole.
+ */
+function teamBackedPlayingGroups(teams: Team[], playingGroups: PlayingGroup[]): PlayingGroup[] {
+  return teams
+    .filter((team) => team.memberIds.length > 0)
+    .map((team) => {
+      const existing = playingGroups.find((group) => hasSameMembers(group, team));
+      return (
+        existing ?? {
+          id: `new-playing-group-${team.id}`,
+          name: team.name,
+          teeTime: null,
+          startingHole: null,
+          cart: null,
+          memberIds: [...team.memberIds],
+        }
+      );
+    });
+}
+
 export default function AdminTeams() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
@@ -82,7 +112,18 @@ export default function AdminTeams() {
     'saved' | 'failed' | null
   >(null);
 
-  useEffect(() => setGroupDrafts(playingGroups), [playingGroups]);
+  // Four-person scramble teams are already complete playing groups. Other
+  // formats retain the group workspace because multiple scoring sides can
+  // share a tee time.
+  const directTeamScheduling = event.gameStyle === 'scramble_4';
+  const [slotPickerTeamId, setSlotPickerTeamId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setGroupDrafts(
+      directTeamScheduling ? teamBackedPlayingGroups(teams, playingGroups) : playingGroups,
+    );
+    setSlotPickerTeamId(null);
+  }, [directTeamScheduling, playingGroups, teams]);
 
   const scheduleSlots = useMemo(
     () => startSlots(event.startFormat, event.startTime, event.teeTimes),
@@ -403,6 +444,10 @@ export default function AdminTeams() {
                 members.length < capacity &&
                 !team.individualException;
               const played = holesPlayed(team.id);
+              const teamScheduleGroup = directTeamScheduling
+                ? groupDrafts.find((group) => hasSameMembers(group, team))
+                : undefined;
+              const slotPickerOpen = slotPickerTeamId === team.id;
 
               return (
                 <View
@@ -548,7 +593,79 @@ export default function AdminTeams() {
                     </Pressable>
                   ) : null}
 
-                  {members.length > 0 && members.length <= PLAYING_GROUP_CAPACITY ? (
+                  {directTeamScheduling && teamScheduleGroup ? (
+                    <View style={styles.teamStartAssignment}>
+                      <View style={styles.teamStartHeading}>
+                        <View style={{ flex: 1, gap: 3 }}>
+                          <SectionLabel color={colors.link} size={9}>
+                            start slot
+                          </SectionLabel>
+                          <Text style={styles.hint}>
+                            {teamScheduleGroup.teeTime && teamScheduleGroup.startingHole
+                              ? `${teamScheduleGroup.teeTime} · START HOLE ${teamScheduleGroup.startingHole}`
+                              : 'Choose this team’s tee time and opening hole.'}
+                          </Text>
+                        </View>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`Choose start slot for ${team.name}`}
+                          accessibilityState={{ expanded: slotPickerOpen }}
+                          style={styles.slotSelectButton}
+                          onPress={() =>
+                            setSlotPickerTeamId(slotPickerOpen ? null : team.id)
+                          }>
+                          <Text style={styles.slotSelectButtonText}>
+                            {teamScheduleGroup.teeTime && teamScheduleGroup.startingHole
+                              ? `H${teamScheduleGroup.startingHole}`
+                              : 'SELECT'}
+                          </Text>
+                        </Pressable>
+                      </View>
+                      {slotPickerOpen ? (
+                        <View style={styles.teamSlotPicker}>
+                          {scheduleSlots.map((slot) => {
+                            const active =
+                              teamScheduleGroup.teeTime === slot.teeTime &&
+                              teamScheduleGroup.startingHole === slot.startingHole;
+                            const taken = groupDrafts.some(
+                              (other) =>
+                                other.id !== teamScheduleGroup.id &&
+                                other.teeTime === slot.teeTime &&
+                                other.startingHole === slot.startingHole,
+                            );
+                            return (
+                              <Pressable
+                                key={`${team.id}-${slot.teeTime}-${slot.startingHole}`}
+                                accessibilityRole="radio"
+                                accessibilityLabel={`${slot.teeTime}, starting hole ${slot.startingHole}`}
+                                accessibilityState={{ checked: active, disabled: taken }}
+                                disabled={taken}
+                                onPress={() => {
+                                  updateGroup(teamScheduleGroup.id, {
+                                    teeTime: active ? null : slot.teeTime,
+                                    startingHole: active ? null : slot.startingHole,
+                                  });
+                                  setSlotPickerTeamId(null);
+                                }}
+                                style={[
+                                  styles.slotChip,
+                                  active && styles.slotChipActive,
+                                  taken && styles.slotChipTaken,
+                                ]}>
+                                <Text
+                                  style={[
+                                    styles.slotChipText,
+                                    active && styles.slotChipTextActive,
+                                  ]}>
+                                  {slot.teeTime} · H{slot.startingHole}
+                                </Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      ) : null}
+                    </View>
+                  ) : members.length > 0 && members.length <= PLAYING_GROUP_CAPACITY ? (
                     <Pressable
                       style={styles.inlineAction}
                       onPress={() => setSchedulingIds(team.memberIds)}>
@@ -627,6 +744,40 @@ export default function AdminTeams() {
           </View>
         )}
 
+        {directTeamScheduling ? (
+          <>
+            {teams.length > scheduleSlots.length ? (
+              <View style={styles.scheduleCapacityWarning}>
+                <Text style={styles.scheduleCapacityWarningText}>
+                  {teams.length} teams need start slots, but this shotgun has only{' '}
+                  {scheduleSlots.length} holes. Add a second wave or remove a team before
+                  publishing.
+                </Text>
+              </View>
+            ) : null}
+            <ActionButton
+              label={savingGroups ? 'SAVING TEAM STARTS…' : 'SAVE TEAM STARTS'}
+              height={58}
+              disabled={!groupsDirty || savingGroups}
+              onPress={() => void saveSchedule()}
+            />
+            {scheduleSaveState ? (
+              <Text
+                accessibilityLiveRegion="polite"
+                style={[
+                  styles.saveStatus,
+                  scheduleSaveState === 'failed' && styles.saveStatusError,
+                ]}>
+                {scheduleSaveState === 'saved'
+                  ? 'Team start slots saved.'
+                  : 'Team start slots were not saved. Review the error and try again.'}
+              </Text>
+            ) : null}
+          </>
+        ) : null}
+
+        {!directTeamScheduling ? (
+          <>
         <View style={styles.sectionRule} />
         <View style={styles.sectionHeading}>
           <View style={{ flex: 1, gap: 5 }}>
@@ -836,6 +987,8 @@ export default function AdminTeams() {
               ? 'Playing groups and start slots saved together.'
               : 'Schedule was not saved. Review the error and try again.'}
           </Text>
+        ) : null}
+          </>
         ) : null}
       </ScrollView>
     </View>
@@ -1117,6 +1270,52 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     fontSize: 9,
     color: colors.link,
+  },
+  teamStartAssignment: {
+    marginTop: 4,
+    paddingTop: 12,
+    gap: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(123,255,178,0.2)',
+  },
+  teamStartHeading: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  slotSelectButton: {
+    minHeight: 44,
+    minWidth: 82,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(123,255,178,0.48)',
+    backgroundColor: 'rgba(123,255,178,0.08)',
+  },
+  slotSelectButtonText: {
+    fontFamily: fonts.bold,
+    fontSize: 10,
+    color: colors.highlight,
+  },
+  teamSlotPicker: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    paddingTop: 2,
+  },
+  scheduleCapacityWarning: {
+    padding: 14,
+    backgroundColor: 'rgba(255, 207, 139, 0.11)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 207, 139, 0.32)',
+  },
+  scheduleCapacityWarningText: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#ffcf8b',
   },
   fieldRow: {
     flexDirection: 'row',
