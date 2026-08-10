@@ -431,7 +431,7 @@ export default function AdminRoster() {
 
   /** Everyone with a real address who has never been sent one. */
   const uninvited = participants.filter(
-    (p) => !isSyntheticEmail(p.authEmail) && !p.inviteSentAt,
+    (p) => p.inviteEnabled && !isSyntheticEmail(p.authEmail) && !p.inviteSentAt,
   );
 
   const exportAll = async () => {
@@ -887,7 +887,9 @@ export default function AdminRoster() {
                           selectionColor={colors.highlight}
                         />
                         <Text style={styles.lockNote}>
-                          Blank means they sign in with their invite code alone.
+                          {isSyntheticEmail(p.authEmail) && p.inviteEnabled
+                            ? 'This legacy code-only invite remains usable if left blank.'
+                            : 'Blank leaves this placeholder unclaimable. Adding an email prepares — but does not send — an invitation.'}
                         </Text>
                       </>
                     )}
@@ -918,7 +920,9 @@ export default function AdminRoster() {
                   <View style={styles.expandedPanel}>
                     <Text style={styles.expandedEmail}>
                       {isSyntheticEmail(p.authEmail)
-                        ? 'No email on file — invite by code'
+                        ? p.inviteEnabled
+                          ? 'No email on file — invite by code'
+                          : 'No email on file — invite disabled until an email is added'
                         : p.authEmail}
                       {p.inviteSentAt
                         ? `  ·  invited ${new Date(p.inviteSentAt).toLocaleDateString()}`
@@ -928,14 +932,18 @@ export default function AdminRoster() {
                       <Pressable style={styles.chip} onPress={() => startEditing(p)}>
                         <Text style={styles.chipText}>EDIT</Text>
                       </Pressable>
-                      <Pressable style={styles.chip} onPress={() => copyInvite(p)}>
-                        <Text style={styles.chipText}>COPY INVITE</Text>
-                      </Pressable>
-                      <Pressable style={styles.chip} onPress={() => shareInvite(p)}>
-                        <Text style={styles.chipText}>SHARE</Text>
-                      </Pressable>
+                      {p.inviteEnabled ? (
+                        <>
+                          <Pressable style={styles.chip} onPress={() => copyInvite(p)}>
+                            <Text style={styles.chipText}>COPY INVITE</Text>
+                          </Pressable>
+                          <Pressable style={styles.chip} onPress={() => shareInvite(p)}>
+                            <Text style={styles.chipText}>SHARE</Text>
+                          </Pressable>
+                        </>
+                      ) : null}
                       {/* Nothing to email a placeholder address. */}
-                      {!isSyntheticEmail(p.authEmail) ? (
+                      {!isSyntheticEmail(p.authEmail) && p.inviteEnabled ? (
                         <Pressable
                           style={styles.chip}
                           disabled={emailing}

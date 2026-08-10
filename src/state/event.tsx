@@ -25,10 +25,12 @@ import {
   apiRegenerateInviteCode,
   apiRemoveParticipant,
   apiResetRound,
+  apiSetTeamLeader,
   apiSetGameStyle,
   apiUpdateEvent,
   apiUpdateScorecard,
   apiUpdateParticipant,
+  apiUpdateLeaderManagedTeammate,
   apiUpdateProfile,
   apiUpdateTeam,
   apiUploadImage,
@@ -152,6 +154,10 @@ function participant(
     authEmail: syntheticEmail(inviteCode),
     claimed,
     inviteSentAt: null,
+    leaderManaged: false,
+    inviteEnabled: true,
+    claimEmailBound: false,
+    identityVersion: 0,
   };
 }
 
@@ -179,6 +185,7 @@ const SEED_TEAMS: Team[] = [
   {
     id: 't1',
     name: 'Team 4',
+    leaderParticipantId: 'p1',
     individualException: false,
     teeTime: '8:40 AM',
     startingHole: 1,
@@ -188,6 +195,7 @@ const SEED_TEAMS: Team[] = [
   {
     id: 't2',
     name: 'The Turn Dogs',
+    leaderParticipantId: 'p5',
     individualException: false,
     teeTime: '8:20 AM',
     startingHole: 1,
@@ -197,6 +205,7 @@ const SEED_TEAMS: Team[] = [
   {
     id: 't3',
     name: 'Sunday Service',
+    leaderParticipantId: 'p9',
     individualException: false,
     teeTime: '8:30 AM',
     startingHole: 1,
@@ -206,6 +215,7 @@ const SEED_TEAMS: Team[] = [
   {
     id: 't4',
     name: 'Green Jackets',
+    leaderParticipantId: 'p13',
     individualException: false,
     teeTime: '8:50 AM',
     startingHole: 1,
@@ -340,6 +350,8 @@ type EventState = {
       Pick<Team, 'name' | 'individualException' | 'teeTime' | 'startingHole' | 'cart'>
     >,
   ) => void;
+  /** Admin-only delegated roster manager; available even after publication. */
+  setTeamLeader: (teamId: string, participantId: string | null) => Promise<boolean>;
   /** Atomically validates and saves every physical foursome and start slot. */
   savePlayingGroups: (groups: PlayingGroup[]) => Promise<boolean>;
 
@@ -368,6 +380,13 @@ type EventState = {
     id: string,
     patch: Partial<Pick<Participant, 'fullName' | 'handicap' | 'isAdmin' | 'authEmail'>>,
   ) => void;
+  /** Assigned leaders may update only their own unclaimed delegated teammates. */
+  updateManagedTeammate: (input: {
+    participantId: string;
+    expectedVersion: number;
+    fullName: string;
+    email: string | null;
+  }) => Promise<Participant>;
   removeParticipant: (id: string) => Promise<void>;
   regenerateInviteCode: (id: string) => Promise<void>;
 };
@@ -385,6 +404,10 @@ const UNLINKED_ME: Participant = {
   authEmail: '',
   claimed: false,
   inviteSentAt: null,
+  leaderManaged: false,
+  inviteEnabled: false,
+  claimEmailBound: false,
+  identityVersion: 0,
 };
 
 /** What a rejected write is explained with when the server didn't say. */
@@ -534,11 +557,21 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       lifecycleStatus: bundle.event.lifecycleStatus ?? 'published',
       startFormat: bundle.event.startFormat ?? 'staggered',
     });
-    setParticipants(bundle.participants);
+    setParticipants(
+      bundle.participants.map((participant) => ({
+        ...participant,
+        // Defaults keep pre-feature offline snapshots readable.
+        leaderManaged: participant.leaderManaged ?? false,
+        inviteEnabled: participant.inviteEnabled ?? true,
+        claimEmailBound: participant.claimEmailBound ?? false,
+        identityVersion: participant.identityVersion ?? 0,
+      })),
+    );
     const compatibleTeams = bundle.teams.map((team) => ({
       ...team,
       // v1/v2 snapshots saved before the explicit one-player exception.
       individualException: team.individualException ?? false,
+      leaderParticipantId: team.leaderParticipantId ?? null,
     }));
     setTeams(compatibleTeams);
     // v1 offline snapshots predate playing groups. Derive the exact legacy
@@ -1469,6 +1502,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
             return {
               ...team,
               memberIds,
+              leaderParticipantId:
+                team.leaderParticipantId && memberIds.includes(team.leaderParticipantId)
+                  ? team.leaderParticipantId
+                  : null,
               individualException:
                 team.individualException && memberIds.length === 1,
             };
@@ -1476,6 +1513,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           return {
             ...team,
             memberIds: without,
+            leaderParticipantId:
+              team.leaderParticipantId && without.includes(team.leaderParticipantId)
+                ? team.leaderParticipantId
+                : null,
             individualException:
               team.individualException && without.length === 1,
           };
@@ -1499,6 +1540,41 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       persistTeamPatch(teamId, patch);
     },
     [persistTeamPatch],
+  );
+
+  const setTeamLeader = useCallback<EventState['setTeamLeader']>(
+    async (teamId, participantId) => {
+      const team = teams.find((candidate) => candidate.id === teamId);
+      if (!team) return false;
+
+      try {
+        const assignedId = isLive
+          ? await apiSetTeamLeader(event.id, teamId, participantId)
+          : participantId;
+        setTeams((current) =>
+          current.map((candidate) =>
+            candidate.id === teamId
+              ? { ...candidate, leaderParticipantId: assignedId }
+              : candidate,
+          ),
+        );
+        if (assignedId) {
+          const delegatedIds = new Set(team.memberIds);
+          setParticipants((current) =>
+            current.map((participant) =>
+              delegatedIds.has(participant.id) && !participant.claimed
+                ? { ...participant, leaderManaged: true }
+                : participant,
+            ),
+          );
+        }
+        return true;
+      } catch (error) {
+        Alert.alert("Couldn't assign the team leader", reasonFor(error));
+        return false;
+      }
+    },
+    [event.id, isLive, teams],
   );
 
   const renameMyTeam = useCallback<EventState['renameMyTeam']>(
@@ -1526,6 +1602,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       const teamName = name?.trim() || `Team ${teams.length + 1}`;
       const blank = {
         name: teamName,
+        leaderParticipantId: null,
         individualException: false,
         teeTime: null,
         startingHole: null,
@@ -1612,6 +1689,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         startingHole: existing?.startingHole ?? null,
         cart: existing?.cart ?? null,
         memberIds,
+        leaderParticipantId:
+          existing?.leaderParticipantId && memberIds.includes(existing.leaderParticipantId)
+            ? existing.leaderParticipantId
+            : null,
       };
     });
 
@@ -1681,6 +1762,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
               authEmail: row.email?.toLowerCase() ?? syntheticEmail(inviteCode),
               claimed: false,
               inviteSentAt: null,
+              leaderManaged: false,
+              inviteEnabled: row.email !== null,
+              claimEmailBound: row.email !== null,
+              identityVersion: 0,
             };
           }),
         ]);
@@ -1757,14 +1842,37 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       const current = participants.find((p) => p.id === id);
       if (!current) return;
 
-      // Clearing the email falls back to the code-derived placeholder so the
-      // participant can still sign in with their invite code alone.
+      const requestedEmail = patch.authEmail?.trim().toLowerCase();
+      const currentEmail = isSyntheticEmail(current.authEmail)
+        ? null
+        : current.authEmail.toLowerCase();
+      const nextRealEmail =
+        patch.authEmail === undefined ? currentEmail : requestedEmail || null;
+      const emailChanged =
+        patch.authEmail !== undefined && nextRealEmail !== currentEmail;
+      const lifecycleNeedsBinding =
+        patch.authEmail !== undefined &&
+        nextRealEmail !== null &&
+        (!current.inviteEnabled || !current.claimEmailBound);
+      const nameChanged =
+        patch.fullName !== undefined && patch.fullName !== current.fullName;
+      const identityChanged = emailChanged || lifecycleNeedsBinding || nameChanged;
+      const inviteCode = emailChanged || lifecycleNeedsBinding
+        ? makeInviteCode()
+        : current.inviteCode;
       const authEmail =
         patch.authEmail === undefined
           ? undefined
-          : patch.authEmail.trim() === ''
-            ? syntheticEmail(current.inviteCode)
-            : patch.authEmail.trim().toLowerCase();
+          : nextRealEmail ?? syntheticEmail(inviteCode);
+      const inviteLifecycle =
+        emailChanged || lifecycleNeedsBinding
+          ? {
+              inviteCode,
+              inviteSentAt: null,
+              inviteEnabled: nextRealEmail !== null,
+              claimEmailBound: nextRealEmail !== null,
+            }
+          : {};
 
       setParticipants((prev) =>
         prev.map((p) =>
@@ -1774,6 +1882,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
                 ...patch,
                 authEmail: authEmail ?? p.authEmail,
                 initials: patch.fullName ? initialsOf(patch.fullName) : p.initials,
+                ...inviteLifecycle,
+                identityVersion: identityChanged
+                  ? p.identityVersion + 1
+                  : p.identityVersion,
               }
             : p,
         ),
@@ -1785,10 +1897,70 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           handicap: patch.handicap,
           isAdmin: patch.isAdmin,
           authEmail,
+          ...inviteLifecycle,
+          identityVersion: identityChanged
+            ? current.identityVersion + 1
+            : undefined,
         }),
       );
     },
     [participants, persist],
+  );
+
+  const updateManagedTeammate = useCallback<EventState['updateManagedTeammate']>(
+    async (input) => {
+      const current = participants.find(
+        (participant) => participant.id === input.participantId,
+      );
+      if (!current) throw new Error('That teammate is no longer on the roster.');
+
+      if (!isLive) {
+        const normalizedEmail = input.email?.trim().toLowerCase() || null;
+        const emailChanged =
+          normalizedEmail !==
+            (isSyntheticEmail(current.authEmail) ? null : current.authEmail.toLowerCase()) ||
+          (normalizedEmail !== null &&
+            (!current.claimEmailBound || !current.inviteEnabled));
+        const inviteCode = emailChanged ? makeInviteCode() : current.inviteCode;
+        const updated: Participant = {
+          ...current,
+          fullName: input.fullName.trim(),
+          initials: initialsOf(input.fullName.trim()),
+          authEmail: emailChanged
+            ? normalizedEmail ?? syntheticEmail(inviteCode)
+            : current.authEmail,
+          inviteCode,
+          inviteSentAt: emailChanged ? null : current.inviteSentAt,
+          inviteEnabled: emailChanged ? normalizedEmail !== null : current.inviteEnabled,
+          claimEmailBound: emailChanged
+            ? normalizedEmail !== null
+            : current.claimEmailBound,
+          identityVersion: current.identityVersion + 1,
+        };
+        setParticipants((rows) =>
+          rows.map((participant) =>
+            participant.id === updated.id ? updated : participant,
+          ),
+        );
+        return updated;
+      }
+
+      const identity = await apiUpdateLeaderManagedTeammate({
+        eventId: event.id,
+        participantId: input.participantId,
+        expectedVersion: input.expectedVersion,
+        fullName: input.fullName,
+        email: input.email,
+      });
+      const updated: Participant = { ...current, ...identity };
+      setParticipants((rows) =>
+        rows.map((participant) =>
+          participant.id === updated.id ? updated : participant,
+        ),
+      );
+      return updated;
+    },
+    [event.id, isLive, participants],
   );
 
   const removeParticipant = useCallback(
@@ -1804,6 +1976,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         prev.map((team) => ({
           ...team,
           memberIds: team.memberIds.filter((memberId) => memberId !== id),
+          leaderParticipantId:
+            team.leaderParticipantId === id ? null : team.leaderParticipantId,
           individualException:
             team.individualException &&
             team.memberIds.filter((memberId) => memberId !== id).length === 1,
@@ -1896,6 +2070,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     postAnnouncement,
     assignToTeam,
     updateTeam,
+    setTeamLeader,
     savePlayingGroups,
     createTeam,
     deleteTeam,
@@ -1904,6 +2079,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     availableExistingAccounts,
     addExistingAccount,
     updateParticipant,
+    updateManagedTeammate,
     removeParticipant,
     regenerateInviteCode,
   };

@@ -59,6 +59,7 @@
     "test:scorecard-scroll": "node --test scripts/scorecard-scroll.test.mjs",
     "test:club-messaging": "node --test scripts/club-messaging.test.mjs",
     "test:club-admin": "node --test scripts/club-admin.test.mjs",
+    "test:leader-placeholders": "node --test scripts/leader-managed-placeholders.test.mjs",
     "test:auth-entry": "node --test scripts/auth-entry.test.mjs",
     "test:my-team-discoverability": "node --test scripts/my-team-discoverability.test.mjs",
     "test:member-team-rename": "node --test scripts/member-team-rename.test.mjs",

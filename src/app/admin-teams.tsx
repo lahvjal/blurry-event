@@ -61,6 +61,7 @@ export default function AdminTeams() {
     teamOf,
     assignToTeam,
     updateTeam,
+    setTeamLeader,
     createTeam,
     deleteTeam,
     autoBalanceTeams,
@@ -73,6 +74,7 @@ export default function AdminTeams() {
   /** One player or a whole scoring side waiting to be placed in a start slot. */
   const [schedulingIds, setSchedulingIds] = useState<string[]>([]);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [leaderSavingId, setLeaderSavingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [groupDrafts, setGroupDrafts] = useState<PlayingGroup[]>(playingGroups);
   const [savingGroups, setSavingGroups] = useState(false);
@@ -460,6 +462,70 @@ export default function AdminTeams() {
                   })}
                   {members.length === 0 ? (
                     <Text style={styles.emptyTeam}>No players yet.</Text>
+                  ) : null}
+
+                  {members.length > 0 ? (
+                    <View style={styles.leaderManager}>
+                      <View style={styles.leaderManagerHeader}>
+                        <View style={{ flex: 1, gap: 4 }}>
+                          <SectionLabel color={colors.link} size={9}>
+                            team leader
+                          </SectionLabel>
+                          <Text style={styles.hint}>
+                            May manage only this team’s unclaimed names and invite emails.
+                            Score entry remains shared by every claimed teammate.
+                          </Text>
+                        </View>
+                        {team.leaderParticipantId ? (
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`Clear leader for ${team.name}`}
+                            disabled={leaderSavingId === team.id}
+                            onPress={async () => {
+                              setLeaderSavingId(team.id);
+                              await setTeamLeader(team.id, null);
+                              setLeaderSavingId(null);
+                            }}>
+                            <Text style={styles.deleteText}>CLEAR</Text>
+                          </Pressable>
+                        ) : null}
+                      </View>
+                      {members.map((member) => {
+                        const selected = team.leaderParticipantId === member.id;
+                        return (
+                          <Pressable
+                            key={`leader-${member.id}`}
+                            accessibilityRole="radio"
+                            accessibilityLabel={`Assign ${member.fullName} as leader of ${team.name}`}
+                            accessibilityState={{
+                              checked: selected,
+                              disabled: leaderSavingId === team.id,
+                            }}
+                            disabled={leaderSavingId === team.id}
+                            onPress={async () => {
+                              if (selected) return;
+                              setLeaderSavingId(team.id);
+                              await setTeamLeader(team.id, member.id);
+                              setLeaderSavingId(null);
+                            }}
+                            style={[
+                              styles.leaderOption,
+                              selected && styles.leaderOptionSelected,
+                            ]}>
+                            <View
+                              style={[
+                                styles.radioDot,
+                                selected && styles.radioDotSelected,
+                              ]}
+                            />
+                            <Text style={styles.playerName}>{member.fullName}</Text>
+                            <Text style={styles.metaText}>
+                              {member.claimed ? 'SIGNED IN' : 'AWAITING CLAIM'}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
                   ) : null}
 
                   {(members.length === 1 || team.individualException) && played === 0 ? (
@@ -918,6 +984,41 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(15,17,16,0.4)',
     padding: 14,
     gap: 8,
+  },
+  leaderManager: {
+    marginTop: 6,
+    paddingTop: 12,
+    gap: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(123,255,178,0.2)',
+  },
+  leaderManagerHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  leaderOption: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 10,
+    backgroundColor: 'rgba(255,255,255,0.035)',
+  },
+  leaderOptionSelected: {
+    backgroundColor: 'rgba(123,255,178,0.1)',
+  },
+  radioDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.4)',
+  },
+  radioDotSelected: {
+    borderWidth: 4,
+    borderColor: colors.highlight,
+    backgroundColor: '#1b2a22',
   },
   groupCard: {
     backgroundColor: 'rgba(15,17,16,0.5)',

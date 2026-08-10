@@ -2,6 +2,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -18,6 +20,8 @@ import { ParticipantAvatar } from '@/components/participant-avatar';
 import { ActionButton, Badge, InfoRow, Noise, SectionLabel } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
 import { useBrowserDefinitelyOffline } from '@/lib/offline/network';
+import { sendInviteEmails } from '@/lib/invite-email';
+import { isSyntheticEmail } from '@/lib/invites';
 import { normalizeTeamName, teamNameError } from '@/lib/team-name';
 import { useEvent } from '@/state/event';
 import { GAME_STYLE_LABELS, isTeamFormat, teamSize } from '@/state/types';
@@ -36,6 +40,8 @@ export default function MyTeam() {
     teamOf,
     inviteToTeam,
     renameMyTeam,
+    refresh,
+    updateManagedTeammate,
   } = useEvent();
   const offline = useBrowserDefinitelyOffline();
 
@@ -43,6 +49,11 @@ export default function MyTeam() {
   const [editingTeamName, setEditingTeamName] = useState(false);
   const [teamNameDraft, setTeamNameDraft] = useState('');
   const [savingTeamName, setSavingTeamName] = useState(false);
+  const [editingParticipantId, setEditingParticipantId] = useState<string | null>(null);
+  const [teammateNameDraft, setTeammateNameDraft] = useState('');
+  const [teammateEmailDraft, setTeammateEmailDraft] = useState('');
+  const [savingTeammate, setSavingTeammate] = useState(false);
+  const [sendingParticipantId, setSendingParticipantId] = useState<string | null>(null);
 
   if (!myTeam && !myPlayingGroup) {
     const teamScoring = isTeamFormat(event.gameStyle);
@@ -88,6 +99,7 @@ export default function MyTeam() {
       !pendingInvites.some((inv) => inv.invitedParticipantId === p.id),
   );
   const renameError = teamNameError(teamNameDraft);
+  const isTeamLeader = myTeam?.leaderParticipantId === me.id;
 
   const startTeamRename = () => {
     if (!myTeam || offline) return;
@@ -104,6 +116,89 @@ export default function MyTeam() {
     } finally {
       setSavingTeamName(false);
     }
+  };
+
+  const startTeammateEdit = (participantId: string) => {
+    const participant = participantById(participantId);
+    if (!participant || offline) return;
+    setEditingParticipantId(participant.id);
+    setTeammateNameDraft(participant.fullName);
+    setTeammateEmailDraft(
+      isSyntheticEmail(participant.authEmail) ? '' : participant.authEmail,
+    );
+  };
+
+  const saveTeammate = async () => {
+    const participant = editingParticipantId
+      ? participantById(editingParticipantId)
+      : undefined;
+    const fullName = teammateNameDraft.trim();
+    const email = teammateEmailDraft.trim().toLowerCase();
+    if (!participant || offline || savingTeammate) return;
+    if (!fullName) {
+      Alert.alert('Name required', 'Enter a name for this teammate.');
+      return;
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      Alert.alert('Email not valid', 'Enter a complete email address or leave it blank.');
+      return;
+    }
+
+    setSavingTeammate(true);
+    try {
+      await updateManagedTeammate({
+        participantId: participant.id,
+        expectedVersion: participant.identityVersion,
+        fullName,
+        email: email || null,
+      });
+      setEditingParticipantId(null);
+    } catch (caught) {
+      Alert.alert(
+        "Couldn't update teammate",
+        caught instanceof Error ? caught.message : 'Refresh and try again.',
+      );
+    } finally {
+      setSavingTeammate(false);
+    }
+  };
+
+  const sendManagedInvite = async (participantId: string) => {
+    if (offline || sendingParticipantId) return;
+    setSendingParticipantId(participantId);
+    try {
+      const result = await sendInviteEmails([participantId]);
+      if (result.sent !== 1) {
+        throw new Error(result.errors[0] ?? 'The invitation was not sent.');
+      }
+      // Delivery has already happened; a refresh failure must not suggest that
+      // the leader should send a duplicate message.
+      await refresh().catch(() => {});
+      Alert.alert('Invite sent', 'The teammate invitation was accepted for delivery.');
+    } catch (caught) {
+      Alert.alert(
+        "Couldn't send invite",
+        caught instanceof Error ? caught.message : 'Reconnect and try again.',
+      );
+    } finally {
+      setSendingParticipantId(null);
+    }
+  };
+
+  const confirmManagedInvite = (participantId: string) => {
+    const participant = participantById(participantId);
+    if (!participant || offline) return;
+    Alert.alert(
+      participant.inviteSentAt ? 'Resend teammate invite?' : 'Send teammate invite?',
+      `Send ${participant.fullName} an invitation at ${participant.authEmail}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: participant.inviteSentAt ? 'Resend' : 'Send',
+          onPress: () => void sendManagedInvite(participant.id),
+        },
+      ],
+    );
   };
 
   return (
@@ -224,10 +319,10 @@ export default function MyTeam() {
             </View>
           ) : null}
 
-          {offline && openSlots > 0 ? (
+          {offline && (openSlots > 0 || isTeamLeader) ? (
             <OfflineNotice
               compact
-              message="Team details remain available, but inviting a player requires a connection. Reconnect and try again."
+              message="Team details and the scorecard remain available. Roster edits and invitations require a connection."
             />
           ) : null}
 
@@ -238,21 +333,143 @@ export default function MyTeam() {
           <View>
             {members.map((member, i) => {
               const isMe = member.id === me.id;
+              const isLeader = myTeam?.leaderParticipantId === member.id;
+              const canManage =
+                isTeamLeader && !member.claimed && member.leaderManaged;
+              const hasRealEmail = !isSyntheticEmail(member.authEmail);
+              const inviteStatus = member.claimed
+                ? 'CLAIMED'
+                : !hasRealEmail || !member.inviteEnabled
+                  ? 'NO EMAIL'
+                  : !member.claimEmailBound
+                    ? 'CONFIRM EMAIL'
+                  : member.inviteSentAt
+                    ? 'INVITE SENT'
+                    : 'INVITE READY';
+              const editing = editingParticipantId === member.id;
+              const canSend =
+                canManage &&
+                hasRealEmail &&
+                member.inviteEnabled &&
+                member.claimEmailBound;
               return (
                 <View
                   key={member.id}
                   style={[
-                    styles.memberRow,
+                    styles.memberBlock,
                     i < members.length - 1 && styles.memberRowBorder,
                   ]}>
-                  <ParticipantAvatar participant={member} size={36} />
-                  <View style={{ flex: 1, gap: 4 }}>
-                    <Text style={styles.memberName}>{member.fullName}</Text>
-                    {isMe ? <Text style={styles.youTag}>YOU</Text> : null}
+                  <View style={styles.memberRow}>
+                    <ParticipantAvatar participant={member} size={36} />
+                    <View style={{ flex: 1, gap: 4 }}>
+                      <Text style={styles.memberName}>{member.fullName}</Text>
+                      <View style={styles.memberTags}>
+                        {isMe ? <Text style={styles.youTag}>YOU</Text> : null}
+                        {isLeader ? <Text style={styles.leaderTag}>TEAM LEADER</Text> : null}
+                        {!member.claimed && member.leaderManaged ? (
+                          <Text style={styles.inviteStatus}>{inviteStatus}</Text>
+                        ) : null}
+                      </View>
+                    </View>
+                    {canManage ? (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Edit ${member.fullName}`}
+                        accessibilityState={{ disabled: offline }}
+                        disabled={offline}
+                        onPress={() => startTeammateEdit(member.id)}
+                        style={styles.memberEditButton}>
+                        <Text style={styles.memberEditText}>{editing ? 'EDITING' : 'EDIT'}</Text>
+                      </Pressable>
+                    ) : (
+                      <Text style={styles.memberHcp}>
+                        {member.handicap === null ? '—' : `${member.handicap} HCP`}
+                      </Text>
+                    )}
                   </View>
-                  <Text style={styles.memberHcp}>
-                    {member.handicap === null ? '—' : `${member.handicap} HCP`}
-                  </Text>
+
+                  {editing ? (
+                    <View style={styles.teammateEditor}>
+                      <Text style={styles.fieldLabel}>NAME</Text>
+                      <TextInput
+                        accessibilityLabel={`${member.fullName} name`}
+                        value={teammateNameDraft}
+                        onChangeText={setTeammateNameDraft}
+                        autoCapitalize="words"
+                        autoCorrect={false}
+                        selectionColor={colors.highlight}
+                        style={styles.teammateInput}
+                      />
+                      <Text style={styles.fieldLabel}>EMAIL · OPTIONAL</Text>
+                      <TextInput
+                        accessibilityLabel={`${member.fullName} invite email`}
+                        value={teammateEmailDraft}
+                        onChangeText={setTeammateEmailDraft}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        keyboardType="email-address"
+                        selectionColor={colors.highlight}
+                        placeholder="name@example.com"
+                        placeholderTextColor="rgba(255,255,255,0.28)"
+                        style={styles.teammateInput}
+                      />
+                      <Text style={styles.editorHelp}>
+                        Saving updates the roster only. It never sends an invitation.
+                      </Text>
+                      <View style={styles.renameActions}>
+                        <Pressable
+                          accessibilityRole="button"
+                          disabled={savingTeammate}
+                          onPress={() => setEditingParticipantId(null)}
+                          style={styles.renameSecondaryAction}>
+                          <Text style={styles.renameSecondaryText}>CANCEL</Text>
+                        </Pressable>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`Save ${member.fullName}`}
+                          accessibilityState={{ disabled: savingTeammate || offline }}
+                          disabled={savingTeammate || offline}
+                          onPress={() => void saveTeammate()}
+                          style={[
+                            styles.renamePrimaryAction,
+                            (savingTeammate || offline) && styles.renameActionDisabled,
+                          ]}>
+                          <Text style={styles.renamePrimaryText}>
+                            {savingTeammate ? 'SAVING…' : 'SAVE'}
+                          </Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  ) : canManage ? (
+                    <View style={styles.managedInviteRow}>
+                      <Text style={styles.managedInviteAddress} numberOfLines={1}>
+                        {hasRealEmail
+                          ? member.claimEmailBound
+                            ? member.authEmail
+                            : 'Edit and save this email before sending'
+                          : 'Add an email to prepare an invite'}
+                      </Text>
+                      {canSend ? (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`${member.inviteSentAt ? 'Resend' : 'Send'} invite to ${member.fullName}`}
+                          accessibilityState={{
+                            disabled: offline || sendingParticipantId !== null,
+                          }}
+                          disabled={offline || sendingParticipantId !== null}
+                          onPress={() => confirmManagedInvite(member.id)}
+                          style={styles.sendInviteButton}>
+                          {sendingParticipantId === member.id ? (
+                            <ActivityIndicator size="small" color="#0d1a12" />
+                          ) : (
+                            <Text style={styles.sendInviteText}>
+                              {member.inviteSentAt ? 'RESEND INVITE' : 'SEND INVITE'}
+                            </Text>
+                          )}
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  ) : null}
                 </View>
               );
             })}
@@ -526,13 +743,16 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: 'rgba(255,255,255,0.45)',
   },
+  memberBlock: {
+    backgroundColor: 'rgba(15,17,16,0.45)',
+  },
   memberRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
     paddingHorizontal: 12,
     paddingVertical: 14,
-    backgroundColor: 'rgba(15,17,16,0.45)',
+    backgroundColor: 'transparent',
   },
   memberRowBorder: {
     borderBottomWidth: 1,
@@ -548,10 +768,92 @@ const styles = StyleSheet.create({
     fontSize: 9,
     color: colors.highlight,
   },
+  memberTags: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+  },
+  leaderTag: {
+    fontFamily: fonts.bold,
+    fontSize: 9,
+    color: '#ffcf8b',
+  },
+  inviteStatus: {
+    fontFamily: fonts.bold,
+    fontSize: 9,
+    color: 'rgba(255,255,255,0.52)',
+  },
+  memberEditButton: {
+    minWidth: 52,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(123,255,178,0.3)',
+  },
+  memberEditText: {
+    fontFamily: fonts.bold,
+    fontSize: 9,
+    color: colors.highlight,
+  },
   memberHcp: {
     fontFamily: fonts.bold,
     fontSize: 10,
     color: 'rgba(255,255,255,0.4)',
+  },
+  teammateEditor: {
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingBottom: 14,
+  },
+  fieldLabel: {
+    fontFamily: fonts.bold,
+    fontSize: 9,
+    color: 'rgba(255,255,255,0.48)',
+  },
+  teammateInput: {
+    minHeight: 48,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(0,0,0,0.28)',
+    borderWidth: 1,
+    borderColor: 'rgba(123,255,178,0.35)',
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: '#ffffff',
+  },
+  editorHelp: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    lineHeight: 16,
+    color: 'rgba(255,255,255,0.48)',
+  },
+  managedInviteRow: {
+    minHeight: 50,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+  },
+  managedInviteAddress: {
+    flex: 1,
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.5)',
+  },
+  sendInviteButton: {
+    minWidth: 108,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    backgroundColor: colors.highlight,
+  },
+  sendInviteText: {
+    fontFamily: fonts.bold,
+    fontSize: 9,
+    color: '#0d1a12',
   },
   inviteRow: {
     flexDirection: 'row',

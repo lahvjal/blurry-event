@@ -223,6 +223,10 @@ export async function fetchEventBundle(eventId: string): Promise<EventBundle> {
       authEmail: p.auth_email,
       claimed: p.claimed_by !== null,
       inviteSentAt: p.invite_sent_at ?? null,
+      leaderManaged: Boolean(p.leader_managed),
+      inviteEnabled: p.invite_enabled !== false,
+      claimEmailBound: Boolean(p.claim_email_bound),
+      identityVersion: Number(p.identity_version ?? 0),
     };
   });
 
@@ -236,6 +240,7 @@ export async function fetchEventBundle(eventId: string): Promise<EventBundle> {
   const teams: Team[] = (teamsRes.data ?? []).map((t: any) => ({
     id: t.id,
     name: t.name,
+    leaderParticipantId: t.leader_participant_id ?? null,
     individualException: Boolean(t.individual_exception),
     teeTime: t.tee_time,
     startingHole: t.starting_hole,
@@ -584,6 +589,21 @@ export async function apiUpdateTeam(
   if (error) throw error;
 }
 
+/** Assigns the event-scoped identity manager without changing team membership. */
+export async function apiSetTeamLeader(
+  eventId: string,
+  teamId: string,
+  leaderParticipantId: string | null,
+): Promise<string | null> {
+  const { data, error } = await supabase.rpc('set_team_leader', {
+    p_event_id: eventId,
+    p_team_id: teamId,
+    p_leader_participant_id: leaderParticipantId,
+  });
+  if (error) throw error;
+  return (data as string | null) ?? null;
+}
+
 /** Member-only rename. The RPC proves event-scoped team membership server-side. */
 export async function apiRenameOwnScoringTeam(
   eventId: string,
@@ -735,6 +755,10 @@ export async function apiAddExistingAccountToEvent(
     authEmail: participant.auth_email,
     claimed: participant.claimed_by !== null,
     inviteSentAt: participant.invite_sent_at ?? null,
+    leaderManaged: Boolean(participant.leader_managed),
+    inviteEnabled: participant.invite_enabled !== false,
+    claimEmailBound: Boolean(participant.claim_email_bound),
+    identityVersion: Number(participant.identity_version ?? 0),
   };
 }
 
@@ -747,13 +771,18 @@ export async function apiAddParticipants(
   // default. Generating the code here keeps it to one insert.
   const payload = rows.map((row) => {
     const inviteCode = makeInviteCode();
+    const email = row.email?.trim().toLowerCase() || null;
     return {
       event_id: eventId,
       full_name: row.fullName,
       handicap: row.handicap,
       is_admin: row.isAdmin,
       invite_code: inviteCode,
-      auth_email: row.email?.trim().toLowerCase() || syntheticEmail(inviteCode),
+      auth_email: email ?? syntheticEmail(inviteCode),
+      // No-email placeholders have no usable claim path. Adding an address is
+      // still separate from the later, explicit send-invite action.
+      invite_enabled: email !== null,
+      claim_email_bound: email !== null,
     };
   });
 
@@ -771,7 +800,66 @@ export async function apiAddParticipants(
     authEmail: p.auth_email,
     claimed: p.claimed_by !== null,
     inviteSentAt: p.invite_sent_at ?? null,
+    leaderManaged: Boolean(p.leader_managed),
+    inviteEnabled: p.invite_enabled !== false,
+    claimEmailBound: Boolean(p.claim_email_bound),
+    identityVersion: Number(p.identity_version ?? 0),
   }));
+}
+
+/**
+ * Leader-only placeholder identity update. The RPC proves leadership, same-team
+ * membership, unclaimed state, and optimistic version before writing.
+ */
+export async function apiUpdateLeaderManagedTeammate(input: {
+  eventId: string;
+  participantId: string;
+  expectedVersion: number;
+  fullName: string;
+  email: string | null;
+}): Promise<
+  Pick<
+    Participant,
+    | 'id'
+    | 'fullName'
+    | 'initials'
+    | 'inviteCode'
+    | 'authEmail'
+    | 'claimed'
+    | 'inviteSentAt'
+    | 'leaderManaged'
+    | 'inviteEnabled'
+    | 'claimEmailBound'
+    | 'identityVersion'
+  >
+> {
+  const { data, error } = await supabase.rpc('update_leader_managed_teammate', {
+    p_event_id: input.eventId,
+    p_target_participant_id: input.participantId,
+    p_expected_version: input.expectedVersion,
+    p_full_name: input.fullName,
+    p_email: input.email,
+  });
+  if (error) throw error;
+
+  const participant = (data as any[] | null)?.[0];
+  if (!participant) {
+    throw new Error('The teammate was not updated. Refresh and try again.');
+  }
+
+  return {
+    id: participant.id,
+    fullName: participant.full_name,
+    initials: initialsOf(participant.full_name),
+    inviteCode: participant.invite_code,
+    authEmail: participant.auth_email,
+    claimed: Boolean(participant.claimed),
+    inviteSentAt: participant.invite_sent_at ?? null,
+    leaderManaged: Boolean(participant.leader_managed),
+    inviteEnabled: Boolean(participant.invite_enabled),
+    claimEmailBound: Boolean(participant.claim_email_bound),
+    identityVersion: Number(participant.identity_version ?? 0),
+  };
 }
 
 export async function apiUpdateParticipant(
@@ -786,6 +874,11 @@ export async function apiUpdateParticipant(
      * lookup_invite hand back an address their password doesn't match.
      */
     authEmail?: string;
+    inviteCode?: string;
+    inviteSentAt?: string | null;
+    inviteEnabled?: boolean;
+    claimEmailBound?: boolean;
+    identityVersion?: number;
   },
 ) {
   const payload = assigned({
@@ -793,6 +886,11 @@ export async function apiUpdateParticipant(
     handicap: patch.handicap,
     is_admin: patch.isAdmin,
     auth_email: patch.authEmail,
+    invite_code: patch.inviteCode,
+    invite_sent_at: patch.inviteSentAt,
+    invite_enabled: patch.inviteEnabled,
+    claim_email_bound: patch.claimEmailBound,
+    identity_version: patch.identityVersion,
   });
   if (!payload) return;
 

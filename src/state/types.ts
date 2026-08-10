@@ -132,6 +132,14 @@ export type Participant = {
   claimed: boolean;
   /** When their invite email went out; null means they've never been sent one. */
   inviteSentAt: string | null;
+  /** Admin-delegated placeholder that the assigned team leader may manage. */
+  leaderManaged: boolean;
+  /** Disabled for a managed placeholder that does not have a real email. */
+  inviteEnabled: boolean;
+  /** Requires the claiming account to use this participant's stored email. */
+  claimEmailBound: boolean;
+  /** Optimistic-concurrency token for leader-managed identity edits. */
+  identityVersion: number;
 };
 
 /** A roster row before it becomes a Participant (CSV import or manual add). */
@@ -155,6 +163,8 @@ export type ExistingAccountCandidate = {
 export type Team = {
   id: string;
   name: string;
+  /** Event-admin-assigned roster manager; unrelated to score-entry authority. */
+  leaderParticipantId: string | null;
   /**
    * Explicit one-player scoring-team exception for an otherwise team-scored
    * event. The round remains team-owned and appears in the main leaderboard.

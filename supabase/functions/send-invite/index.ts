@@ -1,11 +1,10 @@
 /**
  * Emails invites via Resend.
  *
- * Called from the admin roster screen with a list of participant ids. Unlike
- * send-push (whose caller is Postgres), this one's caller is a signed-in admin,
- * so it keeps the default JWT verification and additionally proves the caller
- * really is an admin — via `invite_payloads`, which raises unless `is_admin()`.
- * Authorization lives in the database, not out here.
+ * Called explicitly from the admin roster or by an assigned team leader. Unlike
+ * send-push (whose caller is Postgres), this caller is signed in, so the database
+ * proves either event-admin authority or leader authority over the exact
+ * unclaimed teammate before returning any email address.
  *
  * Secrets (`supabase secrets set`):
  *   RESEND_API_KEY   from resend.com/api-keys
@@ -29,6 +28,7 @@ const SYNTHETIC_DOMAIN = '@invite.blurrygolf.app';
 
 type Participant = {
   id: string;
+  event_id: string;
   full_name: string;
   auth_email: string;
   invite_code: string;
@@ -149,8 +149,8 @@ Deno.serve(async (request) => {
   }
 
   // The caller's own token, so invite_payloads sees their identity and can
-  // refuse a non-admin. Doing the lookup as service_role would hand any
-  // signed-in player the whole roster's email addresses.
+  // refuse an unauthorized sender. Doing the lookup as service_role would hand
+  // any signed-in player roster email addresses.
   const caller = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_ANON_KEY')!,
@@ -162,10 +162,7 @@ Deno.serve(async (request) => {
   });
 
   if (error) {
-    // Two ways to be refused, and both mean the same thing to the caller:
-    // invite_payloads raises for a signed-in non-admin, and Postgres denies
-    // EXECUTE outright for anon, which never reaches that check.
-    const forbidden = /admin|permission denied/i.test(error.message);
+    const forbidden = /cannot send|permission denied|sign in/i.test(error.message);
     return new Response(forbidden ? 'Forbidden' : 'Lookup failed', {
       status: forbidden ? 403 : 500,
     });
@@ -173,25 +170,16 @@ Deno.serve(async (request) => {
 
   const rows = (participants ?? []) as Participant[];
 
-  const { data: event } = await caller
+  const eventIds = [...new Set(rows.map((participant) => participant.event_id))];
+  const { data: events, error: eventError } = await caller
     .from('events')
-    .select('name, course_name, city, state, event_date')
-    .limit(1)
-    .maybeSingle();
+    .select('id, name, course_name, city, state, event_date')
+    .in('id', eventIds);
+  if (eventError) return new Response('Event lookup failed', { status: 500 });
 
-  const eventInfo = {
-    name: event?.name ?? 'Blurry Invitational',
-    where: [event?.course_name, [event?.city, event?.state].filter(Boolean).join(', ')]
-      .filter(Boolean)
-      .join(' · '),
-    when: event?.event_date
-      ? new Date(`${event.event_date}T12:00:00`).toLocaleDateString('en-US', {
-          weekday: 'long',
-          month: 'long',
-          day: 'numeric',
-        })
-      : '',
-  };
+  const eventsById = new Map(
+    (events ?? []).map((event: any) => [event.id, event]),
+  );
 
   const sentIds: string[] = [];
   const errors: string[] = [];
@@ -206,6 +194,20 @@ Deno.serve(async (request) => {
     }
 
     try {
+      const event = eventsById.get(p.event_id);
+      const eventInfo = {
+        name: event?.name ?? 'Blurry Invitational',
+        where: [event?.course_name, [event?.city, event?.state].filter(Boolean).join(', ')]
+          .filter(Boolean)
+          .join(' · '),
+        when: event?.event_date
+          ? new Date(`${event.event_date}T12:00:00`).toLocaleDateString('en-US', {
+              weekday: 'long',
+              month: 'long',
+              day: 'numeric',
+            })
+          : '',
+      };
       const response = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: {
