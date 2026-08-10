@@ -11,7 +11,24 @@ import { GAME_STYLE_LABELS, formatToPar, isTeamFormat } from '@/state/types';
 
 export default function Leaderboard() {
   const insets = useSafeAreaInsets();
-  const { event, leaderboard, myEntrantId } = useEvent();
+  const { activeEventId, event, leaderboard, myEntrantId } = useEvent();
+
+  if (!activeEventId) {
+    return (
+      <View style={styles.root}>
+        <LinearGradient colors={['#203329', '#1b2a22']} style={StyleSheet.absoluteFill} />
+        <Noise />
+        <View style={[styles.empty, { paddingTop: insets.top + 20 }]}>
+          <Text style={styles.eventLabel}>NO EVENT SELECTED</Text>
+          <Text style={styles.title}>Leaderboard</Text>
+          <Text style={styles.emptyCopy}>
+            Results will appear here once you join or create an event.
+          </Text>
+        </View>
+        <FloatingNav />
+      </View>
+    );
+  }
 
   const anyScored = leaderboard.some((row) => row.thru > 0);
   const teamFormat = isTeamFormat(event.gameStyle);
@@ -201,5 +218,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: 'rgba(255,255,255,0.4)',
     textAlign: 'center',
+  },
+  empty: {
+    paddingHorizontal: 20,
+    gap: 16,
+  },
+  emptyCopy: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    lineHeight: 21,
+    color: colors.textMuted,
+    maxWidth: 280,
   },
 });

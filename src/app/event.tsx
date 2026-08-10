@@ -417,6 +417,7 @@ function HomeWithoutFocusedEvent({ unavailable = false }: { unavailable?: boolea
           <Text style={styles.emptyHomeSecondaryText}>SIGN OUT</Text>
         </Pressable>
       </ScrollView>
+      <FloatingNav />
     </View>
   );
 }
@@ -439,11 +440,10 @@ export default function EventHome() {
   }
   if (!activeEventId) {
     const hasAccessibleEvents = Boolean(accountAccess?.events.length);
-    return (
-      <HomeWithoutFocusedEvent
-        unavailable={hasAccessibleEvents || Boolean(eventLoadError)}
-      />
-    );
+    // A stale deep link or a failed fetch must never turn the entire app into
+    // an error screen when this account simply has no events. Home, Inbox and
+    // Profile remain useful account-level destinations in that state.
+    return <HomeWithoutFocusedEvent unavailable={hasAccessibleEvents} />;
   }
   return <FocusedEventHome />;
 }
