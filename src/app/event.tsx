@@ -294,17 +294,21 @@ function HomeNotice({
   );
 }
 
-function HomeWithoutFocusedEvent({ unavailable = false }: { unavailable?: boolean }) {
+function HomeWithoutFocusedEvent() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const offline = useBrowserDefinitelyOffline();
   const {
     accountAccess,
     homeNotice,
-    eventLoadError,
     dismissHomeNotice,
-    refresh,
   } = useEvent();
+  const notificationUnread = useNotificationUnread(
+    'account-home',
+    [],
+    accountAccess?.accountId ?? null,
+    [],
+  );
   const firstName =
     accountAccess?.profile?.displayName?.trim().split(/\s+/)[0] ?? 'there';
 
@@ -322,20 +326,15 @@ function HomeWithoutFocusedEvent({ unavailable = false }: { unavailable?: boolea
       <ScrollView
         contentContainerStyle={[
           styles.emptyHomeContent,
-          { paddingTop: insets.top + 84, paddingBottom: insets.bottom + 40 },
+          { paddingTop: insets.top + HOME_HERO_TOP_OFFSET, paddingBottom: 130 },
         ]}>
         <Text style={styles.greeting}>
           {greeting()}, {firstName}.
         </Text>
-        <Text style={styles.emptyHomeEyebrow}>BLURRY GOLF HOME</Text>
-        <Text style={styles.emptyHomeTitle}>
-          {unavailable ? 'Your event is unavailable.' : 'No events yet.'}
-        </Text>
+        <Text style={styles.subGreeting}>LET’S PLAY SOME GOLF.</Text>
+        <Text style={styles.emptyHomeTitle}>No event selected</Text>
         <Text style={styles.emptyHomeBody}>
-          {unavailable
-            ? eventLoadError ??
-              'We could not load an event or a safe offline copy for this account.'
-            : 'Redeem the invite code from an event organizer to add your first event.'}
+          Redeem an invite code or choose an event to see its details here.
         </Text>
 
         {homeNotice ? (
@@ -349,38 +348,21 @@ function HomeWithoutFocusedEvent({ unavailable = false }: { unavailable?: boolea
           />
         ) : null}
 
-        {unavailable ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ disabled: offline }}
-            accessibilityHint={
-              offline ? 'Refreshing events requires a connection.' : undefined
-            }
-            disabled={offline}
-            style={[
-              styles.emptyHomePrimary,
-              offline && styles.emptyHomeActionDisabled,
-            ]}
-            onPress={() => void refresh()}>
-            <Text style={styles.emptyHomePrimaryText}>TRY AGAIN</Text>
-          </Pressable>
-        ) : (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ disabled: offline }}
-            accessibilityHint={
-              offline ? 'Redeeming an invite requires a connection.' : undefined
-            }
-            disabled={offline}
-            style={[
-              styles.emptyHomePrimary,
-              offline && styles.emptyHomeActionDisabled,
-            ]}
-            onPress={() => router.push('/invite')}>
-            <Text style={styles.emptyHomePrimaryText}>REDEEM AN EVENT INVITE</Text>
-          </Pressable>
-        )}
-        {!unavailable && accountAccess?.profile?.isClubAdmin ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: offline }}
+          accessibilityHint={
+            offline ? 'Redeeming an invite requires a connection.' : undefined
+          }
+          disabled={offline}
+          style={[
+            styles.emptyHomePrimary,
+            offline && styles.emptyHomeActionDisabled,
+          ]}
+          onPress={() => router.push('/invite')}>
+          <Text style={styles.emptyHomePrimaryText}>REDEEM AN EVENT INVITE</Text>
+        </Pressable>
+        {accountAccess?.profile?.isClubAdmin ? (
           <Pressable
             accessibilityRole="button"
             accessibilityState={{ disabled: offline }}
@@ -417,6 +399,11 @@ function HomeWithoutFocusedEvent({ unavailable = false }: { unavailable?: boolea
           <Text style={styles.emptyHomeSecondaryText}>SIGN OUT</Text>
         </Pressable>
       </ScrollView>
+      <HomeHeader
+        stuck={false}
+        unread={notificationUnread}
+        onPressNotifications={() => router.push('/notifications')}
+      />
       <FloatingNav />
     </View>
   );
@@ -424,11 +411,9 @@ function HomeWithoutFocusedEvent({ unavailable = false }: { unavailable?: boolea
 
 export default function EventHome() {
   const {
-    accountAccess,
     accessLoading,
     activeEventId,
     eventLoading,
-    eventLoadError,
   } = useEvent();
 
   if (accessLoading || eventLoading) {
@@ -439,11 +424,10 @@ export default function EventHome() {
     );
   }
   if (!activeEventId) {
-    const hasAccessibleEvents = Boolean(accountAccess?.events.length);
     // A stale deep link or a failed fetch must never turn the entire app into
     // an error screen when this account simply has no events. Home, Inbox and
     // Profile remain useful account-level destinations in that state.
-    return <HomeWithoutFocusedEvent unavailable={hasAccessibleEvents} />;
+    return <HomeWithoutFocusedEvent />;
   }
   return <FocusedEventHome />;
 }
