@@ -66,8 +66,8 @@ export function FloatingNav() {
 
       <View
         style={[styles.wrapper, { paddingBottom: bottomInset }]}
-        pointerEvents="box-none">
-        <View style={styles.barFrame}>
+        pointerEvents="auto">
+        <View style={styles.barFrame} pointerEvents="auto">
           <LiquidGlassSurface
             style={styles.bar}
             tintColor={FLOATING_GLASS_TINT}
@@ -147,12 +147,17 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
+    // On iOS WebKit, a scrolling Home layer can otherwise win hit-testing over
+    // an absolutely positioned nav even when the bar is painted on top.
+    zIndex: 100,
+    elevation: 100,
   },
   wrapper: {
     position: 'relative',
     paddingHorizontal: 13,
     paddingTop: 5,
     paddingBottom: 20,
+    zIndex: 101,
   },
   barFrame: {
     height: BAR_HEIGHT,
