@@ -5,3 +5,6 @@
 # instead — see supabase/functions/send-push/index.ts.
 [functions.send-push]
 verify_jwt = false
+
+[functions.extract-scorecard]
+verify_jwt = true

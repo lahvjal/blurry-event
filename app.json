@@ -38,7 +38,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow Blurry Golf to access photos and GIFs you choose to share in messages.",
+          "photosPermission": "Allow Blurry Golf to access a course scorecard photo you choose to scan.",
+          "cameraPermission": "Allow Blurry Golf to use your camera to scan a course scorecard.",
           "microphonePermission": false
         }
       ]

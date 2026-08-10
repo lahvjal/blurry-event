@@ -200,7 +200,14 @@ export type TeamInvite = {
 export type Hole = {
   hole: number;
   par: number;
+  /** Yardage for EventConfig.teeColor, retained for existing score views. */
   yards: number;
+};
+
+/** One complete course tee card. Every tee carries its own 18 hole yardages. */
+export type TeeYardageSet = {
+  name: string;
+  yardages: number[];
 };
 
 export type Announcement = {
@@ -350,6 +357,8 @@ export type EventConfig = {
   courseMapUrl: string | null;
   /** Which tees the field is playing, e.g. "White". Shown on score entry. */
   teeColor: string;
+  /** All course tee cards; old snapshots fall back to the event tee and holes. */
+  teeYardageSets: TeeYardageSet[];
   gameStyle: GameStyle;
   holes: Hole[];
 };

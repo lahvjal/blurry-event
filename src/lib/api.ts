@@ -9,6 +9,7 @@ import {
   ExistingAccountCandidate,
   GameStyle,
   Hole,
+  TeeYardageSet,
   Participant,
   PlayingGroup,
   ScoreUpdate,
@@ -116,6 +117,8 @@ export async function fetchEventBundle(eventId: string): Promise<EventBundle> {
   const [
     eventRes,
     holesRes,
+    teeSetsRes,
+    teeYardagesRes,
     participantsRes,
     teamsRes,
     playingGroupsRes,
@@ -124,6 +127,8 @@ export async function fetchEventBundle(eventId: string): Promise<EventBundle> {
   ] = await Promise.all([
     supabase.from('events').select('*').eq('id', eventId).maybeSingle(),
     supabase.from('holes').select('*').eq('event_id', eventId).order('hole'),
+    supabase.from('event_tees').select('*').eq('event_id', eventId).order('sort_order'),
+    supabase.from('tee_yardages').select('*').eq('event_id', eventId).order('hole'),
     supabase
       .from('participants')
       .select('*')
@@ -157,6 +162,10 @@ export async function fetchEventBundle(eventId: string): Promise<EventBundle> {
   if (!eventRes.data) {
     throw new Error(`Event ${eventId} was not found or is inaccessible.`);
   }
+
+  // Tee cards were added after the original scorecard. A client updated ahead
+  // of the migration still opens legacy events safely using holes.yards.
+  const teeSchemaAvailable = !teeSetsRes.error && !teeYardagesRes.error;
 
   // Child tables without event_id are scoped through their already-filtered
   // parent rows. Avoid an unfiltered query when an event has no teams/rounds.
@@ -325,6 +334,24 @@ export async function fetchEventBundle(eventId: string): Promise<EventBundle> {
       courseMapUrl: row.course_map_url ?? null,
       teeColor: row.tee_color || 'White',
       gameStyle: row.game_style as GameStyle,
+      teeYardageSets: (() => {
+        const legacy = (holesRes.data ?? []).map((h: any) => Number(h.yards));
+        if (!teeSchemaAvailable || !(teeSetsRes.data ?? []).length) {
+          return [{ name: row.tee_color || 'White', yardages: legacy }];
+        }
+        const byTee = new Map<string, Map<number, number>>();
+        (teeYardagesRes.data ?? []).forEach((yardage: any) => {
+          const values = byTee.get(yardage.tee_name) ?? new Map<number, number>();
+          values.set(Number(yardage.hole), Number(yardage.yards));
+          byTee.set(yardage.tee_name, values);
+        });
+        return (teeSetsRes.data ?? []).map((tee: any): TeeYardageSet => ({
+          name: tee.name,
+          yardages: Array.from({ length: 18 }, (_, index) =>
+            byTee.get(tee.name)?.get(index + 1) ?? legacy[index] ?? 0,
+          ),
+        }));
+      })(),
       holes: (holesRes.data ?? []).map((h: any) => ({
         hole: h.hole,
         par: h.par,
@@ -509,13 +536,31 @@ export async function apiApplyEventSchedule(input: {
   return (data as string[] | null) ?? [];
 }
 
-export async function apiUpdateScorecard(eventId: string, holes: Hole[]) {
-  const rows = holes.map((hole) => ({
-    event_id: eventId,
-    hole: hole.hole,
-    par: hole.par,
-    yards: hole.yards,
-  }));
+export async function apiUpdateScorecard(
+  eventId: string,
+  holes: Hole[],
+  teeYardageSets: TeeYardageSet[],
+) {
+  const { error: rpcError } = await supabase.rpc('apply_event_scorecard', {
+    p_event_id: eventId,
+    p_holes: holes.map(({ hole, par }) => ({ hole, par })),
+    p_tee_sets: teeYardageSets.map((tee) => ({
+      name: tee.name,
+      yardages: tee.yardages.map((yards, index) => ({ hole: index + 1, yards })),
+    })),
+  });
+  if (!rpcError) return;
+
+  // A local preview can run against a production project before this additive
+  // migration is deployed. Preserve manual edits for its legacy single tee;
+  // multi-tee saving deliberately waits for the atomic server RPC.
+  if (!/apply_event_scorecard|schema cache|Could not find the function/i.test(rpcError.message)) {
+    throw new Error(rpcError.message);
+  }
+  if (teeYardageSets.length !== 1) {
+    throw new Error('Multi-tee scorecards need the latest database update.');
+  }
+  const rows = holes.map((hole) => ({ event_id: eventId, hole: hole.hole, par: hole.par, yards: hole.yards }));
 
   // Supabase does not return changed rows unless select() is chained. Asking
   // for the hole numbers lets us distinguish a real save from a policy/filter
@@ -528,6 +573,28 @@ export async function apiUpdateScorecard(eventId: string, holes: Hole[]) {
   if (!data || data.length !== rows.length) {
     throw new Error('The scorecard update did not reach every hole.');
   }
+}
+
+export type ExtractedScorecard = {
+  holes: Array<{ hole: number; par: number }>;
+  teeSets: TeeYardageSet[];
+  notes: string[];
+};
+
+/** Sends one admin-selected image to the server-side vision extractor. */
+export async function apiExtractScorecard(input: {
+  eventId: string;
+  imageBase64: string;
+  mimeType: string;
+}): Promise<ExtractedScorecard> {
+  const { data, error } = await supabase.functions.invoke<ExtractedScorecard>('extract-scorecard', {
+    body: input,
+  });
+  if (error) throw new Error(error.message || 'The scorecard scan could not be completed.');
+  if (!data || !Array.isArray(data.holes) || !Array.isArray(data.teeSets)) {
+    throw new Error('The scorecard scan returned an incomplete result.');
+  }
+  return data;
 }
 
 /**

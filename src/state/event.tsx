@@ -132,6 +132,7 @@ const SEED_EVENT: EventConfig = {
   teeTimes: ['8:20 AM', '8:30 AM', '8:40 AM', '8:50 AM'],
   courseMapUrl: null,
   teeColor: 'White',
+  teeYardageSets: [{ name: 'White', yardages: [...YARDS] }],
   gameStyle: 'scramble_4',
   holes: HOLES,
 };
@@ -364,7 +365,7 @@ type EventState = {
     >,
   ) => Promise<boolean>;
   /** Validates and saves the event's complete 18-hole scorecard. */
-  updateScorecard: (holes: Hole[]) => Promise<boolean>;
+  updateScorecard: (holes: Hole[], teeYardageSets: EventConfig['teeYardageSets']) => Promise<boolean>;
   postAnnouncement: (body: string) => void;
   assignToTeam: (participantId: string, teamId: string | null) => void;
   updateTeam: (
@@ -1490,14 +1491,19 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   );
 
   const updateScorecard = useCallback<EventState['updateScorecard']>(
-    async (holes) => {
+    async (holes, teeYardageSets) => {
       const saved = await persist('the scorecard', () =>
-        apiUpdateScorecard(event.id, holes),
+        apiUpdateScorecard(event.id, holes, teeYardageSets),
       );
       if (saved) {
+        const fieldTee = teeYardageSets.find(
+          (tee) => tee.name.toLowerCase() === event.teeColor.toLowerCase(),
+        )?.name ?? teeYardageSets[0]?.name ?? event.teeColor;
         setEvent((prev) => ({
           ...prev,
+          teeColor: fieldTee,
           holes: holes.map((hole) => ({ ...hole })),
+          teeYardageSets: teeYardageSets.map((tee) => ({ ...tee, yardages: [...tee.yardages] })),
         }));
       }
       return saved;
