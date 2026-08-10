@@ -59,6 +59,7 @@ type EventDraft = Pick<
   | 'startTime'
   | 'startFormat'
   | 'teeTimes'
+  | 'scheduleItems'
   | 'courseMapUrl'
   | 'teeColor'
 >;
@@ -77,6 +78,7 @@ function draftFrom(event: EventConfig): EventDraft {
     startTime: event.startTime,
     startFormat: event.startFormat,
     teeTimes: event.teeTimes,
+    scheduleItems: event.scheduleItems,
     courseMapUrl: event.courseMapUrl,
     teeColor: event.teeColor,
   };
@@ -175,6 +177,16 @@ export default function AdminEvent() {
   }
 
   const patch = (next: Partial<EventDraft>) => setDraft((prev) => ({ ...prev, ...next }));
+  const patchScheduleItem = (
+    index: number,
+    next: Partial<EventDraft['scheduleItems'][number]>,
+  ) => {
+    patch({
+      scheduleItems: draft.scheduleItems.map((item, itemIndex) =>
+        itemIndex === index ? { ...item, ...next } : item,
+      ),
+    });
+  };
 
   const save = () => {
     if (saving) return;
@@ -525,6 +537,58 @@ export default function AdminEvent() {
               </Pressable>
             </View>
           ) : null}
+        </View>
+
+        <View style={{ gap: 10 }}>
+          <SectionLabel color={colors.link} size={10}>
+            event schedule
+          </SectionLabel>
+          <Text style={styles.hint}>
+            This itinerary appears on the player Home screen. Add the key times for the day.
+          </Text>
+          {draft.scheduleItems.map((item, index) => (
+            <View key={`${index}-${item.time}`} style={styles.scheduleEditorRow}>
+              <TextInput
+                value={item.time}
+                onChangeText={(time) => patchScheduleItem(index, { time })}
+                style={[styles.input, styles.scheduleTimeInput]}
+                placeholder="8:00 AM"
+                placeholderTextColor="rgba(255,255,255,0.3)"
+                selectionColor={colors.highlight}
+              />
+              <View style={styles.scheduleTitleInputWrap}>
+                <TextInput
+                  value={item.title}
+                  onChangeText={(title) => patchScheduleItem(index, { title })}
+                  style={styles.input}
+                  placeholder="Tee off"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  selectionColor={colors.highlight}
+                />
+                <TextInput
+                  value={item.detail ?? ''}
+                  onChangeText={(detail) => patchScheduleItem(index, { detail })}
+                  style={[styles.input, styles.scheduleDetailInput]}
+                  placeholder="Optional detail"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  selectionColor={colors.highlight}
+                />
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Remove ${item.title || 'schedule item'}`}
+                onPress={() =>
+                  patch({ scheduleItems: draft.scheduleItems.filter((_, itemIndex) => itemIndex !== index) })
+                }>
+                <Text style={styles.slotRemove}>REMOVE</Text>
+              </Pressable>
+            </View>
+          ))}
+          <Pressable
+            style={styles.secondaryButton}
+            onPress={() => patch({ scheduleItems: [...draft.scheduleItems, { time: '', title: '' }] })}>
+            <Text style={styles.secondaryButtonText}>ADD SCHEDULE ITEM</Text>
+          </Pressable>
         </View>
 
         {/* Tee times */}
@@ -884,6 +948,21 @@ const styles = StyleSheet.create({
   generatorRow: {
     flexDirection: 'row',
     gap: 10,
+  },
+  scheduleEditorRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  scheduleTimeInput: {
+    width: 88,
+  },
+  scheduleTitleInputWrap: {
+    flex: 1,
+    gap: 6,
+  },
+  scheduleDetailInput: {
+    minHeight: 38,
   },
   generatorField: {
     flex: 1,

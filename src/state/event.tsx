@@ -130,6 +130,7 @@ const SEED_EVENT: EventConfig = {
   startTime: '8:20 AM',
   startFormat: 'staggered',
   teeTimes: ['8:20 AM', '8:30 AM', '8:40 AM', '8:50 AM'],
+  scheduleItems: [],
   courseMapUrl: null,
   teeColor: 'White',
   teeYardageSets: [{ name: 'White', color: 'White', yardages: [...YARDS] }],
@@ -358,6 +359,7 @@ type EventState = {
         | 'startTime'
         | 'startFormat'
         | 'teeTimes'
+        | 'scheduleItems'
         | 'courseMapUrl'
         | 'teeColor'
         | 'lifecycleStatus'

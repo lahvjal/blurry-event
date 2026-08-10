@@ -331,6 +331,17 @@ export async function fetchEventBundle(eventId: string): Promise<EventBundle> {
       startTime: row.start_time ?? '8:00 AM',
       startFormat: (row.start_format ?? 'staggered') as StartFormat,
       teeTimes: row.tee_times ?? [],
+      scheduleItems: Array.isArray(row.schedule_items)
+        ? row.schedule_items
+            .filter((item: any) => item && typeof item.time === 'string' && typeof item.title === 'string')
+            .map((item: any) => ({
+              time: item.time.trim(),
+              title: item.title.trim(),
+              ...(typeof item.detail === 'string' && item.detail.trim()
+                ? { detail: item.detail.trim() }
+                : {}),
+            }))
+        : [],
       courseMapUrl: row.course_map_url ?? null,
       teeColor: row.tee_color || 'White',
       gameStyle: row.game_style as GameStyle,
@@ -483,6 +494,7 @@ export async function apiUpdateEvent(
     startTime?: string;
     startFormat?: StartFormat;
     teeTimes?: string[];
+    scheduleItems?: EventConfig['scheduleItems'];
     courseMapUrl?: string | null;
     teeColor?: string;
     lifecycleStatus?: EventLifecycleStatus;
@@ -500,6 +512,7 @@ export async function apiUpdateEvent(
     start_time: patch.startTime,
     start_format: patch.startFormat,
     tee_times: patch.teeTimes,
+    schedule_items: patch.scheduleItems,
     course_map_url: patch.courseMapUrl,
     tee_color: patch.teeColor,
     lifecycle_status: patch.lifecycleStatus,

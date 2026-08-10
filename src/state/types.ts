@@ -355,6 +355,8 @@ export type EventConfig = {
   startFormat: StartFormat;
   /** Slots teams can be assigned to, in play order, e.g. "8:40 AM". */
   teeTimes: string[];
+  /** Player-facing itinerary, kept at the event level rather than baked into Home. */
+  scheduleItems: EventScheduleItem[];
   /** Uploaded course map image; null until an admin adds one. */
   courseMapUrl: string | null;
   /** Which tees the field is playing, e.g. "White". Shown on score entry. */
@@ -363,6 +365,12 @@ export type EventConfig = {
   teeYardageSets: TeeYardageSet[];
   gameStyle: GameStyle;
   holes: Hole[];
+};
+
+export type EventScheduleItem = {
+  time: string;
+  title: string;
+  detail?: string;
 };
 
 /**

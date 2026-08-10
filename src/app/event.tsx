@@ -353,8 +353,8 @@ function HomeWithoutFocusedEvent() {
           </Pressable>
         </View>
         <View style={[styles.section, styles.noEventDimmed]}>
-          <View style={styles.sectionHeader}><SectionLabel>course</SectionLabel><LinkAction label="view map" onPress={() => {}} /></View>
-          <View style={styles.coursePreview}><Text style={styles.courseCaptionText}>NO COURSE SELECTED</Text></View>
+          <View style={styles.sectionHeader}><SectionLabel>schedule</SectionLabel></View>
+          <View style={styles.scheduleCard}><View style={styles.scheduleEmpty}><Text style={styles.scheduleTitle}>NO EVENT SELECTED</Text><Text style={styles.scheduleDetail}>Event timing will appear here.</Text></View></View>
         </View>
         <View style={[styles.section, styles.noEventDimmed]}>
           <View style={styles.sectionHeader}><SectionLabel>my team</SectionLabel><LinkAction label="open" onPress={() => {}} /></View>
@@ -743,27 +743,32 @@ function FocusedEventHome() {
 
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <SectionLabel>course</SectionLabel>
-            <LinkAction
-              label="view map"
-              onPress={() => router.push('/course-map')}
-            />
+            <SectionLabel>schedule</SectionLabel>
+            <Text style={styles.scheduleDate}>{event.eventDate}</Text>
           </View>
-          <Pressable onPress={() => router.push('/course-map')}>
-            <GradientPanel
-              colors={['#203329', '#151e19']}
-              style={styles.coursePreview}>
-              <View style={styles.courseCaption}>
-                <Text style={styles.courseCaptionText}>
-                  {roundStarted ? 'NEXT TEE' : 'YOU START'}
-                </Text>
-                <View style={styles.microDot} />
-                <Text style={styles.courseCaptionText}>
-                  HOLE {roundStarted ? nextHole : (myPlayingGroup?.startingHole ?? 'TBD')}
-                </Text>
+          <GradientPanel colors={['#203329', '#151e19']} style={styles.scheduleCard}>
+            {event.scheduleItems.length > 0 ? (
+              event.scheduleItems.map((item, index) => (
+                <View
+                  key={`${item.time}-${item.title}-${index}`}
+                  style={[
+                    styles.scheduleItem,
+                    index < event.scheduleItems.length - 1 && styles.scheduleItemBorder,
+                  ]}>
+                  <Text style={styles.scheduleTime}>{item.time}</Text>
+                  <View style={styles.scheduleCopy}>
+                    <Text style={styles.scheduleTitle}>{item.title}</Text>
+                    {item.detail ? <Text style={styles.scheduleDetail}>{item.detail}</Text> : null}
+                  </View>
+                </View>
+              ))
+            ) : (
+              <View style={styles.scheduleEmpty}>
+                <Text style={styles.scheduleTitle}>SCHEDULE COMING SOON</Text>
+                <Text style={styles.scheduleDetail}>Event timing will be posted here.</Text>
               </View>
-            </GradientPanel>
-          </Pressable>
+            )}
+          </GradientPanel>
         </View>
 
         {isRegisteredPlayer ? (
@@ -1332,21 +1337,53 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  coursePreview: {
-    height: 134,
-    justifyContent: 'flex-end',
+  scheduleDate: {
+    fontFamily: fonts.bold,
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.45)',
+    textTransform: 'uppercase',
   },
-  courseCaption: {
+  scheduleCard: {
+    overflow: 'hidden',
+  },
+  scheduleItem: {
+    minHeight: 66,
     paddingHorizontal: 18,
-    paddingVertical: 16,
+    paddingVertical: 14,
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
+    gap: 16,
   },
-  courseCaptionText: {
+  scheduleItemBorder: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(123,255,178,0.16)',
+  },
+  scheduleTime: {
     fontFamily: fonts.bold,
     fontSize: 10,
     color: colors.link,
+    width: 84,
+    paddingTop: 2,
+  },
+  scheduleCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  scheduleTitle: {
+    fontFamily: fonts.bold,
+    fontSize: 12,
+    color: '#ffffff',
+    letterSpacing: 0.3,
+  },
+  scheduleDetail: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    lineHeight: 15,
+    color: 'rgba(255,255,255,0.58)',
+  },
+  scheduleEmpty: {
+    paddingHorizontal: 18,
+    paddingVertical: 20,
+    gap: 4,
   },
   microDot: {
     width: 2,
